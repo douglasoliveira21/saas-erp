@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, CheckCircle } from 'lucide-react'
@@ -98,9 +99,20 @@ export function Dashboard() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-1">Bem-vindo, {user?.name}!</p>
+      {/* Header com saudação e data/hora */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Olá, {user?.name}! 👋</h1>
+          <p className="text-gray-500 text-sm mt-0.5">Aqui está o resumo do seu negócio hoje.</p>
+        </div>
+        <div className="hidden md:flex items-center gap-3">
+          <div className="text-right">
+            <p className="text-sm text-gray-500">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+          </div>
+          <div className="px-3 py-1.5 bg-primary-600 text-white rounded-xl text-sm font-mono font-semibold">
+            {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </div>
+        </div>
       </div>
 
       {/* Ticker de indicadores econômicos */}
@@ -108,63 +120,58 @@ export function Dashboard() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
-        <div className="card">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-lg">
-              <ShoppingCart className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-xs font-medium text-gray-500">Vendas</p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{data?.totalSales || 0}</p>
-            </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <ShoppingCart className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Vendas</p>
+            <p className="text-xl font-bold text-gray-900">{data?.totalSales || 0}</p>
+            <p className="text-[10px] text-gray-400">Total de vendas</p>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-10 h-10 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
-              <DollarSign className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-xs font-medium text-gray-500">A Receber</p>
-              <p className="text-xl font-bold text-yellow-600">R$ {Number(data?.totalReceivable || 0).toFixed(2)}</p>
-            </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-12 h-12 bg-orange-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <DollarSign className="w-6 h-6 text-orange-600" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">A Receber</p>
+            <p className="text-xl font-bold text-gray-900">R$ {Number(data?.totalReceivable || 0).toFixed(2)}</p>
+            <p className="text-[10px] text-gray-400">Valor pendente</p>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-10 h-10 bg-green-100 dark:bg-green-900 rounded-lg">
-              <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-xs font-medium text-gray-500">Faturamento</p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">R$ {Number(data?.totalRevenue || 0).toFixed(2)}</p>
-            </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <DollarSign className="w-6 h-6 text-emerald-600" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Faturamento</p>
+            <p className="text-xl font-bold text-gray-900">R$ {Number(data?.totalRevenue || 0).toFixed(2)}</p>
+            <p className="text-[10px] text-gray-400">Total faturado</p>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-10 h-10 bg-purple-100 dark:bg-purple-900 rounded-lg">
-              <TrendingUp className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-xs font-medium text-gray-500">Lucro Liquido</p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">R$ {Number(data?.totalProfit || 0).toFixed(2)}</p>
-            </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <TrendingUp className="w-6 h-6 text-purple-600" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Lucro Líquido</p>
+            <p className="text-xl font-bold text-gray-900">R$ {Number(data?.totalProfit || 0).toFixed(2)}</p>
+            <p className="text-[10px] text-gray-400">Resultado líquido</p>
           </div>
         </div>
 
-        <div className="card">
-          <div className="flex items-center">
-            <div className="flex items-center justify-center w-10 h-10 bg-red-100 dark:bg-red-900 rounded-lg">
-              <Package className="w-5 h-5 text-red-600 dark:text-red-400" />
-            </div>
-            <div className="ml-3">
-              <p className="text-xs font-medium text-gray-500">Estoque Baixo</p>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{data?.lowStockProducts || 0}</p>
-            </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+            <Package className="w-6 h-6 text-red-600" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-500">Estoque Baixo</p>
+            <p className="text-xl font-bold text-gray-900">{data?.lowStockProducts || 0}</p>
+            <p className="text-[10px] text-gray-400">Itens abaixo do mínimo</p>
           </div>
         </div>
       </div>
@@ -405,62 +412,116 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Ações rápidas */}
+      {/* Ações rápidas + Informações */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Ações Rápidas</h2>
-          <div className="space-y-3">
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Ações Rápidas</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {(isTecnico || isAdmin) && (
               <>
-                <a href="/sales/new" className="block px-4 py-3 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-100 transition-colors">
-                  + Nova Venda
-                </a>
-                <a href="/routes" className="block px-4 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 transition-colors">
-                  + Registrar Rota Externa
-                </a>
+                <Link to="/sales/new" className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl hover:bg-blue-100 transition-all group">
+                  <div className="w-10 h-10 bg-blue-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <ShoppingCart className="w-5 h-5 text-blue-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">+ Nova Venda</p>
+                    <p className="text-xs text-gray-500">Cadastrar nova venda</p>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </Link>
+                <Link to="/routes" className="flex items-center gap-3 p-4 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-all group">
+                  <div className="w-10 h-10 bg-indigo-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Navigation className="w-5 h-5 text-indigo-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">+ Registrar Rota Externa</p>
+                    <p className="text-xs text-gray-500">Adicionar nova rota externa</p>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </Link>
               </>
             )}
             {(isAdmin || isFinanceiro) && (
               <>
-                <a href="/commissions" className="block px-4 py-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-100 transition-colors">
-                  Gerenciar Comissoes
-                </a>
-                <a href="/routes" className="block px-4 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 transition-colors">
-                  Gerenciar Rotas Externas
-                </a>
-                <a href="/reports" className="block px-4 py-3 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-100 transition-colors">
-                  Ver Relatorios
-                </a>
+                <Link to="/commissions" className="flex items-center gap-3 p-4 bg-purple-50 rounded-xl hover:bg-purple-100 transition-all group">
+                  <div className="w-10 h-10 bg-purple-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Award className="w-5 h-5 text-purple-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Gerenciar Comissões</p>
+                    <p className="text-xs text-gray-500">Visualizar e gerenciar comissões</p>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </Link>
+                <Link to="/routes" className="flex items-center gap-3 p-4 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-all group">
+                  <div className="w-10 h-10 bg-emerald-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Navigation className="w-5 h-5 text-emerald-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Gerenciar Rotas Externas</p>
+                    <p className="text-xs text-gray-500">Gerenciar todas as rotas</p>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </Link>
+                <Link to="/reports" className="flex items-center gap-3 p-4 bg-orange-50 rounded-xl hover:bg-orange-100 transition-all group sm:col-span-2">
+                  <div className="w-10 h-10 bg-orange-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5 text-orange-700" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Ver Relatórios</p>
+                    <p className="text-xs text-gray-500">Acessar relatórios do sistema</p>
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-gray-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </Link>
               </>
             )}
           </div>
         </div>
 
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Informações do Sistema</h2>
-          <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-            <p><strong>Perfil:</strong>{' '}
-              {user?.role === 'admin' && 'Administrador'}
-              {user?.role === 'financeiro' && 'Financeiro'}
-              {user?.role === 'tecnico' && 'Técnico'}
-            </p>
-            <p><strong>Email:</strong> {user?.email}</p>
+          <h2 className="text-lg font-bold text-gray-900 mb-4">Informações do Sistema</h2>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-2 border-b border-gray-100">
+              <span className="text-sm text-gray-500 flex items-center gap-2">👤 Perfil</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {user?.role === 'admin' && 'Administrador'}
+                {user?.role === 'financeiro' && 'Financeiro'}
+                {user?.role === 'tecnico' && 'Técnico'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-2 border-b border-gray-100">
+              <span className="text-sm text-gray-500 flex items-center gap-2">✉️ Email</span>
+              <span className="text-sm font-medium text-gray-700">{user?.email}</span>
+            </div>
             {(isAdmin || isFinanceiro) && data && (
               <>
-                <hr className="border-gray-200 dark:border-gray-700" />
-                <p><strong>Comissões pendentes:</strong>{' '}
-                  <span className="text-yellow-600 font-semibold">R$ {Number(data.pendingCommissions).toFixed(2)}</span>
-                </p>
-                <p><strong>Produtos com estoque baixo:</strong>{' '}
-                  <span className={data.lowStockProducts > 0 ? 'text-red-600 font-semibold' : 'text-green-600'}>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <span className="text-sm text-gray-500 flex items-center gap-2">💰 Comissões pendentes</span>
+                  <span className="text-sm font-bold text-orange-600">R$ {Number(data.pendingCommissions).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <span className="text-sm text-gray-500 flex items-center gap-2">📦 Produtos com estoque baixo</span>
+                  <span className={`text-sm font-bold ${data.lowStockProducts > 0 ? 'text-red-600' : 'text-green-600'}`}>
                     {data.lowStockProducts}
                   </span>
-                </p>
+                </div>
               </>
             )}
-            <p><strong>Versão:</strong> 1.0.0</p>
+            <div className="flex items-center justify-between py-2 border-b border-gray-100">
+              <span className="text-sm text-gray-500 flex items-center gap-2">{'</>'} Versão do Sistema</span>
+              <span className="text-sm font-medium text-gray-700">1.0.0</span>
+            </div>
+            <div className="flex items-center justify-between py-2">
+              <span className="text-sm text-gray-500 flex items-center gap-2">🕐 Último acesso</span>
+              <span className="text-sm font-medium text-gray-700">{new Date().toLocaleString('pt-BR')}</span>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-8 text-center text-xs text-gray-400 py-4">
+        © {new Date().getFullYear()} Gestão TI. Todos os direitos reservados.
       </div>
     </div>
   )

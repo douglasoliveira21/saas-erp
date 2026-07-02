@@ -7,7 +7,6 @@ import {
   Users,
   ShoppingCart,
   DollarSign,
-  Warehouse,
   UserCog,
   FileText,
   LogOut,
@@ -36,15 +35,14 @@ interface NavSection {
   title: string
   items: NavItem[]
   expandable?: boolean
-  expandIcon?: any
 }
 
 export function Layout() {
-  const { user, logout, isAdmin, isFinanceiro } = useAuth()
+  const { user, logout } = useAuth()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [financeiroOpen, setFinanceiroOpen] = useState(
-    ['/commissions', '/financeiro', '/pagamentos'].includes(location.pathname)
+    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports'].includes(location.pathname)
   )
 
   const sections: NavSection[] = [
@@ -74,20 +72,19 @@ export function Layout() {
     {
       title: 'Financeiro',
       expandable: true,
-      expandIcon: Wallet,
       items: [
-        { name: 'Comissoes', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
+        { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
         { name: 'Financeiro', href: '/financeiro', icon: DollarSign, roles: ['admin', 'financeiro'] },
         { name: 'Pagamentos', href: '/pagamentos', icon: CreditCard, roles: ['admin', 'financeiro'] },
         { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },
-        { name: 'Modulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
-        { name: 'Relatorios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },
+        { name: 'Módulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
+        { name: 'Relatórios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },
       ],
     },
     {
-      title: 'Administracao',
+      title: 'Administração',
       items: [
-        { name: 'Usuarios', href: '/users', icon: UserCog, roles: ['admin'] },
+        { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },
       ],
     },
   ]
@@ -99,18 +96,20 @@ export function Layout() {
     }))
     .filter(section => section.items.length > 0)
 
-  function renderNavItems(items: NavItem[], onClickItem?: () => void) {
-    return items.map((item) => {
-      const Icon = item.icon
-      const isActive = location.pathname === item.href
-      return (
-        <Link key={item.name} to={item.href} onClick={onClickItem}
-          className={`flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${isActive ? 'bg-primary-50 text-primary-600 dark:bg-primary-900 dark:text-primary-400' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}>
-          <Icon className="w-4 h-4 mr-3" />
-          {item.name}
-        </Link>
-      )
-    })
+  function renderNavItem(item: NavItem, onClickItem?: () => void) {
+    const Icon = item.icon
+    const isActive = location.pathname === item.href
+    return (
+      <Link key={item.name} to={item.href} onClick={onClickItem}
+        className={`flex items-center px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+          isActive
+            ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30'
+            : 'text-indigo-200 hover:bg-indigo-800/50 hover:text-white'
+        }`}>
+        <Icon className="w-4 h-4 mr-3 flex-shrink-0" />
+        {item.name}
+      </Link>
+    )
   }
 
   function renderSection(section: typeof filteredSections[0], onClickItem?: () => void) {
@@ -118,24 +117,27 @@ export function Layout() {
       const isAnyActive = section.items.some(item => location.pathname === item.href)
       return (
         <div key={section.title}>
+          <p className="px-3 mb-2 text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest">{section.title}</p>
           <button
             onClick={() => setFinanceiroOpen(!financeiroOpen)}
-            className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-              isAnyActive && !financeiroOpen ? 'bg-primary-50 text-primary-600' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+            className={`w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+              isAnyActive && !financeiroOpen
+                ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30'
+                : 'text-indigo-200 hover:bg-indigo-800/50 hover:text-white'
             }`}
           >
             <span className="flex items-center">
               <Wallet className="w-4 h-4 mr-3" />
-              {section.title}
+              Financeiro
             </span>
             {financeiroOpen
-              ? <ChevronDown className="w-4 h-4 text-gray-400" />
-              : <ChevronRight className="w-4 h-4 text-gray-400" />
+              ? <ChevronDown className="w-4 h-4 opacity-60" />
+              : <ChevronRight className="w-4 h-4 opacity-60" />
             }
           </button>
           {financeiroOpen && (
-            <div className="ml-3 mt-1 space-y-0.5 border-l-2 border-gray-200 dark:border-gray-600 pl-2">
-              {renderNavItems(section.items, onClickItem)}
+            <div className="ml-4 mt-1 space-y-0.5 border-l-2 border-indigo-700/50 pl-3">
+              {section.items.map(item => renderNavItem(item, onClickItem))}
             </div>
           )}
         </div>
@@ -144,75 +146,86 @@ export function Layout() {
 
     return (
       <div key={section.title}>
-        <p className="px-3 mb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">{section.title}</p>
-        <div className="space-y-0.5">
-          {renderNavItems(section.items, onClickItem)}
+        <p className="px-3 mb-2 text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest">{section.title}</p>
+        <div className="space-y-1">
+          {section.items.map(item => renderNavItem(item, onClickItem))}
         </div>
       </div>
     )
   }
 
+  const sidebarContent = (onClickItem?: () => void) => (
+    <>
+      <div className="flex items-center h-16 px-5">
+        <div className="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center mr-3">
+          <span className="text-white font-bold text-sm">G</span>
+        </div>
+        <span className="text-lg font-bold text-white">Gestão TI</span>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+        {filteredSections.map((section) => renderSection(section, onClickItem))}
+      </nav>
+      <div className="p-4 border-t border-indigo-800/50">
+        <Link to="/profile" onClick={onClickItem} className="flex items-center mb-3 hover:bg-indigo-800/30 rounded-xl p-2.5 -m-1 transition-all duration-200">
+          <div className="w-9 h-9 bg-primary-500 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+            <span className="text-sm font-bold text-white">{user?.name?.charAt(0).toUpperCase()}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">{user?.name}</p>
+            <p className="text-xs text-indigo-300">
+              {user?.role === 'admin' && 'Administrador'}
+              {user?.role === 'financeiro' && 'Financeiro'}
+              {user?.role === 'tecnico' && 'Técnico'}
+            </p>
+          </div>
+        </Link>
+        <button onClick={logout} className="flex items-center w-full px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-900/30 hover:text-red-200 rounded-xl transition-all duration-200">
+          <LogOut className="w-4 h-4 mr-3" />
+          Sair
+        </button>
+      </div>
+    </>
+  )
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-100">
       {/* Mobile sidebar */}
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? 'block' : 'hidden'}`}>
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
-        <div className="fixed inset-y-0 left-0 flex flex-col w-64 bg-white dark:bg-gray-800">
-          <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-xl font-bold text-primary-600">Gestão TI</span>
-            <button onClick={() => setSidebarOpen(false)}>
-              <X className="w-6 h-6" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-y-0 left-0 flex flex-col w-64 bg-gradient-to-b from-indigo-950 to-slate-900">
+          <div className="absolute top-4 right-4">
+            <button onClick={() => setSidebarOpen(false)} className="text-indigo-300 hover:text-white">
+              <X className="w-5 h-5" />
             </button>
           </div>
-          <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
-            {filteredSections.map((section) => renderSection(section, () => setSidebarOpen(false)))}
-          </nav>
+          {sidebarContent(() => setSidebarOpen(false))}
         </div>
       </div>
 
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
-        <div className="flex flex-col flex-1 min-h-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
-          <div className="flex items-center h-16 px-4 border-b border-gray-200 dark:border-gray-700">
-            <span className="text-xl font-bold text-primary-600">Gestão TI</span>
-          </div>
-          <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
-            {filteredSections.map((section) => renderSection(section))}
-          </nav>
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-            <Link to="/profile" className="flex items-center mb-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg p-2 -m-2 transition-colors">
-              <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
-                <span className="text-sm font-bold text-primary-600">{user?.name?.charAt(0).toUpperCase()}</span>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {user?.role === 'admin' && 'Administrador'}
-                  {user?.role === 'financeiro' && 'Financeiro'}
-                  {user?.role === 'tecnico' && 'Técnico'}
-                </p>
-              </div>
-            </Link>
-            <button onClick={logout} className="flex items-center w-full px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
-              <LogOut className="w-5 h-5 mr-3" />
-              Sair
-            </button>
-          </div>
+        <div className="flex flex-col flex-1 min-h-0 bg-gradient-to-b from-indigo-950 to-slate-900">
+          {sidebarContent()}
         </div>
       </div>
 
       {/* Main content */}
       <div className="lg:pl-64">
-        {/* Top bar */}
-        <div className="sticky top-0 z-10 flex items-center h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 lg:hidden">
+        {/* Top bar mobile */}
+        <div className="sticky top-0 z-10 flex items-center h-16 bg-white border-b border-gray-200 shadow-sm lg:hidden">
           <button onClick={() => setSidebarOpen(true)} className="px-4 text-gray-500 focus:outline-none">
             <Menu className="w-6 h-6" />
           </button>
-          <span className="text-xl font-bold text-primary-600">Gestão TI</span>
+          <div className="flex items-center">
+            <div className="w-7 h-7 bg-primary-500 rounded-lg flex items-center justify-center mr-2">
+              <span className="text-white font-bold text-xs">G</span>
+            </div>
+            <span className="text-lg font-bold text-gray-800">Gestão TI</span>
+          </div>
         </div>
 
         {/* Page content */}
-        <main className="p-4 lg:p-8">
+        <main className="p-5 lg:p-8">
           <Outlet />
         </main>
       </div>
