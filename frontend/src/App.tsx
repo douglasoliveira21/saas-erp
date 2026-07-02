@@ -22,6 +22,7 @@ import { Profile } from './pages/Profile'
 import { Fiscal } from './pages/Fiscal'
 import { Financial } from './pages/Financial'
 import { Payments } from './pages/Payments'
+import { Vehicles } from './pages/Vehicles'
 
 function App() {
   return (
@@ -43,6 +44,7 @@ function App() {
             <Route path="/commissions" element={<Commissions />} />
             <Route path="/stock" element={<Stock />} />
             <Route path="/routes" element={<RoutesPage />} />
+            <Route path="/vehicles" element={<Vehicles />} />
             <Route path="/contracts" element={<Contracts />} />
             <Route path="/sla" element={<Sla />} />
             <Route path="/users" element={<Users />} />

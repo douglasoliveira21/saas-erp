@@ -3,6 +3,7 @@ import {
   UpdateDateColumn, ManyToOne, OneToMany, JoinColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { Vehicle } from '../../vehicles/entities/vehicle.entity';
 import { RouteLeg } from './route-leg.entity';
 
 @Entity('routes')
@@ -12,6 +13,9 @@ export class Route {
 
   @Column({ name: 'technician_id' })
   technicianId: string;
+
+  @Column({ name: 'vehicle_id', type: 'uuid', nullable: true })
+  vehicleId: string;
 
   @Column({ length: 255 })
   description: string;
@@ -62,6 +66,10 @@ export class Route {
   @ManyToOne(() => User)
   @JoinColumn({ name: 'technician_id' })
   technician: User;
+
+  @ManyToOne(() => Vehicle)
+  @JoinColumn({ name: 'vehicle_id' })
+  vehicle: Vehicle;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'approved_by' })

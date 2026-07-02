@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, CheckCircle, XCircle, DollarSign, MapPin, Filter, X, Check, Navigation, Trash2, ChevronDown, ChevronUp, Map, Edit, Calendar } from 'lucide-react'
+import { Plus, Search, CheckCircle, XCircle, DollarSign, MapPin, Filter, X, Check, Navigation, Trash2, ChevronDown, ChevronUp, Map, Edit, Calendar, Car } from 'lucide-react'
 
 interface RouteLeg { id?: string; origin: string; destination: string; km: string | number }
-interface Route { id: string; technician: { id: string; name: string }; description: string; origin: string; destination: string; km: number; ratePerKm: number; totalValue: number; status: string; observations: string; routeDate: string; legs: RouteLeg[] }
+interface VehicleOption { id: string; plate: string; brand: string; model: string; ratePerKm: number }
+interface Route { id: string; technician: { id: string; name: string }; vehicle: VehicleOption | null; description: string; origin: string; destination: string; km: number; ratePerKm: number; totalValue: number; status: string; observations: string; routeDate: string; legs: RouteLeg[] }
 interface Summary { totalKm: number; totalValue: number; pendente: number; aprovado: number; pago: number; count: number }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', aprovado: 'Aprovado', pago: 'Pago', cancelado: 'Cancelado' }
@@ -25,6 +26,8 @@ export function Routes() {
   const [description, setDescription] = useState('')
   const [routeDate, setRouteDate] = useState(new Date().toISOString().split('T')[0])
   const [ratePerKm, setRatePerKm] = useState('1.30')
+  const [vehicleId, setVehicleId] = useState('')
+  const [vehicles, setVehicles] = useState<VehicleOption[]>([])
   const [observations, setObservations] = useState('')
   const [legs, setLegs] = useState<RouteLeg[]>([emptyLeg()])
   const [includeReturn, setIncludeReturn] = useState(false)
@@ -42,11 +45,37 @@ export function Routes() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    try { const [r, s] = await Promise.all([api.get('/routes'), api.get('/routes/summary')]); setRoutes(r.data); setSummary(s.data) }
+    try {
+      const [r, s, v] = await Promise.all([
+        api.get('/routes'),
+        api.get('/routes/summary'),
+        api.get('/vehicles/by-technician/' + (user?.id || '')).catch(() => ({ data: [] })),
+      ])
+      setRoutes(r.data)
+      setSummary(s.data)
+      setVehicles(v.data)
+      // Se tem apenas 1 veículo, pré-selecionar e setar o rate
+      if (v.data.length === 1) {
+        setVehicleId(v.data[0].id)
+        setRatePerKm(String(v.data[0].ratePerKm))
+      }
+    }
     catch { setError('Erro ao carregar rotas') } finally { setLoading(false) }
   }
 
-  function openNew() { setDescription(''); setRouteDate(new Date().toISOString().split('T')[0]); setRatePerKm('1.30'); setObservations(''); setLegs([emptyLeg()]); setIncludeReturn(false); setError(''); setShowModal(true) }
+  function openNew() {
+    setDescription(''); setRouteDate(new Date().toISOString().split('T')[0]); setObservations(''); setLegs([emptyLeg()]); setIncludeReturn(false); setError('')
+    if (vehicles.length === 1) { setVehicleId(vehicles[0].id); setRatePerKm(String(vehicles[0].ratePerKm)) }
+    else if (vehicles.length > 1) { setVehicleId(''); setRatePerKm('1.30') }
+    else { setVehicleId(''); setRatePerKm('1.30') }
+    setShowModal(true)
+  }
+
+  function onVehicleChange(id: string) {
+    setVehicleId(id)
+    const v = vehicles.find(v => v.id === id)
+    if (v) setRatePerKm(String(v.ratePerKm))
+  }
   function addLeg() { setLegs(p => [...p, emptyLeg()]) }
   function removeLeg(i: number) { if (legs.length > 1) setLegs(p => p.filter((_, idx) => idx !== i)) }
   function updateLeg(i: number, field: keyof RouteLeg, value: string) { setLegs(p => p.map((l, idx) => idx === i ? { ...l, [field]: value } : l)) }
@@ -77,9 +106,10 @@ export function Routes() {
 
   async function save() {
     if (!description.trim()) { setError('Descricao obrigatoria'); return }
+    if (!vehicleId && vehicles.length > 0) { setError('Selecione um veículo'); return }
     for (let i = 0; i < legs.length; i++) { if (!legs[i].origin.trim() || !legs[i].destination.trim()) { setError('Trecho ' + (i+1) + ': preencha'); return } if (!legs[i].km || Number(legs[i].km) <= 0) { setError('Trecho ' + (i+1) + ': KM > 0'); return } }
     setSaving(true)
-    try { await api.post('/routes', { description, routeDate, ratePerKm: Number(ratePerKm), observations, legs: effectiveLegs.map(l => ({ origin: l.origin, destination: l.destination, km: Number(l.km) })) }); setShowModal(false); load() }
+    try { await api.post('/routes', { description, routeDate, ratePerKm: Number(ratePerKm), vehicleId: vehicleId || undefined, observations, legs: effectiveLegs.map(l => ({ origin: l.origin, destination: l.destination, km: Number(l.km) })) }); setShowModal(false); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro') } finally { setSaving(false) }
   }
 
@@ -195,6 +225,7 @@ export function Routes() {
                 </div>
                 <div className="flex items-center gap-4 mt-1 text-sm text-gray-500 flex-wrap">
                   {!isTecnico && <span>{'👤 ' + (r.technician?.name || '')}</span>}
+                  {r.vehicle && <span>{'🚗 ' + r.vehicle.plate}</span>}
                   <span>{'📅 ' + new Date(r.routeDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                   <span>{'📍 ' + r.origin + ' → ' + r.destination}</span>
                 </div>
@@ -304,7 +335,17 @@ export function Routes() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descricao *</label><input className="input" placeholder="Ex: Visita tecnica cliente" value={description} onChange={e => setDescription(e.target.value)} /></div>
                 <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data *</label><input className="input" type="date" value={routeDate} onChange={e => setRouteDate(e.target.value)} /></div>
-                <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor/KM (R$)</label>{isAdmin ? <input className="input" type="number" step="0.01" value={ratePerKm} onChange={e => setRatePerKm(e.target.value)} /> : <div className="input bg-gray-100 text-gray-500 cursor-not-allowed">R$ {Number(ratePerKm).toFixed(2)} <span className="text-xs">(admin)</span></div>}</div>
+                <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Veículo *</label>
+                  {vehicles.length > 0 ? (
+                    <select className="input" value={vehicleId} onChange={e => onVehicleChange(e.target.value)}>
+                      <option value="">Selecione o veículo</option>
+                      {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.brand} {v.model} (R$ {Number(v.ratePerKm).toFixed(2)}/km)</option>)}
+                    </select>
+                  ) : (
+                    <div className="input bg-gray-100 text-gray-500 text-sm">Nenhum veículo vinculado. Contate o admin.</div>
+                  )}
+                </div>
+                {vehicleId && <div className="col-span-2 p-2 bg-green-50 rounded-lg flex items-center gap-2"><Car className="w-4 h-4 text-green-600" /><span className="text-sm text-green-700">Valor de reembolso: <strong>R$ {Number(ratePerKm).toFixed(2)}/km</strong> (definido pelo veículo)</span></div>}
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">

@@ -19,6 +19,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { FiscalModule } from './modules/fiscal/fiscal.module';
 import { FinancialModule } from './modules/financial/financial.module';
 import { InterModule } from './modules/inter/inter.module';
+import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 
@@ -46,6 +47,7 @@ import { HealthController } from './health.controller';
     FiscalModule,
     FinancialModule,
     InterModule,
+    VehiclesModule,
   ],
   controllers: [HealthController],
 })

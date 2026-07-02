@@ -16,6 +16,7 @@ import {
   Navigation,
   ScrollText,
   Clock,
+  Car,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -45,6 +46,7 @@ export function Layout() {
         { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro'] },
         { name: 'Servicos', href: '/services', icon: Wrench, roles: ['admin'] },
         { name: 'Rotas Externas', href: '/routes', icon: Navigation, roles: ['admin', 'financeiro', 'tecnico'] },
+        { name: 'Veiculos', href: '/vehicles', icon: Car, roles: ['admin'] },
       ],
     },
     {

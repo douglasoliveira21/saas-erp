@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Route } from './entities/route.entity';
 import { RouteLeg } from './entities/route-leg.entity';
+import { VehiclesService } from '../vehicles/vehicles.service';
+
 @Injectable()
 export class RoutesService {
   constructor(
@@ -11,6 +13,7 @@ export class RoutesService {
     @InjectRepository(RouteLeg)
     private legsRepository: Repository<RouteLeg>,
     private dataSource: DataSource,
+    private vehiclesService: VehiclesService,
   ) {}
 
   async create(dto: any): Promise<Route> {
@@ -22,7 +25,15 @@ export class RoutesService {
       const legs: { origin: string; destination: string; km: number }[] = dto.legs || [];
       if (legs.length === 0) throw new BadRequestException('Adicione pelo menos um trecho');
 
-      const ratePerKm = Number(dto.ratePerKm || 1.30);
+      // Se tem veículo, busca o rate_per_km do veículo
+      let ratePerKm = Number(dto.ratePerKm || 1.30);
+      let vehicleId = dto.vehicleId || null;
+
+      if (vehicleId) {
+        const vehicle = await this.vehiclesService.findOne(vehicleId);
+        ratePerKm = Number(vehicle.ratePerKm);
+      }
+
       const totalKm = legs.reduce((s, l) => s + Number(l.km), 0);
       const totalValue = totalKm * ratePerKm;
 
@@ -32,6 +43,7 @@ export class RoutesService {
 
       const route = queryRunner.manager.create(Route, {
         technicianId: dto.technicianId,
+        vehicleId,
         description: dto.description,
         origin,
         destination,
@@ -68,7 +80,7 @@ export class RoutesService {
 
   async findAll(): Promise<Route[]> {
     return this.routesRepository.find({
-      relations: ['technician', 'legs'],
+      relations: ['technician', 'vehicle', 'legs'],
       order: { routeDate: 'DESC', createdAt: 'DESC' },
     });
   }
@@ -76,7 +88,7 @@ export class RoutesService {
   async findOne(id: string): Promise<Route> {
     const route = await this.routesRepository.findOne({
       where: { id },
-      relations: ['technician', 'legs'],
+      relations: ['technician', 'vehicle', 'legs'],
     });
     if (!route) throw new NotFoundException('Rota não encontrada');
     // Ordenar legs
