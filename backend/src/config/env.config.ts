@@ -1,7 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 
-// Carregar variáveis de ambiente
+// Carregar variáveis de ambiente (em Docker, já vêm do environment)
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 export const env = {
@@ -17,9 +17,9 @@ export const env = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
   server: {
-    port: parseInt(process.env.PORT) || 3000,
+    port: parseInt(process.env.PORT) || 5000,
     nodeEnv: process.env.NODE_ENV || 'development',
-    corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    corsOrigin: process.env.CORS_ORIGIN || '*',
   },
   inter: {
     clientId: process.env.INTER_CLIENT_ID || '',

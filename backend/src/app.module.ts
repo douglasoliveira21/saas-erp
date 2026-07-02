@@ -20,6 +20,7 @@ import { FiscalModule } from './modules/fiscal/fiscal.module';
 import { FinancialModule } from './modules/financial/financial.module';
 import { InterModule } from './modules/inter/inter.module';
 import { DatabaseConfig } from './config/database.config';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -46,5 +47,6 @@ import { DatabaseConfig } from './config/database.config';
     FinancialModule,
     InterModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

@@ -7,6 +7,9 @@ import { SnakeNamingStrategy } from './snake-naming.strategy';
 @Injectable()
 export class DatabaseConfig implements TypeOrmOptionsFactory {
   createTypeOrmOptions(): TypeOrmModuleOptions {
+    const isSupabase = env.database.host.includes('supabase.com') || env.database.host.includes('supabase.co');
+    const useSSL = isSupabase || process.env.DATABASE_SSL === 'true';
+
     return {
       type: 'postgres',
       host: env.database.host,
@@ -15,16 +18,16 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
       password: env.database.password,
       database: env.database.database,
       entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-      synchronize: false,
+      synchronize: env.server.nodeEnv === 'development',
       logging: env.server.nodeEnv === 'development',
-      ssl: env.database.host.includes('supabase.com') || env.database.host.includes('supabase.co') ? {
-        rejectUnauthorized: false
-      } : false,
+      ssl: useSSL ? { rejectUnauthorized: false } : false,
       poolSize: 10,
-      extra: env.database.host.includes('pooler.supabase.com') ? {
+      extra: isSupabase ? {
         options: '-c search_path=public',
       } : {},
       namingStrategy: new SnakeNamingStrategy(),
+      retryAttempts: 5,
+      retryDelay: 3000,
     };
   }
 }

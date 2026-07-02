@@ -2,18 +2,20 @@
 -- Senhas: Admin@123, Financeiro@123, Tecnico@123
 -- Hash bcrypt com salt rounds = 10
 
--- Usuários
+-- Usuários (hashes gerados com bcrypt)
 INSERT INTO users (id, name, email, password, role, active) VALUES
-('550e8400-e29b-41d4-a716-446655440001', 'Administrador', 'admin@empresa.com', '$2b$10$YourHashHere', 'admin', true),
-('550e8400-e29b-41d4-a716-446655440002', 'Maria Financeiro', 'financeiro@empresa.com', '$2b$10$YourHashHere', 'financeiro', true),
-('550e8400-e29b-41d4-a716-446655440003', 'João Técnico', 'tecnico@empresa.com', '$2b$10$YourHashHere', 'tecnico', true),
-('550e8400-e29b-41d4-a716-446655440004', 'Pedro Técnico', 'pedro@empresa.com', '$2b$10$YourHashHere', 'tecnico', true);
+('550e8400-e29b-41d4-a716-446655440001', 'Administrador', 'admin@empresa.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', true),
+('550e8400-e29b-41d4-a716-446655440002', 'Maria Financeiro', 'financeiro@empresa.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'financeiro', true),
+('550e8400-e29b-41d4-a716-446655440003', 'João Técnico', 'tecnico@empresa.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'tecnico', true),
+('550e8400-e29b-41d4-a716-446655440004', 'Pedro Técnico', 'pedro@empresa.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'tecnico', true)
+ON CONFLICT (id) DO NOTHING;
 
 -- Clientes
 INSERT INTO customers (name, cpf_cnpj, phone, email, address) VALUES
 ('Cliente Exemplo 1', '123.456.789-00', '(11) 98765-4321', 'cliente1@email.com', 'Rua Exemplo, 123 - São Paulo/SP'),
 ('Empresa XYZ Ltda', '12.345.678/0001-90', '(11) 3456-7890', 'contato@empresaxyz.com', 'Av. Paulista, 1000 - São Paulo/SP'),
-('Cliente Exemplo 2', '987.654.321-00', '(11) 91234-5678', 'cliente2@email.com', 'Rua Teste, 456 - São Paulo/SP');
+('Cliente Exemplo 2', '987.654.321-00', '(11) 91234-5678', 'cliente2@email.com', 'Rua Teste, 456 - São Paulo/SP')
+ON CONFLICT DO NOTHING;
 
 -- Produtos
 INSERT INTO products (name, code, category, quantity, purchase_price, sale_price, tax_percentage, supplier, min_stock) VALUES
@@ -26,7 +28,8 @@ INSERT INTO products (name, code, category, quantity, purchase_price, sale_price
 ('Notebook Dell Inspiron', 'NB-DELL-I15', 'Notebook', 10, 2500.00, 3800.00, 18.00, 'Fornecedor D', 2),
 ('Mouse Gamer RGB', 'MOUSE-RGB', 'Periféricos', 60, 80.00, 150.00, 18.00, 'Fornecedor C', 15),
 ('Teclado Mecânico', 'TECLADO-MEC', 'Periféricos', 35, 200.00, 380.00, 18.00, 'Fornecedor C', 10),
-('Monitor 24" Full HD', 'MONITOR-24', 'Monitor', 12, 600.00, 950.00, 18.00, 'Fornecedor D', 3);
+('Monitor 24" Full HD', 'MONITOR-24', 'Monitor', 12, 600.00, 950.00, 18.00, 'Fornecedor D', 3)
+ON CONFLICT (code) DO NOTHING;
 
 -- Serviços
 INSERT INTO services (name, description, sale_price, operational_cost, tax_percentage, estimated_time) VALUES
@@ -39,9 +42,12 @@ INSERT INTO services (name, description, sale_price, operational_cost, tax_perce
 ('Montagem de PC', 'Montagem completa de computador', 200.00, 30.00, 10.00, 180),
 ('Recuperação de Dados', 'Recuperação de dados de HD/SSD', 300.00, 50.00, 10.00, 240),
 ('Configuração de Rede', 'Configuração de rede e internet', 150.00, 20.00, 10.00, 120),
-('Instalação de Antivírus', 'Instalação e configuração de antivírus', 50.00, 5.00, 10.00, 30);
+('Instalação de Antivírus', 'Instalação e configuração de antivírus', 50.00, 5.00, 10.00, 30)
+ON CONFLICT DO NOTHING;
 
--- Nota: As senhas precisam ser geradas com bcrypt
--- Você pode usar o comando abaixo no Node.js para gerar:
--- const bcrypt = require('bcrypt');
--- bcrypt.hash('Admin@123', 10).then(hash => console.log(hash));
+-- IMPORTANTE: Após o deploy, use o seed via TypeScript para gerar senhas corretas:
+-- Execute: npm run seed (dentro do container backend)
+-- Credenciais padrão:
+-- Admin: admin@empresa.com / Admin@123
+-- Financeiro: financeiro@empresa.com / Financeiro@123
+-- Técnico: tecnico@empresa.com / Tecnico@123
