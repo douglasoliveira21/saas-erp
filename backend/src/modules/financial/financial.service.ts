@@ -14,14 +14,21 @@ export class FinancialService implements OnModuleInit {
 
   async onModuleInit() {
     // Sync existing sales on startup
-    try {
-      const result = await this.syncExistingSales('system');
-      if (result.synced > 0) {
-        this.logger.log(`Sincronizadas ${result.synced} vendas com o financeiro`);
+    // Aguarda um momento para garantir que as tabelas foram criadas pelo synchronize
+    setTimeout(async () => {
+      try {
+        const result = await this.syncExistingSales('system');
+        if (result.synced > 0) {
+          this.logger.log(`Sincronizadas ${result.synced} vendas com o financeiro`);
+        }
+      } catch (e) {
+        if (e.message?.includes('does not exist')) {
+          this.logger.warn('Tabelas ainda não criadas. Sincronização será feita no próximo restart.');
+        } else {
+          this.logger.error('Erro ao sincronizar vendas: ' + e.message);
+        }
       }
-    } catch (e) {
-      this.logger.error('Erro ao sincronizar vendas: ' + e.message);
-    }
+    }, 5000);
   }
   constructor(
     @InjectRepository(AccountReceivable)

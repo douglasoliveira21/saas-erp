@@ -29,13 +29,15 @@ async function bootstrap() {
   const port = env.server.port;
   await app.listen(port);
 
-  // Executar seed automático após iniciar
-  try {
-    const dataSource = app.get(DataSource);
-    await seedOnStart(dataSource);
-  } catch (error) {
-    console.warn('⚠️  Seed automático não executado:', error.message);
-  }
+  // Executar seed automático após iniciar (aguardar synchronize terminar)
+  setTimeout(async () => {
+    try {
+      const dataSource = app.get(DataSource);
+      await seedOnStart(dataSource);
+    } catch (error) {
+      console.warn('⚠️  Seed automático não executado:', error.message);
+    }
+  }, 3000);
 
   console.log(`🚀 Server running on http://localhost:${port}`);
   console.log(`📚 API available at http://localhost:${port}/api`);

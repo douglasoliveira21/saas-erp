@@ -14,14 +14,21 @@ export class CommissionsService implements OnModuleInit {
 
   async onModuleInit() {
     // Gerar comissões fixas do mês atual na inicialização
-    try {
-      const result = await this.generateMonthlyFixed();
-      if (result.created > 0) {
-        this.logger.log(`Comissoes fixas geradas automaticamente: ${result.created} de ${result.total}`);
+    // Aguarda um momento para garantir que as tabelas foram criadas pelo synchronize
+    setTimeout(async () => {
+      try {
+        const result = await this.generateMonthlyFixed();
+        if (result.created > 0) {
+          this.logger.log(`Comissoes fixas geradas automaticamente: ${result.created} de ${result.total}`);
+        }
+      } catch (e) {
+        if (e.message?.includes('does not exist')) {
+          this.logger.warn('Tabelas ainda não criadas. Comissões serão geradas no próximo restart.');
+        } else {
+          this.logger.error('Erro ao gerar comissoes fixas: ' + e.message);
+        }
       }
-    } catch (e) {
-      this.logger.error('Erro ao gerar comissoes fixas: ' + e.message);
-    }
+    }, 5000);
 
     // Verificar diariamente se precisa gerar (para o caso do servidor ficar ligado por meses)
     setInterval(async () => {
