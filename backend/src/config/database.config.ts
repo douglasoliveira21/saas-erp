@@ -9,6 +9,7 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
   createTypeOrmOptions(): TypeOrmModuleOptions {
     const isSupabase = env.database.host.includes('supabase.com') || env.database.host.includes('supabase.co');
     const useSSL = isSupabase || process.env.DATABASE_SSL === 'true';
+    const shouldSync = process.env.DATABASE_SYNC === 'true' || env.server.nodeEnv === 'development';
 
     return {
       type: 'postgres',
@@ -18,7 +19,7 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
       password: env.database.password,
       database: env.database.database,
       entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-      synchronize: env.server.nodeEnv === 'development',
+      synchronize: shouldSync,
       logging: env.server.nodeEnv === 'development',
       ssl: useSSL ? { rejectUnauthorized: false } : false,
       poolSize: 10,
