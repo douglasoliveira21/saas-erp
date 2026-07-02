@@ -75,12 +75,12 @@ export class VehiclesService {
   async searchPlate(plate: string): Promise<any> {
     const normalized = this.normalizePlate(plate);
 
-    // Usa a API pública brasileira de consulta de placas
+    // Tenta buscar dados da placa em APIs públicas
     try {
       const data = await this.fetchPlateData(normalized);
       return data;
     } catch (error) {
-      // Se a API falhar, retorna apenas a placa normalizada
+      // Se nenhuma API funcionar, retorna dados parciais para preenchimento manual
       return {
         plate: normalized,
         brand: null,
@@ -89,7 +89,8 @@ export class VehiclesService {
         year: null,
         yearModel: null,
         fuel: null,
-        message: 'Não foi possível consultar os dados da placa. Preencha manualmente.',
+        found: false,
+        message: 'Consulta automática indisponível. Preencha os dados manualmente.',
       };
     }
   }
@@ -103,13 +104,13 @@ export class VehiclesService {
       const postData = JSON.stringify({ placa: plate });
 
       const options = {
-        hostname: 'wdapi2.com.br',
+        hostname: 'apiplacas.com.br',
         port: 443,
-        path: '/consulta/' + plate + '/json',
+        path: '/consulta/' + plate,
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
         },
         timeout: 10000,
       };
@@ -119,22 +120,28 @@ export class VehiclesService {
         res.on('data', (chunk) => (body += chunk));
         res.on('end', () => {
           try {
+            if (res.statusCode !== 200) { reject(new Error('API indisponível')); return; }
             const json = JSON.parse(body);
-            if (json.MARCA) {
+            // Adapta para diferentes formatos de resposta
+            const brand = json.marca || json.MARCA || json.brand || null;
+            const model = json.modelo || json.MODELO || json.model || null;
+
+            if (brand || model) {
               resolve({
                 plate,
-                brand: json.MARCA || null,
-                model: json.MODELO || null,
-                color: json.cor || json.COR || null,
-                year: json.ano ? parseInt(json.ano) : null,
+                brand,
+                model,
+                color: json.cor || json.COR || json.color || null,
+                year: json.ano ? parseInt(json.ano) : (json.year ? parseInt(json.year) : null),
                 yearModel: json.anoModelo ? parseInt(json.anoModelo) : null,
-                fuel: json.combustivel || null,
+                fuel: json.combustivel || json.fuel || null,
+                found: true,
               });
             } else {
-              reject(new Error('Placa não encontrada'));
+              reject(new Error('Dados não encontrados'));
             }
           } catch {
-            reject(new Error('Erro ao parsear resposta'));
+            reject(new Error('Erro ao processar'));
           }
         });
       });

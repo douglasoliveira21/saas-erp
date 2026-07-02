@@ -102,15 +102,18 @@ export function Vehicles() {
     try {
       const res = await api.get('/vehicles/search-plate?plate=' + plate.trim())
       const data = res.data
-      if (data.brand) setBrand(data.brand)
-      if (data.model) setModel(data.model)
-      if (data.color) setColor(data.color)
-      if (data.year) setYear(String(data.year))
-      if (data.yearModel) setYearModel(String(data.yearModel))
-      if (data.fuel) setFuel(data.fuel)
-      if (data.message) setError(data.message)
+      if (data.found) {
+        if (data.brand) setBrand(data.brand)
+        if (data.model) setModel(data.model)
+        if (data.color) setColor(data.color)
+        if (data.year) setYear(String(data.year))
+        if (data.yearModel) setYearModel(String(data.yearModel))
+        if (data.fuel) setFuel(data.fuel)
+      } else {
+        setError(data.message || 'Placa não encontrada. Preencha os dados manualmente.')
+      }
     } catch (e: any) {
-      setError('Não foi possível buscar a placa. Preencha manualmente.')
+      setError('Consulta indisponível. Preencha os dados manualmente.')
     } finally {
       setSearchingPlate(false)
     }
