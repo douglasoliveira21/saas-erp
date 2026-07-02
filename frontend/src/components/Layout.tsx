@@ -206,7 +206,7 @@ export function Layout() {
         </header>
 
         {/* Page content */}
-        <main className="p-5 lg:p-8 max-w-[1440px]">
+        <main className="p-5 lg:p-8">
           <Outlet />
         </main>
       </div>
