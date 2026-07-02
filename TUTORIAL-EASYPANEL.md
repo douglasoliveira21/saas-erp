@@ -99,7 +99,15 @@ CORS_ORIGIN=*
    - **Build Path:** `./frontend`
    - **Dockerfile Path:** `./Dockerfile`
 
-4. Na aba **Network/Domains**:
+4. Na aba **Environment**, adicione:
+
+```
+BACKEND_URL=http://saas-erp-backend:5000
+```
+
+> Se não funcionar com `saas-erp-backend`, tente `backend` ou veja o nome exato do serviço backend nos logs do EasyPanel.
+
+5. Na aba **Network/Domains**:
    - **Port:** `80`
    - **Domain:** coloque seu domínio (ex: `erp.seudominio.com.br`)
 
@@ -155,6 +163,17 @@ Projeto: saas-erp
 ### Tela branca ou erro 502
 - O backend pode ainda estar iniciando (espere 1 minuto)
 - Vá no serviço `backend` → aba "Logs" e veja se tem erro
+
+### Nginx: "host not found in upstream"
+- Isso significa que o frontend não encontra o backend pela rede
+- Vá no serviço `frontend` → aba "Environment"
+- Ajuste o `BACKEND_URL` com o nome correto do backend
+- Tente estas opções até funcionar:
+  - `http://saas-erp-backend:5000`
+  - `http://saas-erp_backend:5000`
+  - `http://backend:5000`
+  - `http://backend.saas-erp.svc.cluster.local:5000`
+- Após mudar, clique em "Redeploy"
 
 ### Login não funciona
 - Verifique nos logs do backend se aparece "Usuários padrão criados com sucesso"

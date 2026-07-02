@@ -22,11 +22,17 @@ RUN npx vite build
 # Production stage - Nginx
 FROM nginx:alpine AS production
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Remove default config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy nginx template
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Default backend URL - override with environment variable in EasyPanel
+ENV BACKEND_URL=http://backend:5000
 
 EXPOSE 80
 

@@ -58,6 +58,8 @@ services:
     restart: always
     ports:
       - "80:80"
+    environment:
+      BACKEND_URL: http://saas-erp-backend:5000
     depends_on:
       - backend
 
