@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, CheckCircle } from 'lucide-react'
+import { MarketTicker } from '../components/MarketTicker'
 
 interface DashboardData {
   totalSales: number
@@ -101,6 +102,9 @@ export function Dashboard() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-gray-600 dark:text-gray-400 mt-1">Bem-vindo, {user?.name}!</p>
       </div>
+
+      {/* Ticker de indicadores econômicos */}
+      <MarketTicker />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
