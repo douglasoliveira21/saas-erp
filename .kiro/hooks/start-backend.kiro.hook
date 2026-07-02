@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "▶ Start Backend",
+  "description": "Inicia o servidor NestJS em modo desenvolvimento na pasta backend/",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "cd backend && npm run start:dev"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "▶ Start Frontend",
+  "description": "Inicia o servidor de desenvolvimento do frontend (Vite) na pasta frontend/",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "cd frontend && npm run dev"
+  }
+}
