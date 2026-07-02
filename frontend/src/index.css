@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,22 +9,24 @@
     box-sizing: border-box;
   }
   body {
-    @apply bg-gray-100 text-gray-900;
+    @apply bg-[#F8FAFC] text-gray-900 antialiased;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
 @layer components {
   .btn {
-    @apply px-4 py-2 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 shadow-sm;
+    @apply px-4 py-2.5 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 text-sm;
   }
   
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 hover:shadow-md;
+    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 shadow-sm hover:shadow-glow-violet;
   }
   
   .btn-secondary {
-    @apply bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 focus:ring-gray-300 hover:shadow-sm;
+    @apply bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 hover:border-gray-300 focus:ring-gray-300;
   }
   
   .btn-danger {
@@ -30,22 +34,38 @@
   }
   
   .input {
-    @apply w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent bg-white text-gray-900 placeholder-gray-400 transition-shadow duration-200;
+    @apply w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-400 bg-white text-gray-900 placeholder-gray-400 text-sm transition-all duration-200;
   }
   
   .card {
-    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-6 transition-shadow duration-200 hover:shadow-md;
+    @apply bg-white rounded-3xl shadow-card border border-gray-100/80 p-6 transition-all duration-300 hover:shadow-elevated;
   }
   
   .table {
-    @apply min-w-full divide-y divide-gray-200;
+    @apply min-w-full divide-y divide-gray-100;
   }
   
   .table-header {
-    @apply bg-gray-50;
+    @apply bg-gray-50/80;
   }
   
   .table-cell {
-    @apply px-6 py-4 whitespace-nowrap text-sm;
+    @apply px-5 py-4 whitespace-nowrap text-sm;
   }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
 }

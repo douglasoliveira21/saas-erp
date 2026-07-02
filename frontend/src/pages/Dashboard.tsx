@@ -100,19 +100,9 @@ export function Dashboard() {
   return (
     <div>
       {/* Header com saudação e data/hora */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Olá, {user?.name}! 👋</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Aqui está o resumo do seu negócio hoje.</p>
-        </div>
-        <div className="hidden md:flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-sm text-gray-500">{new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-          </div>
-          <div className="px-3 py-1.5 bg-primary-600 text-white rounded-xl text-sm font-mono font-semibold">
-            {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </div>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-[26px] font-bold text-gray-900 tracking-tight">Olá, {user?.name}! 👋</h1>
+        <p className="text-gray-500 text-sm mt-1">Aqui está o resumo do seu negócio hoje.</p>
       </div>
 
       {/* Ticker de indicadores econômicos */}
@@ -252,8 +242,13 @@ export function Dashboard() {
           </div>
 
           {techSummary.length === 0 ? (
-            <div className="card text-center text-gray-500 py-8">
-              ✅ Nenhum pagamento pendente para técnicos
+            <div className="card flex items-center gap-8 py-10 px-8">
+              <div className="flex-shrink-0 text-6xl">📋</div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900">Tudo em dia! 🎉</h3>
+                <p className="text-sm text-gray-500 mt-1">Não há pagamentos pendentes para técnicos no momento.</p>
+              </div>
+              <div className="hidden lg:block flex-shrink-0 text-6xl opacity-80">💰</div>
             </div>
           ) : (
             <div className="space-y-3">

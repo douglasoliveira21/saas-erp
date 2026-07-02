@@ -6,6 +6,9 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
       colors: {
         primary: {
           50: '#f5f3ff',
@@ -20,15 +23,19 @@ export default {
           900: '#4c1d95',
           950: '#2e1065',
         },
-        sidebar: {
-          bg: '#1e1b4b',
-          hover: '#312e81',
-          active: '#4338ca',
-          text: '#c7d2fe',
-        },
+      },
+      borderRadius: {
+        '2xl': '16px',
+        '3xl': '20px',
+        '4xl': '24px',
+      },
+      boxShadow: {
+        'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 12px -4px rgba(0, 0, 0, 0.05)',
+        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 2px 8px -1px rgba(0, 0, 0, 0.04)',
+        'elevated': '0 4px 16px -4px rgba(0, 0, 0, 0.08), 0 8px 24px -8px rgba(0, 0, 0, 0.06)',
+        'glow-violet': '0 4px 14px -3px rgba(124, 58, 237, 0.35)',
       },
     },
   },
   plugins: [],
-  darkMode: 'class',
 }
