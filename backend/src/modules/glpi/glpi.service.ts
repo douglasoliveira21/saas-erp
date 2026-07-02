@@ -242,13 +242,25 @@ export class GlpiService {
     };
   }
 
-  async getConfig2(): Promise<GlpiConfig> {
-    return this.getConfig();
+  async getConfig2(): Promise<GlpiConfig | null> {
+    const config = await this.configRepository.findOne({ where: {} });
+    return config;
   }
 
   async updateConfig(dto: any): Promise<GlpiConfig> {
-    const config = await this.getConfig();
-    Object.assign(config, dto);
+    let config = await this.configRepository.findOne({ where: {} });
+
+    if (!config) {
+      // Criar config se não existe
+      config = this.configRepository.create({
+        apiUrl: dto.apiUrl,
+        appToken: dto.appToken,
+        userToken: dto.userToken || null,
+      });
+    } else {
+      Object.assign(config, dto);
+    }
+
     return this.configRepository.save(config);
   }
 }

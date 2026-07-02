@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { RefreshCw, AlertTriangle, Clock, DollarSign, CheckCircle, XCircle, Filter } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Clock, DollarSign, CheckCircle, XCircle, Filter, Settings, Save, Eye, EyeOff } from 'lucide-react'
 
 interface Ticket {
   id: string
@@ -27,6 +27,14 @@ interface SlaReport {
   byCustomer: { name: string; tickets: number; exceeded: number; charge: number }[]
 }
 
+interface GlpiConfig {
+  id?: string
+  apiUrl: string
+  appToken: string
+  userToken: string
+  lastSync?: string
+}
+
 const glpiStatus: Record<number, string> = { 1: 'Novo', 2: 'Em atendimento', 3: 'Planejado', 4: 'Pendente', 5: 'Solucionado', 6: 'Fechado' }
 
 export function Sla() {
@@ -38,6 +46,17 @@ export function Sla() {
   const [filter, setFilter] = useState<'all' | 'exceeded'>('all')
   const [error, setError] = useState('')
 
+  // GLPI Config state
+  const [showConfig, setShowConfig] = useState(false)
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState('')
+  const [configSuccess, setConfigSuccess] = useState('')
+  const [glpiApiUrl, setGlpiApiUrl] = useState('')
+  const [glpiAppToken, setGlpiAppToken] = useState('')
+  const [glpiUserToken, setGlpiUserToken] = useState('')
+  const [showTokens, setShowTokens] = useState(false)
+
   useEffect(() => { load() }, [])
 
   async function load() {
@@ -47,8 +66,45 @@ export function Sla() {
         api.get('/glpi/sla-report'),
       ])
       setTickets(t.data); setReport(r.data)
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar dados GLPI') }
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar dados GLPI. Configure a conexão primeiro.') }
     finally { setLoading(false) }
+  }
+
+  async function loadConfig() {
+    setConfigLoading(true); setConfigError('')
+    try {
+      const res = await api.get('/glpi/config')
+      setGlpiApiUrl(res.data.apiUrl || '')
+      setGlpiAppToken(res.data.appToken || '')
+      setGlpiUserToken(res.data.userToken || '')
+    } catch {
+      // Config não existe ainda - campos ficam vazios
+      setGlpiApiUrl('')
+      setGlpiAppToken('')
+      setGlpiUserToken('')
+    } finally { setConfigLoading(false) }
+  }
+
+  async function saveConfig() {
+    if (!glpiApiUrl.trim()) { setConfigError('URL da API é obrigatória'); return }
+    if (!glpiAppToken.trim()) { setConfigError('App-Token é obrigatório'); return }
+    setConfigSaving(true); setConfigError(''); setConfigSuccess('')
+    try {
+      await api.patch('/glpi/config', {
+        apiUrl: glpiApiUrl.trim().replace(/\/$/, ''),
+        appToken: glpiAppToken.trim(),
+        userToken: glpiUserToken.trim() || null,
+      })
+      setConfigSuccess('Configuração salva com sucesso!')
+      setTimeout(() => setConfigSuccess(''), 3000)
+    } catch (e: any) {
+      setConfigError(e.response?.data?.message || 'Erro ao salvar configuração')
+    } finally { setConfigSaving(false) }
+  }
+
+  function openConfig() {
+    setShowConfig(true)
+    loadConfig()
   }
 
   async function sync() {
@@ -70,11 +126,96 @@ export function Sla() {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Controle de SLA</h1>
           <p className="text-sm text-gray-500 mt-1">Integrado com GLPI - R$ 80,00/hora excedida</p>
         </div>
-        <button onClick={sync} disabled={syncing} className="btn btn-primary flex items-center gap-2">
-          <RefreshCw className={'w-4 h-4 ' + (syncing ? 'animate-spin' : '')} />
-          {syncing ? 'Sincronizando...' : 'Sincronizar GLPI'}
-        </button>
+        <div className="flex gap-2">
+          {isAdmin && (
+            <button onClick={openConfig} className="btn btn-secondary flex items-center gap-2">
+              <Settings className="w-4 h-4" /> Configurar GLPI
+            </button>
+          )}
+          <button onClick={sync} disabled={syncing} className="btn btn-primary flex items-center gap-2">
+            <RefreshCw className={'w-4 h-4 ' + (syncing ? 'animate-spin' : '')} />
+            {syncing ? 'Sincronizando...' : 'Sincronizar GLPI'}
+          </button>
+        </div>
       </div>
+
+      {/* Painel de Configuração GLPI */}
+      {showConfig && (
+        <div className="card mb-6 border-2 border-blue-200 bg-blue-50/30">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-blue-600" /> Configuração GLPI
+            </h2>
+            <button onClick={() => setShowConfig(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+          </div>
+
+          {configError && <div className="mb-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{configError}</div>}
+          {configSuccess && <div className="mb-3 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{configSuccess}</div>}
+
+          {configLoading ? (
+            <div className="flex justify-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" /></div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">URL da API do GLPI *</label>
+                <input
+                  className="input"
+                  placeholder="https://seuglpi.com.br/apirest.php"
+                  value={glpiApiUrl}
+                  onChange={e => setGlpiApiUrl(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">Ex: https://glpi.suaempresa.com.br/apirest.php</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">App-Token *</label>
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1 font-mono text-sm"
+                    type={showTokens ? 'text' : 'password'}
+                    placeholder="Cole aqui o App-Token do GLPI"
+                    value={glpiAppToken}
+                    onChange={e => setGlpiAppToken(e.target.value)}
+                  />
+                  <button onClick={() => setShowTokens(!showTokens)} className="btn btn-secondary px-3" title="Mostrar/ocultar">
+                    {showTokens ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Gerado em: GLPI → Configurar → Geral → API → Clientes de API</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">User Token (API Token do Usuário)</label>
+                <input
+                  className="input font-mono text-sm"
+                  type={showTokens ? 'text' : 'password'}
+                  placeholder="Cole aqui o Token de API do usuário"
+                  value={glpiUserToken}
+                  onChange={e => setGlpiUserToken(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">Encontrado em: GLPI → Perfil do usuário → Configurações → Token de API Remota</p>
+              </div>
+
+              <div className="pt-2 border-t border-gray-200">
+                <button onClick={saveConfig} disabled={configSaving} className="btn btn-primary flex items-center gap-2">
+                  {configSaving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Save className="w-4 h-4" />}
+                  Salvar Configuração
+                </button>
+              </div>
+
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <h3 className="font-medium text-gray-800 mb-2">📋 Como obter os tokens no GLPI:</h3>
+                <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+                  <li><strong>App-Token:</strong> Acesse GLPI → Configurar → Geral → API → Clientes de API → Adicionar (coloque nome, ative, copie o token gerado)</li>
+                  <li><strong>User Token:</strong> Acesse GLPI → clique no seu nome (canto superior direito) → Configurações → aba "Token de API Remota" → Regenerar → copie o token</li>
+                  <li><strong>URL da API:</strong> Geralmente é o endereço do seu GLPI + <code>/apirest.php</code></li>
+                  <li><strong>Importante:</strong> Ative a API REST em: Configurar → Geral → API → Ativar API Rest = Sim</li>
+                </ol>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* KPIs */}
       {report && (
