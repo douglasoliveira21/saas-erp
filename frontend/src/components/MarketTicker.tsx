@@ -54,7 +54,6 @@ export function MarketTicker() {
 
       // Nasdaq
       n.push({ label: 'Nasdaq', value: '---', icon: '💻' })
-
       // Selic
       if (selicRes?.[0]) {
         n.push({ label: 'Selic', value: `${Number(selicRes[0].valor).toFixed(2)}% a.a.`, icon: '🏦', positive: true })
@@ -106,29 +105,36 @@ export function MarketTicker() {
         n.push({ label: 'Libra', value: `R$ ${Number(g.bid).toFixed(2)}`, change: `${Number(g.pctChange) >= 0 ? '+' : ''}${Number(g.pctChange).toFixed(2)}%`, positive: Number(g.pctChange) >= 0, icon: '🇬🇧' })
       }
 
-      // Agora tentar buscar dados extras de APIs gratuitas
+      // Agora tentar buscar Ibovespa, S&P 500, Nasdaq via APIs alternativas
       try {
-        const brapi = await fetch('https://brapi.dev/api/quote/^BVSP,^GSPC,^IXIC?token=demo').then(r => r.json()).catch(() => null)
-        if (brapi?.results) {
-          for (const r of brapi.results) {
-            if (r.symbol === '^BVSP') {
-              const idx = n.findIndex(i => i.label === 'Ibovespa')
-              if (idx >= 0) n[idx] = { label: 'Ibovespa', value: `${(r.regularMarketPrice / 1000).toFixed(1)}k`, change: `${r.regularMarketChangePercent >= 0 ? '+' : ''}${r.regularMarketChangePercent.toFixed(2)}%`, positive: r.regularMarketChangePercent >= 0, icon: '📊' }
-            }
-            if (r.symbol === '^GSPC') {
-              const idx = n.findIndex(i => i.label === 'S&P 500')
-              if (idx >= 0) n[idx] = { label: 'S&P 500', value: `${r.regularMarketPrice.toFixed(0)}`, change: `${r.regularMarketChangePercent >= 0 ? '+' : ''}${r.regularMarketChangePercent.toFixed(2)}%`, positive: r.regularMarketChangePercent >= 0, icon: '🇺🇸' }
-            }
-            if (r.symbol === '^IXIC') {
-              const idx = n.findIndex(i => i.label === 'Nasdaq')
-              if (idx >= 0) n[idx] = { label: 'Nasdaq', value: `${r.regularMarketPrice.toFixed(0)}`, change: `${r.regularMarketChangePercent >= 0 ? '+' : ''}${r.regularMarketChangePercent.toFixed(2)}%`, positive: r.regularMarketChangePercent >= 0, icon: '💻' }
+        const indicesRes = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL').then(() => true).catch(() => false)
+        // Tentar brapi sem token (funciona como demo)
+        const brapiRes = await fetch('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d')
+        if (brapiRes.ok) {
+          const brapi = await brapiRes.json()
+          if (brapi?.results) {
+            for (const r of brapi.results) {
+              const pct = r.regularMarketChangePercent || 0
+              const price = r.regularMarketPrice || 0
+              if (r.symbol === '^BVSP' || r.symbol === '%5EBVSP') {
+                const idx = n.findIndex(i => i.label === 'Ibovespa')
+                if (idx >= 0) n[idx] = { label: 'Ibovespa', value: `${(price / 1000).toFixed(1)}k`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '📊' }
+              }
+              if (r.symbol === '^GSPC' || r.symbol === '%5EGSPC') {
+                const idx = n.findIndex(i => i.label === 'S&P 500')
+                if (idx >= 0) n[idx] = { label: 'S&P 500', value: `${price.toFixed(0)}`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '🇺🇸' }
+              }
+              if (r.symbol === '^IXIC' || r.symbol === '%5EIXIC') {
+                const idx = n.findIndex(i => i.label === 'Nasdaq')
+                if (idx >= 0) n[idx] = { label: 'Nasdaq', value: `${price.toFixed(0)}`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '💻' }
+              }
             }
           }
         }
       } catch {}
 
-      // Remover items com valor "---" que não conseguimos preencher (opcional: manter para mostrar que rastreamos)
-      setItems(n.filter(i => i.value !== '---' || true))
+      // Filtrar items que não têm valor real (remover "---")
+      setItems(n.filter(i => i.value !== '---'))
     } catch {
       setItems([
         { label: 'Dólar', value: 'R$ 5.65', change: '+0.12%', positive: true, icon: '🇺🇸' },
