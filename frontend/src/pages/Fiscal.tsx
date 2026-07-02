@@ -151,7 +151,7 @@ export function Fiscal() {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
           modelo: nfeModelo, tpNF: nfeTpNF, tPag: nfeTpPag,
           recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientIE,
-          items: (sales.find(s => s.id === selectedSaleId)?.items || []).map((i: any) => ({
+          items: (window as any).__nfeImportedItems || (sales.find(s => s.id === selectedSaleId)?.items || []).map((i: any) => ({
             name: i.name, quantity: i.quantity, unitPrice: i.unitPrice || i.unit_price,
             code: i.productId || i.code || '1', ncm: i.ncm || '', cfop: i.cfop || '',
             unit: i.unit || 'UN', cest: i.cest || '',
@@ -169,6 +169,8 @@ export function Fiscal() {
       }
       load()
       setTab('invoices')
+      // Limpar itens importados do XML
+      delete (window as any).__nfeImportedItems
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao emitir nota') }
     finally { setEmitting(false) }
   }
@@ -594,6 +596,95 @@ export function Fiscal() {
                       </select>
                     </div>
                   </div>
+
+                  {/* Upload XML para NF-e de Entrada */}
+                  {nfeTpNF === '0' && (
+                    <div className="p-4 bg-white border-2 border-dashed border-blue-300 rounded-lg">
+                      <div className="flex items-center gap-3 mb-3">
+                        <Upload className="w-5 h-5 text-blue-600" />
+                        <div>
+                          <p className="font-medium text-blue-700">Importar XML da NF-e de entrada</p>
+                          <p className="text-xs text-gray-500">Faça upload do XML recebido do fornecedor para preenchimento automático</p>
+                        </div>
+                      </div>
+                      <input
+                        type="file"
+                        accept=".xml"
+                        className="input text-sm"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          try {
+                            const text = await file.text()
+                            // Parse XML da NF-e
+                            const parser = new DOMParser()
+                            const doc = parser.parseFromString(text, 'text/xml')
+
+                            // Extrair dados do emitente (fornecedor = destinatario na entrada)
+                            const emit = doc.querySelector('emit')
+                            const emitName = emit?.querySelector('xNome')?.textContent || ''
+                            const emitCnpj = emit?.querySelector('CNPJ')?.textContent || emit?.querySelector('CPF')?.textContent || ''
+                            const emitIE = emit?.querySelector('IE')?.textContent || ''
+                            const enderEmit = emit?.querySelector('enderEmit')
+                            const emitAddr = enderEmit?.querySelector('xLgr')?.textContent || ''
+                            const emitNum = enderEmit?.querySelector('nro')?.textContent || ''
+                            const emitBairro = enderEmit?.querySelector('xBairro')?.textContent || ''
+                            const emitCity = enderEmit?.querySelector('xMun')?.textContent || ''
+                            const emitUf = enderEmit?.querySelector('UF')?.textContent || ''
+                            const emitCep = enderEmit?.querySelector('CEP')?.textContent || ''
+
+                            // Extrair valor total
+                            const icmsTot = doc.querySelector('ICMSTot')
+                            const vNF = icmsTot?.querySelector('vNF')?.textContent || ''
+
+                            // Extrair itens
+                            const dets = doc.querySelectorAll('det')
+                            const parsedItems: any[] = []
+                            dets.forEach(det => {
+                              const prod = det.querySelector('prod')
+                              if (prod) {
+                                parsedItems.push({
+                                  name: prod.querySelector('xProd')?.textContent || '',
+                                  code: prod.querySelector('cProd')?.textContent || '',
+                                  ncm: prod.querySelector('NCM')?.textContent || '',
+                                  cfop: prod.querySelector('CFOP')?.textContent || '',
+                                  unit: prod.querySelector('uCom')?.textContent || 'UN',
+                                  quantity: parseFloat(prod.querySelector('qCom')?.textContent || '1'),
+                                  unitPrice: parseFloat(prod.querySelector('vUnCom')?.textContent || '0'),
+                                  ean: prod.querySelector('cEAN')?.textContent || '',
+                                  cest: prod.querySelector('CEST')?.textContent || '',
+                                })
+                              }
+                            })
+
+                            // Preencher os campos
+                            setRecipientName(emitName)
+                            setRecipientCnpj(emitCnpj)
+                            setRecipientIE(emitIE)
+                            setRecipientAddress(emitAddr + (emitNum ? ', ' + emitNum : ''))
+                            setRecipientNeighborhood(emitBairro)
+                            setRecipientCity(emitCity)
+                            setRecipientUf(emitUf)
+                            setRecipientCep(emitCep)
+                            if (vNF) setTotalValue(vNF)
+
+                            // Guardar itens parseados para envio
+                            if (parsedItems.length > 0) {
+                              // Criar uma venda fake com os itens para o payload
+                              (window as any).__nfeImportedItems = parsedItems
+                            }
+
+                            setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Confira os dados e emita.`)
+                            setTimeout(() => setSuccess(''), 5000)
+                          } catch (err) {
+                            setError('Erro ao ler o XML. Verifique se é um arquivo XML de NF-e válido.')
+                          }
+                        }}
+                      />
+                      <p className="text-xs text-gray-400 mt-2">Aceita XML de NF-e (procNFe ou NFe). Os dados do emitente serão usados como fornecedor/remetente.</p>
+                    </div>
+                  )}
+
                   <p className="text-sm text-blue-600">Os itens da venda vinculada serao utilizados. Certifique-se de que os produtos possuem NCM e CFOP cadastrados.</p>
                   <div className="text-xs text-gray-500">Ambiente: {nfeAmbiente === 1 ? 'Producao' : 'Homologacao'} (MG) | Versao: 4.00</div>
                 </div>
