@@ -76,8 +76,33 @@ export class FiscalController {
   // === CONFIGURACAO ===
   @Get('config')
   @Roles(UserRole.ADMIN)
-  getConfig() {
-    return this.configRepo.findOne({ where: {} });
+  async getConfig() {
+    const config = await this.configRepo.findOne({ where: {} });
+    if (!config) {
+      // Retorna objeto vazio para o frontend não quebrar
+      return {
+        cnpj: '',
+        companyName: '',
+        stateRegistration: '',
+        cityRegistration: '',
+        taxRegime: 1,
+        nfeSeries: 1,
+        nfeNextNumber: 1,
+        nfseSeries: 1,
+        nfseNextNumber: 1,
+        environment: 2,
+        ufCode: '31',
+        cityCode: '3118601',
+        nfseApiUrl: '',
+        nfseTestUrl: '',
+        emitAddress: '',
+        emitNumber: '',
+        emitNeighborhood: '',
+        emitCep: '',
+        emitPhone: '',
+      };
+    }
+    return config;
   }
 
   @Patch('config')

@@ -57,7 +57,21 @@ export class NfeService {
 
   async checkStatus(certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
-    const agent = await this.certificateService.getHttpsAgent(certId);
+    if (!config) {
+      return { success: false, error: 'Configuração fiscal não encontrada. Acesse a aba Configuração e preencha os dados.' };
+    }
+
+    if (!certId) {
+      return { success: false, error: 'Nenhum certificado digital selecionado. Faça upload de um certificado .pfx primeiro.' };
+    }
+
+    let agent: any;
+    try {
+      agent = await this.certificateService.getHttpsAgent(certId);
+    } catch (e) {
+      return { success: false, error: 'Erro ao carregar certificado: ' + e.message };
+    }
+
     const endpoints = this.getEndpoints(config, '55');
     const tpAmb = config.environment;
 
