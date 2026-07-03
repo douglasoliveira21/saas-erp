@@ -1127,9 +1127,23 @@ function FiscalConfigForm() {
         </div>
       </div>
 
+      {/* URLs da API NFS-e */}
+      <h4 className="font-medium text-gray-700 mt-4">URLs API NFS-e (Cidade360 / Padrão Nacional)</h4>
+      <div className="grid grid-cols-1 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">URL API NFS-e (Produção) *</label>
+          <input className="input" value={cfg.nfseApiUrl || ''} onChange={e => setCfg({...cfg, nfseApiUrl: e.target.value})} placeholder="https://nfse-contagem.cidade360.com.br/api" />
+          <p className="text-xs text-gray-400 mt-1">URL da API de produção do seu município para emissão de NFS-e</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">URL API NFS-e (Homologação/Teste)</label>
+          <input className="input" value={cfg.nfseTestUrl || ''} onChange={e => setCfg({...cfg, nfseTestUrl: e.target.value})} placeholder="https://nfse-contagem-hom.cidade360.com.br/api" />
+          <p className="text-xs text-gray-400 mt-1">URL para testes. Usada quando Ambiente = Homologação</p>
+        </div>
+      </div>
+
       {/* Endereco do Emitente */}
-      <h4 className="font-medium text-gray-700 mt-4">Endereco do Emitente (NF-e)</h4>
-      <div className="grid grid-cols-2 gap-4">
+      <h4 className="font-medium text-gray-700 mt-4">Endereco do Emitente (NF-e)</h4>      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Logradouro</label>
           <input className="input" value={cfg.emitAddress || ''} onChange={e => setCfg({...cfg, emitAddress: e.target.value})} placeholder="Rua/Av..." />
