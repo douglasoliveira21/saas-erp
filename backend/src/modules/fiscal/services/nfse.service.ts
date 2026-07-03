@@ -26,10 +26,14 @@ export class NfseService {
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
 
     const config = await this.configRepository.findOne({ where: {} });
-    if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada');
+    if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada. Acesse Modulo Fiscal > Configuracao e preencha os dados.');
+    if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
+    if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
+
+    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
+    if (!baseUrl) throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Acesse Modulo Fiscal > Configuracao e preencha o campo "URL API NFS-e${config.environment !== 1 ? ' Teste' : ''}".`);
 
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
 
     try {
       invoice.status = 'processando';
