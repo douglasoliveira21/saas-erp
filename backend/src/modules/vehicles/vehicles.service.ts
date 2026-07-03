@@ -46,6 +46,7 @@ export class VehiclesService {
   }
 
   async findByTechnician(technicianId: string): Promise<Vehicle[]> {
+    if (!technicianId) return [];
     return this.vehiclesRepository.find({
       where: { technicianId, active: true },
       relations: ['technician'],
