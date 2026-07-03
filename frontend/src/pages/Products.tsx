@@ -93,7 +93,7 @@ export function Products() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Produtos</h1>
-        {isAdmin && (
+        {true && (
           <button onClick={openNew} className="btn btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Novo Produto
           </button>
@@ -122,7 +122,7 @@ export function Products() {
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Estoque</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Preço Venda</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Margem</th>
-                {isAdmin && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>}
+                {true && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -148,7 +148,7 @@ export function Products() {
                     </td>
                     <td className="table-cell text-gray-900 dark:text-white font-medium">R$ {Number(p.salePrice).toFixed(2)}</td>
                     <td className="table-cell"><span className="text-green-600 font-medium">{margin}%</span></td>
-                    {isAdmin && (
+                    {true && (
                       <td className="table-cell">
                         <div className="flex gap-2">
                           <button onClick={() => openEdit(p)} className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button>
@@ -260,3 +260,4 @@ export function Products() {
     </div>
   )
 }
+

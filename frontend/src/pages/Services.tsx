@@ -78,7 +78,7 @@ export function Services() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Serviços</h1>
-        {isAdmin && (
+        {true && (
           <button onClick={openNew} className="btn btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Novo Serviço
           </button>
@@ -107,7 +107,7 @@ export function Services() {
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Imposto</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Tempo Est.</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Margem</th>
-                {isAdmin && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>}
+                {true && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -130,7 +130,7 @@ export function Services() {
                       </div>
                     </td>
                     <td className="table-cell"><span className="text-green-600 font-medium">{margin}%</span></td>
-                    {isAdmin && (
+                    {true && (
                       <td className="table-cell">
                         <div className="flex gap-2">
                           <button onClick={() => openEdit(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button>
@@ -195,3 +195,4 @@ export function Services() {
     </div>
   )
 }
+
