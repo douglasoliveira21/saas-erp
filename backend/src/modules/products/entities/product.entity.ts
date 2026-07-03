@@ -20,7 +20,7 @@ export class Product {
   @Column({ unique: true, length: 100 })
   code: string;
 
-  @Column({ length: 100 })
+  @Column({ length: 100, default: 'Geral' })
   category: string;
 
   @Column({ type: 'int', default: 0 })

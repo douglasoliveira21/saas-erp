@@ -25,6 +25,12 @@ export class ProductsController {
     return this.productsService.create(createProductDto);
   }
 
+  @Post('import')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  importProducts(@Body() body: { products: any[] }) {
+    return this.productsService.importFromXml(body.products);
+  }
+
   @Get()
   findAll() {
     return this.productsService.findAll();

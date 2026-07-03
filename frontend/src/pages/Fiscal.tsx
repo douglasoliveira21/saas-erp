@@ -670,12 +670,33 @@ export function Fiscal() {
 
                             // Guardar itens parseados para envio
                             if (parsedItems.length > 0) {
-                              // Criar uma venda fake com os itens para o payload
                               (window as any).__nfeImportedItems = parsedItems
-                            }
 
-                            setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Confira os dados e emita.`)
-                            setTimeout(() => setSuccess(''), 5000)
+                              // Importar produtos automaticamente no cadastro
+                              try {
+                                const importPayload = parsedItems.map((item: any) => ({
+                                  name: item.name,
+                                  code: item.code,
+                                  quantity: item.quantity || 1,
+                                  purchasePrice: item.unitPrice || 0,
+                                  ncm: item.ncm || null,
+                                  cfop: item.cfop || null,
+                                  cest: item.cest || null,
+                                  unit: item.unit || 'UN',
+                                  supplier: emitName || 'Importação XML',
+                                }))
+                                const importRes = await api.post('/products/import', { products: importPayload })
+                                const { imported, skipped } = importRes.data
+                                setSuccess(`XML importado! ${imported} produto(s) cadastrado(s), ${skipped} atualizado(s). Redirecionando para Produtos...`)
+                                setTimeout(() => { window.location.href = '/products' }, 2000)
+                              } catch (importErr) {
+                                setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Erro ao cadastrar produtos automaticamente - faça manualmente.`)
+                                setTimeout(() => setSuccess(''), 5000)
+                              }
+                            } else {
+                              setSuccess(`XML importado! Nenhum item encontrado.`)
+                              setTimeout(() => setSuccess(''), 5000)
+                            }
                           } catch (err) {
                             setError('Erro ao ler o XML. Verifique se é um arquivo XML de NF-e válido.')
                           }
