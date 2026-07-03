@@ -261,8 +261,9 @@ export class NfeService {
 
     try {
       const now = new Date();
+      const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
       const pad = (n: number) => String(n).padStart(2, '0');
-      const dhEvento = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}-03:00`;
+      const dhEvento = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
       const nSeqEvento = '1';
       const eventId = 'ID110111' + chNFe + '01';
 
@@ -330,8 +331,10 @@ export class NfeService {
     const cnpj = (config.cnpj || '').replace(/\D/g, '').padStart(14, '0');
     const recipientDoc = (invoice.recipientCnpj || '').replace(/\D/g, '');
     const now = new Date();
+    // Converter para horário de Brasília (UTC-3)
+    const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
-    const dhEmi = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}-03:00`;
+    const dhEmi = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
     const tpAmb = config.environment;
     const tpNF = saleData?.tpNF || '1'; // 0=entrada, 1=saida
     const natOp = saleData?.natOp || (tpNF === '0' ? 'COMPRA' : 'VENDA');

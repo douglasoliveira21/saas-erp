@@ -247,9 +247,11 @@ export class NfseService {
     const cnpj = (config.cnpj || '').replace(/\D/g, '').padStart(14, '0');
     const recipientDoc = (invoice.recipientCnpj || '').replace(/\D/g, '');
     const now = new Date();
+    // Converter para horário de Brasília (UTC-3)
+    const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
-    const dhEmi = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}-03:00`;
-    const dCompet = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+    const dhEmi = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
+    const dCompet = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}`;
     const valor = Number(invoice.totalValue).toFixed(2);
     const aliquota = serviceData?.aliquota || 5;
     // TSDec1V2 = ate 1 digito inteiro + 2 decimais. Ex: 5.00, 2.50
@@ -291,8 +293,9 @@ export class NfseService {
 
   private buildCancelEventXml(invoice: Invoice, cnpj: string, reason: string): string {
     const now = new Date();
+    const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
-    const dhEvento = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}-03:00`;
+    const dhEvento = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
     // TSIdPedRegEvt: PRE + chNFSe(50) + tpEvento(6) = 59 chars (pattern: PRE[0-9]{56})
     const chNFSe = (invoice.accessKey || '').replace(/\D/g, '').slice(0, 50);
     const eventId = 'PRE' + chNFSe + '101101';
