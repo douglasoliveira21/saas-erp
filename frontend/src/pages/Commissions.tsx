@@ -32,6 +32,7 @@ export function Commissions() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [techFilter, setTechFilter] = useState('')
   const [monthFilter, setMonthFilter] = useState(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') })
   const [showModal, setShowModal] = useState(false)
   const [commissionType, setCommissionType] = useState<'avulsa' | 'fixa'>('avulsa')
@@ -79,6 +80,32 @@ export function Commissions() {
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
+  async function payAll() {
+    const pending = filtered.filter(c => c.status === 'pendente' || c.status === 'aprovada')
+    if (pending.length === 0) { setError('Nenhuma comissão pendente para pagar'); return }
+    const techName = techFilter ? technicians.find(t => t.id === techFilter)?.name : 'todos os técnicos'
+    if (!confirm(`Pagar ${pending.length} comissão(ões) de ${techName}? Total: R$ ${pending.reduce((s, c) => s + Number(c.amount), 0).toFixed(2)}`)) return
+    try {
+      for (const c of pending) {
+        await api.patch(`/commissions/${c.id}/pay`)
+      }
+      load()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao pagar em lote') }
+  }
+
+  async function cancelAll() {
+    const payable = filtered.filter(c => c.status === 'pendente' || c.status === 'aprovada')
+    if (payable.length === 0) { setError('Nenhuma comissão para cancelar'); return }
+    const techName = techFilter ? technicians.find(t => t.id === techFilter)?.name : 'todos os técnicos'
+    if (!confirm(`Cancelar ${payable.length} comissão(ões) de ${techName}?`)) return
+    try {
+      for (const c of payable) {
+        await api.patch(`/commissions/${c.id}/cancel`)
+      }
+      load()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar em lote') }
+  }
+
   async function saveAvulsa() {
     if (!form.technicianId || !form.description) { setError('Tecnico e descricao obrigatorios'); return }
     setSaving(true)
@@ -113,9 +140,10 @@ export function Commissions() {
     const matchSearch = c.technician?.name?.toLowerCase().includes(search.toLowerCase()) ||
       (c.description || '').toLowerCase().includes(search.toLowerCase())
     const matchStatus = !statusFilter || c.status === statusFilter
+    const matchTech = !techFilter || c.technician?.id === techFilter
     const matchUser = isTecnico ? c.technician?.id === user?.id : true
     const matchMonth = !monthFilter || (c.createdAt && c.createdAt.startsWith(monthFilter))
-    return matchSearch && matchStatus && matchUser && matchMonth
+    return matchSearch && matchStatus && matchTech && matchUser && matchMonth
   })
 
   const totalPendente = filtered.filter(c => c.status === 'pendente').reduce((s, c) => s + Number(c.amount), 0)
@@ -147,13 +175,21 @@ export function Commissions() {
       </div>
 
       <div className="card mb-6">
-        <div className="flex gap-4 flex-wrap">
+        <div className="flex gap-4 flex-wrap items-end">
           <div>
             <select className="input w-48" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
               <option value="">Todos os meses</option>
               {monthOptions.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
             </select>
           </div>
+          {canManage && (
+            <div>
+              <select className="input w-48" value={techFilter} onChange={e => setTechFilter(e.target.value)}>
+                <option value="">Todos os técnicos</option>
+                {technicians.filter(t => (t as any).role === 'tecnico').map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="relative flex-1 min-w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-10" placeholder="Buscar por tecnico ou descricao..." value={search} onChange={e => setSearch(e.target.value)} />
@@ -166,6 +202,21 @@ export function Commissions() {
             </select>
           </div>
         </div>
+
+        {/* Ações em lote */}
+        {canManage && filtered.some(c => c.status === 'pendente' || c.status === 'aprovada') && (
+          <div className="flex gap-3 mt-4 pt-4 border-t border-gray-100">
+            <button onClick={payAll} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 transition-colors">
+              <DollarSign className="w-4 h-4" /> Pagar Todas ({filtered.filter(c => c.status === 'pendente' || c.status === 'aprovada').length})
+            </button>
+            <button onClick={cancelAll} className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-xl text-sm font-medium hover:bg-red-200 transition-colors">
+              <XCircle className="w-4 h-4" /> Cancelar Todas
+            </button>
+            <span className="text-sm text-gray-500 self-center ml-2">
+              {techFilter ? `Filtrado: ${technicians.find(t => t.id === techFilter)?.name}` : 'Todos os técnicos'}
+            </span>
+          </div>
+        )}
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}

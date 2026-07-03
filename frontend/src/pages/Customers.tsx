@@ -27,7 +27,7 @@ const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', address: '', s
 
 export function Customers() {
   const { isAdmin, isFinanceiro } = useAuth()
-  const canEdit = isAdmin || isFinanceiro
+  const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
