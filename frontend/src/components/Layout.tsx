@@ -53,8 +53,8 @@ export function Layout() {
       { name: 'Contratos', href: '/contracts', icon: ScrollText, roles: ['admin', 'financeiro'] },
     ]},
     { title: 'Operacional', items: [
-      { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro'] },
-      { name: 'Serviços', href: '/services', icon: Wrench, roles: ['admin'] },
+      { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Serviços', href: '/services', icon: Wrench, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Rotas Externas', href: '/routes', icon: Navigation, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'] },
     ]},
