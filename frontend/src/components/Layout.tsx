@@ -109,20 +109,19 @@ export function Layout() {
     )
   }
 
-  function SidebarContent({ onClick }: { onClick?: () => void }) {
-    return (
-      <>
-        {/* Logo */}
-        <div className="flex items-center h-16 px-5 border-b border-gray-100">
-          <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-sm">G</span>
-          </div>
-          <span className="ml-3 text-[15px] font-bold text-gray-900 tracking-tight">Gestão TI</span>
+  const sidebarContent = (onClick?: () => void) => (
+    <>
+      {/* Logo */}
+      <div className="flex items-center h-16 px-5 border-b border-gray-100 flex-shrink-0">
+        <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-sm">
+          <span className="text-white font-bold text-sm">G</span>
         </div>
+        <span className="ml-3 text-[15px] font-bold text-gray-900 tracking-tight">Gestão TI</span>
+      </div>
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-5 space-y-6 overflow-y-auto">
-          {filteredSections.map(section => {
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-5 space-y-6 overflow-y-auto min-h-0">
+        {filteredSections.map(section => {
             if (section.expandable) {
               const isAnyActive = section.items.some(i => location.pathname === i.href)
               const isVendas = section.expandId === 'vendas'
@@ -181,7 +180,6 @@ export function Layout() {
         </div>
       </>
     )
-  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
@@ -192,13 +190,13 @@ export function Layout() {
           <button onClick={() => setSidebarOpen(false)} className="absolute top-5 right-4 text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
-          <SidebarContent onClick={() => setSidebarOpen(false)} />
+          {sidebarContent(() => setSidebarOpen(false))}
         </div>
       </div>
 
       {/* Desktop sidebar */}
       <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-[264px] lg:flex-col bg-white border-r border-gray-100">
-        <SidebarContent />
+        {sidebarContent()}
       </aside>
 
       {/* Main */}
