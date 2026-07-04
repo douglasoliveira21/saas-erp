@@ -53,6 +53,13 @@ export function Financial() {
   const [flowType, setFlowType] = useState('')
   const [flowCategory, setFlowCategory] = useState('')
   const [flowForecast, setFlowForecast] = useState('')
+  const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [expenseDescription, setExpenseDescription] = useState('')
+  const [expenseValue, setExpenseValue] = useState('')
+  const [expenseCategory, setExpenseCategory] = useState('outros')
+  const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [expenseIsForecast, setExpenseIsForecast] = useState(false)
+  const [savingExpense, setSavingExpense] = useState(false)
 
   // Card Fees
   const [cardFees, setCardFees] = useState<CardFee[]>([])
@@ -165,6 +172,26 @@ export function Financial() {
       setFeeOperator(''); setFeePercent(''); setFeeDays('')
       loadTab()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao salvar') } finally { setSavingFee(false) }
+  }
+
+  async function saveExpense() {
+    if (!expenseDescription.trim() || !expenseValue || Number(expenseValue) <= 0) { setError('Preencha descrição e valor da despesa'); return }
+    setSavingExpense(true)
+    try {
+      await api.post('/financial/movements', {
+        type: 'despesa',
+        category: expenseCategory,
+        description: expenseDescription.trim(),
+        value: Number(expenseValue),
+        date: expenseDate,
+        isForecast: expenseIsForecast,
+      })
+      setShowExpenseModal(false)
+      setExpenseDescription(''); setExpenseValue(''); setExpenseCategory('outros')
+      setExpenseDate(new Date().toISOString().split('T')[0]); setExpenseIsForecast(false)
+      loadTab()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao salvar despesa') }
+    finally { setSavingExpense(false) }
   }
 
   async function deleteFee(id: string) {
@@ -422,7 +449,7 @@ export function Financial() {
             <div className="space-y-6">
               {/* Flow Summary */}
               {flowData && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <div className="card flex items-center gap-3">
                     <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><TrendingUp className="w-5 h-5 text-green-600" /></div>
                     <div><p className="text-xs text-gray-500">Receitas Realizadas</p><p className="text-lg font-bold text-green-600">{formatCurrency(flowData.realized?.receitas || 0)}</p></div>
@@ -435,6 +462,18 @@ export function Financial() {
                     <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><DollarSign className="w-5 h-5 text-blue-600" /></div>
                     <div><p className="text-xs text-gray-500">Saldo</p><p className="text-lg font-bold text-blue-600">{formatCurrency(flowData.realized?.saldo || 0)}</p></div>
                   </div>
+                  <div className="card flex items-center justify-center">
+                    <button onClick={() => setShowExpenseModal(true)} className="btn btn-primary flex items-center gap-2 text-sm w-full justify-center">
+                      <TrendingUp className="w-4 h-4 rotate-180" /> Adicionar Despesa
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!flowData && (
+                <div className="flex justify-end mb-4">
+                  <button onClick={() => setShowExpenseModal(true)} className="btn btn-primary flex items-center gap-2 text-sm">
+                    <TrendingUp className="w-4 h-4 rotate-180" /> Adicionar Despesa
+                  </button>
                 </div>
               )}
 
@@ -634,6 +673,60 @@ export function Financial() {
               <button onClick={() => setShowFeeModal(false)} className="btn btn-primary bg-gray-200 text-gray-700 hover:bg-gray-300">Cancelar</button>
               <button onClick={saveFee} disabled={savingFee} className="btn btn-primary flex items-center gap-2 disabled:opacity-50">
                 {savingFee ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />} Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expense Modal */}
+      {showExpenseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Adicionar Despesa</h2>
+              <button onClick={() => setShowExpenseModal(false)}><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição *</label>
+                <input className="input" value={expenseDescription} onChange={e => setExpenseDescription(e.target.value)} placeholder="Ex: Aluguel, Conta de luz, Material..." />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor (R$) *</label>
+                <input className="input" type="number" step="0.01" min="0.01" value={expenseValue} onChange={e => setExpenseValue(e.target.value)} placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Categoria *</label>
+                <select className="input" value={expenseCategory} onChange={e => setExpenseCategory(e.target.value)}>
+                  <option value="aluguel">Aluguel</option>
+                  <option value="energia">Energia</option>
+                  <option value="internet">Internet/Telecom</option>
+                  <option value="salarios">Salários</option>
+                  <option value="impostos">Impostos</option>
+                  <option value="compra_mercadoria">Compra de Mercadoria</option>
+                  <option value="manutencao">Manutenção</option>
+                  <option value="combustivel">Combustível</option>
+                  <option value="marketing">Marketing</option>
+                  <option value="software">Software/Licenças</option>
+                  <option value="comissao">Comissão</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data *</label>
+                <input className="input" type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="expForecast" checked={expenseIsForecast} onChange={e => setExpenseIsForecast(e.target.checked)} className="w-4 h-4 text-primary-600 rounded" />
+                <label htmlFor="expForecast" className="text-sm text-gray-700 dark:text-gray-300">Despesa prevista (não realizada ainda)</label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
+              <button onClick={() => setShowExpenseModal(false)} className="btn btn-primary bg-gray-200 text-gray-700 hover:bg-gray-300">Cancelar</button>
+              <button onClick={saveExpense} disabled={savingExpense || !expenseDescription.trim() || !expenseValue || Number(expenseValue) <= 0} className="btn btn-primary flex items-center gap-2 disabled:opacity-50">
+                {savingExpense ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />} Salvar Despesa
               </button>
             </div>
           </div>

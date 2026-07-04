@@ -35,6 +35,9 @@ export class Vehicle {
   @Column({ type: 'varchar', length: 50, nullable: true })
   fuel: string;
 
+  @Column({ name: 'vehicle_type', type: 'varchar', length: 20, nullable: true, default: 'carro' })
+  vehicleType: string;
+
   @Column({ name: 'technician_id', type: 'uuid', nullable: true })
   technicianId: string;
 

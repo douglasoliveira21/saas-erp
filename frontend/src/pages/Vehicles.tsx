@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, X, Check, Car, Trash2, Edit, User } from 'lucide-react'
+import { Plus, Search, X, Check, Car, Trash2, Edit, User, Bike, Truck } from 'lucide-react'
+
+type VehicleType = 'carro' | 'moto' | 'caminhao' | 'van'
 
 interface Vehicle {
   id: string
@@ -12,6 +14,7 @@ interface Vehicle {
   year: number
   yearModel: number
   fuel: string
+  vehicleType: VehicleType
   technicianId: string
   technician: { id: string; name: string } | null
   ratePerKm: number
@@ -45,9 +48,30 @@ export function Vehicles() {
   const [year, setYear] = useState('')
   const [yearModel, setYearModel] = useState('')
   const [fuel, setFuel] = useState('')
+  const [vehicleType, setVehicleType] = useState<VehicleType>('carro')
   const [technicianId, setTechnicianId] = useState('')
   const [ratePerKm, setRatePerKm] = useState('1.30')
   const [observations, setObservations] = useState('')
+
+  const vehicleTypeLabels: Record<VehicleType, string> = { carro: 'Carro', moto: 'Moto', caminhao: 'Caminhão', van: 'Van' }
+
+  function getVehicleIcon(type: VehicleType) {
+    switch (type) {
+      case 'moto': return <Bike className="w-5 h-5 text-purple-600" />
+      case 'caminhao': return <Truck className="w-5 h-5 text-orange-600" />
+      case 'van': return <Truck className="w-5 h-5 text-teal-600" />
+      default: return <Car className="w-5 h-5 text-blue-600" />
+    }
+  }
+
+  function getVehicleIconBg(type: VehicleType) {
+    switch (type) {
+      case 'moto': return 'bg-purple-100'
+      case 'caminhao': return 'bg-orange-100'
+      case 'van': return 'bg-teal-100'
+      default: return 'bg-blue-100'
+    }
+  }
 
   useEffect(() => { load() }, [])
 
@@ -68,7 +92,7 @@ export function Vehicles() {
 
   function resetForm() {
     setPlate(''); setBrand(''); setModel(''); setColor('')
-    setYear(''); setYearModel(''); setFuel('')
+    setYear(''); setYearModel(''); setFuel(''); setVehicleType('carro')
     setTechnicianId(''); setRatePerKm('1.30'); setObservations('')
     setError('')
   }
@@ -88,6 +112,7 @@ export function Vehicles() {
     setYear(v.year ? String(v.year) : '')
     setYearModel(v.yearModel ? String(v.yearModel) : '')
     setFuel(v.fuel || '')
+    setVehicleType(v.vehicleType || 'carro')
     setTechnicianId(v.technicianId || '')
     setRatePerKm(String(v.ratePerKm))
     setObservations(v.observations || '')
@@ -134,6 +159,7 @@ export function Vehicles() {
         year: year ? parseInt(year) : null,
         yearModel: yearModel ? parseInt(yearModel) : null,
         fuel: fuel || null,
+        vehicleType,
         technicianId: technicianId || null,
         ratePerKm: Number(ratePerKm),
         observations: observations || null,
@@ -216,12 +242,13 @@ export function Vehicles() {
             <div key={v.id} className="card hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Car className="w-5 h-5 text-blue-600" />
+                  <div className={`w-10 h-10 ${getVehicleIconBg(v.vehicleType || 'carro')} rounded-lg flex items-center justify-center`}>
+                    {getVehicleIcon(v.vehicleType || 'carro')}
                   </div>
                   <div>
                     <div className="font-bold text-gray-900 dark:text-white text-lg">{v.plate}</div>
                     <div className="text-sm text-gray-500">{[v.brand, v.model].filter(Boolean).join(' ') || 'Sem modelo'}</div>
+                    {v.vehicleType && <div className="text-xs text-gray-400">{vehicleTypeLabels[v.vehicleType]}</div>}
                   </div>
                 </div>
                 <div className="flex gap-1">
@@ -316,6 +343,17 @@ export function Vehicles() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ano Modelo</label>
                   <input className="input" type="number" value={yearModel} onChange={e => setYearModel(e.target.value)} />
                 </div>
+              </div>
+
+              {/* Tipo de veículo */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo do Veículo *</label>
+                <select className="input" value={vehicleType} onChange={e => setVehicleType(e.target.value as VehicleType)}>
+                  <option value="carro">🚗 Carro</option>
+                  <option value="moto">🏍️ Moto</option>
+                  <option value="caminhao">🚛 Caminhão</option>
+                  <option value="van">🚐 Van</option>
+                </select>
               </div>
 
               {/* Técnico */}

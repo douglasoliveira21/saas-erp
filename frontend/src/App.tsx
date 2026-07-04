@@ -23,6 +23,14 @@ import { Fiscal } from './pages/Fiscal'
 import { Financial } from './pages/Financial'
 import { Payments } from './pages/Payments'
 import { Vehicles } from './pages/Vehicles'
+import { Purchases } from './pages/Purchases'
+import { Pdv } from './pages/Pdv'
+import { Orcamentos } from './pages/Orcamentos'
+import { PreVendas } from './pages/PreVendas'
+import { VendasRecorrentes } from './pages/VendasRecorrentes'
+import { Cashback } from './pages/Cashback'
+import { Fidelidade } from './pages/Fidelidade'
+import { Assinaturas } from './pages/Assinaturas'
 
 function App() {
   return (
@@ -53,6 +61,14 @@ function App() {
             <Route path="/fiscal" element={<Fiscal />} />
             <Route path="/financeiro" element={<Financial />} />
             <Route path="/pagamentos" element={<Payments />} />
+            <Route path="/compras" element={<Purchases />} />
+            <Route path="/pdv" element={<Pdv />} />
+            <Route path="/orcamentos" element={<Orcamentos />} />
+            <Route path="/pre-vendas" element={<PreVendas />} />
+            <Route path="/vendas-recorrentes" element={<VendasRecorrentes />} />
+            <Route path="/cashback" element={<Cashback />} />
+            <Route path="/fidelidade" element={<Fidelidade />} />
+            <Route path="/assinaturas" element={<Assinaturas />} />
           </Route>
         </Routes>
       </AuthProvider>

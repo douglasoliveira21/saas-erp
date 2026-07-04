@@ -23,11 +23,16 @@ import {
   PiggyBank,
   Search,
   Bell,
+  ShoppingBag,
+  Receipt,
+  Star,
+  Repeat,
+  ClipboardList,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 interface NavItem { name: string; href: string; icon: any; roles: string[] }
-interface NavSection { title: string; items: NavItem[]; expandable?: boolean }
+interface NavSection { title: string; items: NavItem[]; expandable?: boolean; expandId?: string }
 
 export function Layout() {
   const { user, logout } = useAuth()
@@ -35,6 +40,9 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [financeiroOpen, setFinanceiroOpen] = useState(
     ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports'].includes(location.pathname)
+  )
+  const [vendasOpen, setVendasOpen] = useState(
+    ['/sales', '/sales/new', '/pdv', '/orcamentos', '/pre-vendas', '/vendas-recorrentes', '/cashback', '/fidelidade', '/assinaturas'].includes(location.pathname)
   )
   const [clock, setClock] = useState(new Date())
 
@@ -49,12 +57,22 @@ export function Layout() {
     ]},
     { title: 'Comercial', items: [
       { name: 'Clientes', href: '/customers', icon: Users, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Contratos', href: '/contracts', icon: ScrollText, roles: ['admin', 'financeiro'] },
+    ]},
+    { title: 'Vendas', expandable: true, expandId: 'vendas', items: [
+      { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'PDV', href: '/pdv', icon: Receipt, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Orçamentos', href: '/orcamentos', icon: FileText, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Pré-venda', href: '/pre-vendas', icon: ClipboardList, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Venda Recorrente', href: '/vendas-recorrentes', icon: Repeat, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Cashback', href: '/cashback', icon: DollarSign, roles: ['admin', 'financeiro'] },
+      { name: 'Fidelidade', href: '/fidelidade', icon: Star, roles: ['admin', 'financeiro'] },
+      { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: ['admin', 'financeiro'] },
     ]},
     { title: 'Operacional', items: [
       { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Serviços', href: '/services', icon: Wrench, roles: ['admin', 'financeiro', 'tecnico'] },
+      { name: 'Compras', href: '/compras', icon: ShoppingBag, roles: ['admin', 'financeiro'] },
       { name: 'Rotas Externas', href: '/routes', icon: Navigation, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'] },
     ]},
@@ -107,20 +125,25 @@ export function Layout() {
           {filteredSections.map(section => {
             if (section.expandable) {
               const isAnyActive = section.items.some(i => location.pathname === i.href)
+              const isVendas = section.expandId === 'vendas'
+              const isOpen = isVendas ? vendasOpen : financeiroOpen
+              const setOpen = isVendas ? setVendasOpen : setFinanceiroOpen
+              const SectionIcon = isVendas ? ShoppingCart : Wallet
+              const sectionLabel = section.title
               return (
                 <div key={section.title}>
                   <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.08em]">{section.title}</p>
-                  <button onClick={() => setFinanceiroOpen(!financeiroOpen)}
+                  <button onClick={() => setOpen(!isOpen)}
                     className={`w-full flex items-center justify-between px-3 py-2 text-[13px] font-medium rounded-xl transition-all duration-200 ${
-                      isAnyActive && !financeiroOpen ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      isAnyActive && !isOpen ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                     }`}>
                     <span className="flex items-center gap-3">
-                      <Wallet className={`w-[18px] h-[18px] ${isAnyActive ? 'text-primary-500' : 'text-gray-400'}`} />
-                      Financeiro
+                      <SectionIcon className={`w-[18px] h-[18px] ${isAnyActive ? 'text-primary-500' : 'text-gray-400'}`} />
+                      {sectionLabel}
                     </span>
-                    {financeiroOpen ? <ChevronDown className="w-4 h-4 text-gray-300" /> : <ChevronRight className="w-4 h-4 text-gray-300" />}
+                    {isOpen ? <ChevronDown className="w-4 h-4 text-gray-300" /> : <ChevronRight className="w-4 h-4 text-gray-300" />}
                   </button>
-                  <div className={`overflow-hidden transition-all duration-300 ${financeiroOpen ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
+                  <div className={`overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
                     <div className="ml-4 pl-3 border-l-2 border-gray-100 space-y-0.5">
                       {section.items.map(item => <NavLink key={item.name} item={item} onClick={onClick} />)}
                     </div>

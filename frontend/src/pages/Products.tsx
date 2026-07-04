@@ -129,7 +129,8 @@ export function Products() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} className="table-cell text-center text-gray-500">Nenhum produto encontrado</td></tr>
               ) : filtered.map(p => {
-                const margin = p.purchasePrice > 0 ? ((p.salePrice - p.purchasePrice) / p.purchasePrice * 100).toFixed(0) : 0
+                const taxOnSale = p.salePrice * (p.taxPercentage || 0) / 100
+                const margin = p.purchasePrice > 0 ? ((p.salePrice - p.purchasePrice - taxOnSale) / p.purchasePrice * 100).toFixed(0) : 0
                 const lowStock = p.quantity <= p.minStock
                 return (
                   <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">

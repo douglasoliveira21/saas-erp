@@ -34,6 +34,7 @@ export function Commissions() {
   const [statusFilter, setStatusFilter] = useState('')
   const [techFilter, setTechFilter] = useState('')
   const [monthFilter, setMonthFilter] = useState(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') })
+  const [typeFilter, setTypeFilter] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [commissionType, setCommissionType] = useState<'avulsa' | 'fixa'>('avulsa')
   const [form, setForm] = useState({ technicianId: '', description: '', baseValue: 0, percentage: 10, observations: '' })
@@ -141,9 +142,10 @@ export function Commissions() {
       (c.description || '').toLowerCase().includes(search.toLowerCase())
     const matchStatus = !statusFilter || c.status === statusFilter
     const matchTech = !techFilter || c.technician?.id === techFilter
+    const matchType = !typeFilter || c.type === typeFilter
     const matchUser = isTecnico ? c.technician?.id === user?.id : true
     const matchMonth = !monthFilter || (c.createdAt && c.createdAt.startsWith(monthFilter))
-    return matchSearch && matchStatus && matchTech && matchUser && matchMonth
+    return matchSearch && matchStatus && matchTech && matchType && matchUser && matchMonth
   })
 
   const totalPendente = filtered.filter(c => c.status === 'pendente').reduce((s, c) => s + Number(c.amount), 0)
@@ -185,11 +187,19 @@ export function Commissions() {
           {canManage && (
             <div>
               <select className="input w-48" value={techFilter} onChange={e => setTechFilter(e.target.value)}>
-                <option value="">Todos os técnicos</option>
-                {technicians.filter(t => (t as any).role === 'tecnico').map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value="">Todos os usuários</option>
+                {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
           )}
+          <div>
+            <select className="input w-40" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+              <option value="">Todos os tipos</option>
+              <option value="venda">Venda</option>
+              <option value="fixa">Fixa</option>
+              <option value="avulsa">Avulsa</option>
+            </select>
+          </div>
           <div className="relative flex-1 min-w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input className="input pl-10" placeholder="Buscar por tecnico ou descricao..." value={search} onChange={e => setSearch(e.target.value)} />

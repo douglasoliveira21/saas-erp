@@ -1052,8 +1052,41 @@ function FiscalConfigForm() {
   const [cfg, setCfg] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
 
-  useEffect(() => { api.get('/fiscal/config').then(r => setCfg(r.data)).catch(() => setCfg({})) }, [])
+  useEffect(() => { api.get('/fiscal/config').then(r => { setCfg(r.data); if (r.data?.logoUrl) setLogoPreview(r.data.logoUrl) }).catch(() => setCfg({})) }, [])
+
+  async function save() {
+    setSaving(true); setMsg('')
+    try { await api.patch('/fiscal/config', cfg); setMsg('Configuracao salva!') }
+    catch { setMsg('Erro ao salvar') }
+    finally { setSaving(false) }
+  }
+
+  async function uploadLogo() {
+    if (!logoFile) return
+    setUploadingLogo(true); setMsg('')
+    try {
+      const fd = new FormData()
+      fd.append('logo', logoFile)
+      const res = await api.post('/fiscal/config/logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      setLogoPreview(res.data.logoUrl || URL.createObjectURL(logoFile))
+      setCfg({ ...cfg, logoUrl: res.data.logoUrl })
+      setMsg('Logo enviada com sucesso!')
+      setLogoFile(null)
+    } catch { setMsg('Erro ao enviar logo') }
+    finally { setUploadingLogo(false) }
+  }
+
+  function handleLogoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) {
+      setLogoFile(file)
+      setLogoPreview(URL.createObjectURL(file))
+    }
+  }
 
   async function save() {
     setSaving(true); setMsg('')
@@ -1068,6 +1101,33 @@ function FiscalConfigForm() {
     <div className="card space-y-6">
       <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2"><Settings className="w-5 h-5" /> Configuracao Fiscal</h3>
       {msg && <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm">{msg}</div>}
+
+      {/* Logo da Nota Fiscal */}
+      <div className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600">
+        <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-3">Logo da Empresa (Nota Fiscal)</h4>
+        <div className="flex items-center gap-4">
+          {logoPreview && (
+            <div className="w-24 h-24 border border-gray-200 rounded-lg overflow-hidden bg-white flex items-center justify-center">
+              <img src={logoPreview} alt="Logo" className="max-w-full max-h-full object-contain" />
+            </div>
+          )}
+          <div className="flex-1 space-y-2">
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml"
+              onChange={handleLogoSelect}
+              className="input text-sm"
+            />
+            <p className="text-xs text-gray-400">Formatos aceitos: PNG, JPG, SVG. Tamanho recomendado: 200x200px</p>
+            {logoFile && (
+              <button onClick={uploadLogo} disabled={uploadingLogo} className="btn btn-primary text-sm flex items-center gap-2">
+                {uploadingLogo ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Upload className="w-4 h-4" />}
+                Enviar Logo
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>

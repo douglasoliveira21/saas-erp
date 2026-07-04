@@ -114,7 +114,8 @@ export function Services() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} className="table-cell text-center text-gray-500">Nenhum serviço encontrado</td></tr>
               ) : filtered.map(s => {
-                const margin = s.operationalCost > 0 ? ((s.salePrice - s.operationalCost) / s.salePrice * 100).toFixed(0) : 100
+                const taxOnService = s.salePrice * (s.taxPercentage || 0) / 100
+                const margin = s.operationalCost > 0 ? ((s.salePrice - s.operationalCost - taxOnService) / s.salePrice * 100).toFixed(0) : 100
                 return (
                   <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                     <td className="table-cell">

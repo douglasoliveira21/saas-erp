@@ -28,14 +28,51 @@ export function NewSale() {
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
+  const [discountPct, setDiscountPct] = useState(0)
+  const [orderNumber, setOrderNumber] = useState('')
 
   useEffect(() => {
     Promise.all([
       api.get('/customers').then(r => setCustomers(r.data)),
       api.get('/products').then(r => setProducts(r.data)),
       api.get('/services').then(r => setServices(r.data)),
-    ])
+    ]).then(() => {
+      // Check if editing an existing sale
+      const params = new URLSearchParams(window.location.search)
+      const editId = params.get('edit')
+      if (editId) {
+        loadSaleForEdit(editId)
+      }
+    })
   }, [])
+
+  async function loadSaleForEdit(saleId: string) {
+    try {
+      const res = await api.get('/sales/' + saleId)
+      const sale = res.data
+      setEditingSaleId(saleId)
+      setCustomerId(sale.customer?.id || '')
+      setPaymentMethod(sale.paymentMethod || 'pix')
+      setInstallments(sale.installments || 1)
+      setSaleType(sale.saleType || 'eventual')
+      setObservations(sale.observations || '')
+      setCommissionPct(sale.commissionPercentage || 10)
+      if (sale.items?.length > 0) {
+        setItems(sale.items.map((i: any) => ({
+          type: i.productId ? 'product' : 'service',
+          id: i.productId || i.serviceId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          taxPercentage: Number(i.taxPercentage || 0),
+          costPrice: Number(i.costPrice || 0),
+        })))
+      }
+    } catch {
+      setError('Erro ao carregar venda para edição')
+    }
+  }
 
   function addItem() {
     if (!selectedId) { setError('Selecione um item'); return }
@@ -54,13 +91,30 @@ export function NewSale() {
 
   const subtotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
   const taxAmount = items.reduce((s, i) => s + (i.unitPrice * i.quantity * i.taxPercentage / 100), 0)
-  const totalAmount = subtotal + taxAmount
+  const discountValue = subtotal * discountPct / 100
+  const totalAmount = subtotal + taxAmount - discountValue
   const netProfit = items.reduce((s, i) => s + ((i.unitPrice - i.costPrice) * i.quantity), 0)
   const commissionAmount = totalAmount * commissionPct / 100
 
   async function submit() {
     if (!customerId) { setError('Selecione um cliente'); return }
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
+
+    // Validação: data de vencimento não pode ser menor que 5 dias
+    if (paymentMethod === 'boleto') {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const firstDueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay)
+      if (firstDueDate < today) {
+        firstDueDate.setMonth(firstDueDate.getMonth() + 1)
+      }
+      const diffDays = Math.ceil((firstDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      if (diffDays < 5) {
+        setError('A data de vencimento deve ser no mínimo 5 dias a partir de hoje')
+        return
+      }
+    }
+
     setSaving(true)
     try {
       const payload = {
@@ -70,10 +124,12 @@ export function NewSale() {
         installments: paymentMethod === 'boleto' ? installments : 1,
         dueDay: paymentMethod === 'boleto' ? dueDay : null,
         saleType,
-        observations,
+        observations: orderNumber ? `Pedido #${orderNumber}${observations ? ' | ' + observations : ''}` : observations,
         subtotal,
         taxAmount,
         totalAmount,
+        discount: discountPct,
+        discountValue,
         netProfit,
         commissionPercentage: commissionPct,
         commissionAmount,
@@ -89,7 +145,11 @@ export function NewSale() {
           netProfit: (i.unitPrice - i.costPrice) * i.quantity,
         }))
       }
-      await api.post('/sales', payload)
+      if (editingSaleId) {
+        await api.patch('/sales/' + editingSaleId, payload)
+      } else {
+        await api.post('/sales', payload)
+      }
       navigate('/sales')
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao registrar venda') }
     finally { setSaving(false) }
@@ -99,7 +159,7 @@ export function NewSale() {
     <div>
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => navigate('/sales')} className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Nova Venda</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{editingSaleId ? 'Editar Venda' : 'Nova Venda'}</h1>
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
@@ -168,6 +228,17 @@ export function NewSale() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Observacoes</label>
               <textarea className="input" rows={2} value={observations} onChange={e => setObservations(e.target.value)} />
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nº Pedido</label>
+                <input className="input" value={orderNumber} onChange={e => setOrderNumber(e.target.value)} placeholder="Número do pedido real (opcional)" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Desconto (%)</label>
+                <input className="input" type="number" min="0" max="100" step="0.5" value={discountPct} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)} placeholder="0" />
+              </div>
+            </div>
           </div>
 
           {/* Adicionar itens */}
@@ -223,6 +294,7 @@ export function NewSale() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-gray-600">Subtotal:</span><span>R$ {subtotal.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-gray-600">Impostos:</span><span>R$ {taxAmount.toFixed(2)}</span></div>
+              {discountPct > 0 && <div className="flex justify-between text-red-500"><span>Desconto ({discountPct}%):</span><span>-R$ {discountValue.toFixed(2)}</span></div>}
               <div className="flex justify-between font-bold text-base border-t pt-2"><span>Total:</span><span className="text-green-600">R$ {totalAmount.toFixed(2)}</span></div>
               <div className="flex justify-between text-gray-500 border-t pt-2"><span>Lucro liquido:</span><span>R$ {netProfit.toFixed(2)}</span></div>
               <div className="flex justify-between text-gray-500 items-center">
@@ -240,7 +312,7 @@ export function NewSale() {
 
           <button onClick={submit} disabled={saving || items.length === 0} className="btn btn-primary w-full flex items-center justify-center gap-2 py-3">
             {saving ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" /> : <Check className="w-5 h-5" />}
-            Registrar Venda
+            {editingSaleId ? 'Salvar Alterações' : 'Registrar Venda'}
           </button>
         </div>
       </div>

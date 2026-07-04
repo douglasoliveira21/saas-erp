@@ -49,6 +49,27 @@ export class Contract {
   @Column({ type: 'text', nullable: true })
   observations: string;
 
+  @Column({ name: 'adjustment_index', type: 'varchar', length: 20, nullable: true })
+  adjustmentIndex: string;
+
+  @Column({ name: 'adjustment_percentage', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  adjustmentPercentage: number;
+
+  @Column({ name: 'auto_charge', type: 'boolean', default: false })
+  autoCharge: boolean;
+
+  @Column({ name: 'charge_day', type: 'int', nullable: true, default: 10 })
+  chargeDay: number;
+
+  @Column({ type: 'text', nullable: true })
+  equipments: string;
+
+  @Column({ name: 'renewal_history', type: 'text', nullable: true })
+  renewalHistory: string;
+
+  @Column({ name: 'last_renewal_date', type: 'date', nullable: true })
+  lastRenewalDate: string;
+
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string;
 

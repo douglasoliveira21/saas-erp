@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, Receipt, CreditCard } from 'lucide-react'
+import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, Receipt, CreditCard, Edit } from 'lucide-react'
 
 interface Sale {
   id: string
@@ -201,6 +201,9 @@ export function Sales() {
                   <td className="table-cell">
                     <div className="flex gap-2">
                       <button onClick={() => setSelected(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver detalhes"><Eye className="w-4 h-4" /></button>
+                      {(isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status) && (
+                        <Link to={`/sales/new?edit=${s.id}`} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar Venda"><Edit className="w-4 h-4" /></Link>
+                      )}
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'pago', 'finalizado'].includes(s.status) && (
                         <button onClick={() => window.location.href = '/fiscal?emit=' + s.id} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Emitir Nota Fiscal"><FileText className="w-4 h-4" /></button>
                       )}

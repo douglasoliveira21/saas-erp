@@ -41,6 +41,11 @@ export class ContractsController {
       slaInternal: parseInt(body.slaInternal) || 4,
       slaExternal: parseInt(body.slaExternal) || 24,
       observations: body.observations,
+      adjustmentIndex: body.adjustmentIndex || null,
+      adjustmentPercentage: body.adjustmentPercentage ? parseFloat(body.adjustmentPercentage) : null,
+      autoCharge: body.autoCharge === 'true' || body.autoCharge === true,
+      chargeDay: body.chargeDay ? parseInt(body.chargeDay) : 10,
+      equipments: body.equipments || null,
       createdBy: req.user.id,
     };
 
@@ -97,6 +102,9 @@ export class ContractsController {
     if (dto.monthlyValue) dto.monthlyValue = parseFloat(dto.monthlyValue);
     if (dto.slaInternal) dto.slaInternal = parseInt(dto.slaInternal);
     if (dto.slaExternal) dto.slaExternal = parseInt(dto.slaExternal);
+    if (dto.adjustmentPercentage) dto.adjustmentPercentage = parseFloat(dto.adjustmentPercentage);
+    if (dto.chargeDay) dto.chargeDay = parseInt(dto.chargeDay);
+    if (dto.autoCharge !== undefined) dto.autoCharge = dto.autoCharge === 'true' || dto.autoCharge === true;
     if (file) {
       dto.fileName = file.originalname;
       dto.filePath = file.path;

@@ -20,6 +20,8 @@ export function Routes() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [userFilter, setUserFilter] = useState('')
+  const [allUsers, setAllUsers] = useState<{ id: string; name: string }[]>([])
   const [monthFilter, setMonthFilter] = useState(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') })
   const [showModal, setShowModal] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -46,14 +48,16 @@ export function Routes() {
 
   async function load() {
     try {
-      const [r, s, v] = await Promise.all([
+      const [r, s, v, u] = await Promise.all([
         api.get('/routes'),
         api.get('/routes/summary'),
         api.get('/vehicles/by-technician/' + (user?.id || '')).catch(() => ({ data: [] })),
+        canManage ? api.get('/users').then(res => ({ data: res.data.filter((u: any) => u.active) })) : Promise.resolve({ data: [] }),
       ])
       setRoutes(r.data)
       setSummary(s.data)
       setVehicles(v.data)
+      setAllUsers(u.data)
       // Se tem apenas 1 veículo, pré-selecionar e setar o rate
       if (v.data.length === 1) {
         setVehicleId(v.data[0].id)
@@ -135,7 +139,8 @@ export function Routes() {
   const filtered = routes.filter(r => {
     const ms = r.description.toLowerCase().includes(search.toLowerCase()) || (r.technician?.name || '').toLowerCase().includes(search.toLowerCase())
     const matchMonth = !monthFilter || (r.routeDate && r.routeDate.startsWith(monthFilter))
-    return ms && (!statusFilter || r.status === statusFilter) && (isTecnico ? r.technician?.id === user?.id : true) && matchMonth
+    const matchUserFilter = !userFilter || r.technician?.id === userFilter
+    return ms && (!statusFilter || r.status === statusFilter) && (isTecnico ? r.technician?.id === user?.id : true) && matchMonth && matchUserFilter
   })
 
   const monthStats = { pendente: filtered.filter(r => r.status === 'pendente').reduce((s, r) => s + Number(r.totalValue), 0), aprovado: filtered.filter(r => r.status === 'aprovado').reduce((s, r) => s + Number(r.totalValue), 0), pago: filtered.filter(r => r.status === 'pago').reduce((s, r) => s + Number(r.totalValue), 0), totalKm: filtered.reduce((s, r) => s + Number(r.km), 0) }
@@ -147,7 +152,7 @@ export function Routes() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Rotas Externas</h1>
-          <p className="text-sm text-gray-500 mt-1">Reembolso de R$ 1,30/km rodado</p>
+          <p className="text-sm text-gray-500 mt-1">Controle de rotas externas e deslocamentos</p>
         </div>
         {isTecnico && <button onClick={openNew} className="btn btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Registrar Rota</button>}
       </div>
@@ -173,6 +178,14 @@ export function Routes() {
               {Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </div>
+          {canManage && (
+            <div>
+              <select className="input w-48" value={userFilter} onChange={e => setUserFilter(e.target.value)}>
+                <option value="">Todos os usuários</option>
+                {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 

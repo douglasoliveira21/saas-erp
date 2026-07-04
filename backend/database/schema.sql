@@ -153,6 +153,13 @@ CREATE TABLE IF NOT EXISTS contracts (
     file_size INTEGER,
     status VARCHAR(20) DEFAULT 'ativo',
     observations TEXT,
+    adjustment_index VARCHAR(20),
+    adjustment_percentage DECIMAL(5, 2),
+    auto_charge BOOLEAN DEFAULT FALSE,
+    charge_day INTEGER DEFAULT 10,
+    equipments TEXT,
+    renewal_history TEXT,
+    last_renewal_date DATE,
     created_by UUID REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
