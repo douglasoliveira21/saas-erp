@@ -15,7 +15,8 @@ export class PurchasesService {
 
   async create(dto: any): Promise<Purchase> {
     const purchase = this.purchasesRepo.create(dto);
-    return this.purchasesRepo.save(purchase);
+    const saved = await this.purchasesRepo.save(purchase);
+    return Array.isArray(saved) ? saved[0] : saved;
   }
 
   async findAll(type?: string): Promise<Purchase[]> {
