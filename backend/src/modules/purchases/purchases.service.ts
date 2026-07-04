@@ -14,9 +14,34 @@ export class PurchasesService {
   ) {}
 
   async create(dto: any): Promise<Purchase> {
+    // Se tipo é entrada, já marca como recebido
+    if (dto.type === 'entrada') {
+      dto.status = 'recebido';
+      dto.receivedAt = new Date();
+    }
     const purchase = this.purchasesRepo.create(dto);
     const saved = await this.purchasesRepo.save(purchase);
-    return Array.isArray(saved) ? saved[0] : saved;
+    const result = Array.isArray(saved) ? saved[0] : saved;
+
+    // Se entrada de mercadoria, criar despesa no fluxo de caixa
+    if (result.type === 'entrada' && Number(result.totalValue) > 0) {
+      await this.movementRepo.save(
+        this.movementRepo.create({
+          type: 'despesa',
+          category: 'compra_mercadoria',
+          description: `Compra: ${result.description} - ${result.supplierName}`,
+          value: Number(result.totalValue),
+          date: new Date().toISOString().split('T')[0],
+          referenceId: result.id,
+          referenceType: 'purchase',
+          paymentMethod: result.paymentMethod,
+          isForecast: false,
+          createdBy: dto.createdBy,
+        }),
+      );
+    }
+
+    return result;
   }
 
   async findAll(type?: string): Promise<Purchase[]> {

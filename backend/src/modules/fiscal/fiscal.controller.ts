@@ -13,6 +13,7 @@ import { NfseService } from './services/nfse.service';
 import { Invoice } from './entities/invoice.entity';
 import { FiscalConfig } from './entities/fiscal-config.entity';
 import { FinancialTask } from '../financial-tasks/entities/financial-task.entity';
+import { FinancialMovement } from '../financial/entities/financial-movement.entity';
 import { MailService } from '../mail/mail.service';
 
 @Controller('fiscal')
@@ -25,6 +26,7 @@ export class FiscalController {
     @InjectRepository(Invoice) private invoiceRepo: Repository<Invoice>,
     @InjectRepository(FiscalConfig) private configRepo: Repository<FiscalConfig>,
     @InjectRepository(FinancialTask) private taskRepo: Repository<FinancialTask>,
+    @InjectRepository(FinancialMovement) private movementRepo: Repository<FinancialMovement>,
     private mailService: MailService,
   ) {}
 
@@ -162,7 +164,7 @@ export class FiscalController {
   // === NF-e ===
   @Post('nfe/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  async emitNfe(@Body() body: { saleId: string; certId: string; saleData?: any }) {
+  async emitNfe(@Body() body: { saleId: string; certId: string; saleData?: any }, @Request() req: any) {
     // Criar registro de invoice
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
@@ -178,6 +180,25 @@ export class FiscalController {
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
     }
+
+    // Se for NF-e de entrada (compra), registrar despesa no fluxo de caixa
+    const tpNF = body.saleData?.tpNF || '1';
+    if (tpNF === '0' && result.status === 'autorizada' && body.saleData?.totalValue) {
+      await this.movementRepo.save(
+        this.movementRepo.create({
+          type: 'despesa',
+          category: 'compra_mercadoria',
+          description: `NF-e Entrada: ${body.saleData.recipientName || 'Fornecedor'} - Nota ${result.number || ''}`,
+          value: Number(body.saleData.totalValue),
+          date: new Date().toISOString().split('T')[0],
+          referenceId: saved.id,
+          referenceType: 'nfe_entrada',
+          isForecast: false,
+          createdBy: req.user?.id,
+        }),
+      );
+    }
+
     return result;
   }
 
