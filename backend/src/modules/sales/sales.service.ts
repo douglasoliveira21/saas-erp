@@ -261,8 +261,57 @@ export class SalesService {
     // Remover campos de relação que não devem ser sobrescritos diretamente
     const { technician, customer, items, approver, ...safeDto } = updateSaleDto;
     
+    // Verificar se dueDay mudou para atualizar parcelas
+    const dueDayChanged = safeDto.dueDay !== undefined && safeDto.dueDay !== sale.dueDay;
+    
     Object.assign(sale, safeDto);
     await this.salesRepository.save(sale);
+
+    // Se o dia de vencimento mudou, atualizar parcelas pendentes
+    if (dueDayChanged && safeDto.dueDay) {
+      try {
+        const newDueDay = Number(safeDto.dueDay);
+        
+        // Atualizar parcelas pendentes (installments)
+        const pendingInstallments = await this.dataSource.query(
+          `SELECT id, number, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente', 'vencido')`,
+          [id]
+        );
+
+        for (const inst of pendingInstallments) {
+          const oldDate = new Date(inst.due_date);
+          const newDate = new Date(oldDate.getFullYear(), oldDate.getMonth(), newDueDay);
+          // Se o novo dia é menor que hoje, pula para o próximo mês
+          if (newDate < new Date()) {
+            newDate.setMonth(newDate.getMonth() + 1);
+          }
+          const newDateStr = newDate.toISOString().split('T')[0];
+          await this.dataSource.query(
+            `UPDATE installments SET due_date = $1, status = 'pendente' WHERE id = $2`,
+            [newDateStr, inst.id]
+          );
+        }
+
+        // Atualizar conta a receber (due_date principal)
+        const account = await this.dataSource.query(
+          `SELECT id FROM accounts_receivable WHERE sale_id = $1 AND status IN ('pendente', 'parcial')`,
+          [id]
+        );
+        if (account.length > 0) {
+          const now = new Date();
+          const newAccountDate = new Date(now.getFullYear(), now.getMonth(), newDueDay);
+          if (newAccountDate < now) newAccountDate.setMonth(newAccountDate.getMonth() + 1);
+          await this.dataSource.query(
+            `UPDATE accounts_receivable SET due_date = $1 WHERE id = $2`,
+            [newAccountDate.toISOString().split('T')[0], account[0].id]
+          );
+        }
+      } catch (err) {
+        // Não bloquear a edição se a atualização de parcelas falhar
+        console.warn('Erro ao atualizar parcelas:', err.message);
+      }
+    }
+
     return this.findOne(id);
   }
 
