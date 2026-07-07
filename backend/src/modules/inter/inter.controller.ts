@@ -88,7 +88,7 @@ export class InterController {
   async getStatus(@Param('codigoSolicitacao') codigoSolicitacao: string) {
     this.logger.log(`Consultando status: ${codigoSolicitacao}`);
 
-    const boleto = await this.interService.getBoleto(codigoSolicitacao);
+    const boleto = await this.interService.syncBoletoStatus(codigoSolicitacao);
 
     return {
       success: true,

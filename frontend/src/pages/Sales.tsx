@@ -95,7 +95,7 @@ export function Sales() {
     try {
       const res = await api.post(`/inter/generate/${id}?type=${type}`)
       if (res.data.success) {
-        alert(`${type === 'pix' ? 'PIX' : 'Boleto'} gerado com sucesso! Email enviado ao cliente.`)
+        alert(`${type === 'pix' ? 'PIX' : 'Boleto'} gerado com sucesso! Confira em Pagamentos.`)
         load()
       }
     } catch (e: any) {

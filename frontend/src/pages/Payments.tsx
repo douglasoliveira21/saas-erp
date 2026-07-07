@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
 import { Download, Search, RefreshCw, CreditCard, Eye } from 'lucide-react'
 
 interface Payment {
@@ -22,7 +21,6 @@ const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', pago: 'bg-green-100 text-green-700', vencido: 'bg-red-100 text-red-700', cancelado: 'bg-gray-100 text-gray-700', a_receber: 'bg-blue-100 text-blue-700' }
 
 export function Payments() {
-  const { isAdmin, isFinanceiro } = useAuth()
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -135,10 +133,13 @@ export function Payments() {
                   <td className="table-cell font-mono text-xs text-gray-500">{(p.codigoSolicitacao || '').substring(0, 8)}...</td>
                   <td className="table-cell">
                     <div className="flex gap-1">
-                      <button onClick={() => viewPdf(p.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>
                       {p.type === 'boleto' && (
-                        <button onClick={() => downloadPdf(p.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
+                        <>
+                          <button onClick={() => viewPdf(p.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>
+                          <button onClick={() => downloadPdf(p.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
+                        </>
                       )}
+                      <button onClick={() => checkStatus(p.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
                       {p.linhaDigitavel && (
                         <button onClick={() => { navigator.clipboard.writeText(p.linhaDigitavel!); alert('Linha digitável copiada!') }} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Copiar linha digitável"><CreditCard className="w-4 h-4" /></button>
                       )}

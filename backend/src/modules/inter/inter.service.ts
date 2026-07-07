@@ -281,6 +281,84 @@ export class InterService {
     }
   }
 
+  private getLocalPaymentStatus(situacao?: string): string {
+    const status = (situacao || '').toUpperCase();
+    if (['RECEBIDO', 'CONFIRMADO', 'PAGO', 'REALIZADO', 'CONCLUIDA'].includes(status)) {
+      return 'pago';
+    }
+    if (['VENCIDO', 'EXPIRADO'].includes(status)) {
+      return 'vencido';
+    }
+    if (['CANCELADO', 'CANCELADA', 'REMOVIDA_PELO_USUARIO_RECEBEDOR', 'REMOVIDA_PELO_PSP'].includes(status)) {
+      return 'cancelado';
+    }
+    return 'a_receber';
+  }
+
+  private async markSaleAsPaid(saleId: string, paymentMethod = 'boleto'): Promise<void> {
+    await this.saleRepo.manager.query(
+      `UPDATE sales SET status = 'pago', updated_at = NOW() WHERE id = $1 AND status != 'pago'`,
+      [saleId],
+    );
+
+    await this.saleRepo.manager.query(
+      `UPDATE accounts_receivable
+       SET paid_value = total_value, pending_value = 0, status = 'pago', paid_at = COALESCE(paid_at, NOW()), updated_at = NOW()
+       WHERE sale_id = $1 AND status != 'pago'`,
+      [saleId],
+    );
+
+    await this.saleRepo.manager.query(
+      `UPDATE installments
+       SET paid_value = value, status = 'pago', paid_at = COALESCE(paid_at, NOW()), payment_method = $2, updated_at = NOW()
+       WHERE sale_id = $1 AND status != 'pago'`,
+      [saleId, paymentMethod],
+    );
+
+    await this.saleRepo.manager.query(
+      `UPDATE financial_movements
+       SET is_forecast = false, date = CURRENT_DATE, payment_method = $2
+       WHERE sale_id = $1 AND type = 'receita' AND category = 'venda' AND is_forecast = true`,
+      [saleId, paymentMethod],
+    );
+  }
+
+  private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<void> {
+    const cobranca = interData?.cobranca || interData;
+    const boleto = interData?.boleto || {};
+    const pix = interData?.pix || {};
+    const situacao = cobranca?.situacao || interData?.situacao || interData?.status;
+    const localStatus = this.getLocalPaymentStatus(situacao);
+
+    const updated = await this.saleRepo.manager.query(
+      `UPDATE payments
+       SET status = $1,
+           linha_digitavel = COALESCE($2, linha_digitavel),
+           pix_copia_e_cola = COALESCE($3, pix_copia_e_cola),
+           nosso_numero = COALESCE($4, nosso_numero),
+           updated_at = NOW()
+       WHERE codigo_solicitacao = $5
+       RETURNING sale_id, type`,
+      [
+        localStatus,
+        boleto?.linhaDigitavel || interData?.linhaDigitavel || null,
+        pix?.pixCopiaECola || interData?.pixCopiaECola || null,
+        boleto?.nossoNumero || interData?.nossoNumero || null,
+        codigoSolicitacao,
+      ],
+    );
+
+    if (localStatus === 'pago' && updated[0]?.sale_id) {
+      await this.markSaleAsPaid(updated[0].sale_id, updated[0].type || 'boleto');
+    }
+  }
+
+  async syncBoletoStatus(codigoSolicitacao: string): Promise<any> {
+    const boleto = await this.getBoleto(codigoSolicitacao);
+    await this.applyPaymentStatus(codigoSolicitacao, boleto);
+    return boleto;
+  }
+
   /**
    * Processa webhook de pagamento do Banco Inter.
    * Localiza a venda pelo seuNumero, atualiza status e registra no financeiro.
@@ -289,76 +367,64 @@ export class InterService {
     this.logger.log('Webhook recebido do Banco Inter: ' + JSON.stringify(payload));
 
     try {
-      // O payload pode vir em diferentes formatos dependendo do tipo (boleto ou pix)
-      const seuNumero = payload.cobranca?.seuNumero || payload.seuNumero || payload.txid;
-      const situacao = payload.cobranca?.situacao || payload.situacao || payload.status;
+      const events = Array.isArray(payload) ? payload : [payload];
+      let processed = 0;
 
-      if (!seuNumero) {
-        this.logger.warn('Webhook sem identificador de venda (seuNumero/txid)');
-        return { success: false, message: 'Identificador não encontrado no payload' };
-      }
-
-      // Verificar se é confirmação de pagamento
-      const isPaid = ['RECEBIDO', 'CONFIRMADO', 'PAGO', 'REALIZADO'].includes(
-        (situacao || '').toUpperCase(),
-      );
-
-      if (!isPaid) {
-        this.logger.log(`Webhook com situação "${situacao}" - ignorando (não é pagamento confirmado)`);
-        return { success: true, message: `Situação ${situacao} registrada` };
-      }
-
-      // Buscar venda pelo seuNumero (que é o ID curto da venda)
-      const sale = await this.saleRepo.findOne({
-        where: { id: seuNumero },
-        relations: ['customer'],
-      });
-
-      // Tentar busca por ID parcial se não encontrou
-      let foundSale = sale;
-      if (!foundSale) {
-        const sales = await this.saleRepo
-          .createQueryBuilder('sale')
-          .leftJoinAndSelect('sale.customer', 'customer')
-          .where('sale.id LIKE :id', { id: `${seuNumero}%` })
-          .getMany();
-
-        if (sales.length === 1) {
-          foundSale = sales[0];
+      for (const event of events) {
+        const codigoSolicitacao = event.codigoSolicitacao || event.cobranca?.codigoSolicitacao;
+        if (codigoSolicitacao) {
+          await this.applyPaymentStatus(codigoSolicitacao, event);
+          processed++;
+          continue;
         }
+
+        const seuNumero = event.cobranca?.seuNumero || event.seuNumero || event.txid;
+        const situacao = event.cobranca?.situacao || event.situacao || event.status;
+
+        if (!seuNumero) {
+          this.logger.warn('Webhook sem identificador de venda (seuNumero/txid/codigoSolicitacao)');
+          continue;
+        }
+
+        if (this.getLocalPaymentStatus(situacao) !== 'pago') {
+          this.logger.log(`Webhook com situação "${situacao}" - ignorando (não é pagamento confirmado)`);
+          processed++;
+          continue;
+        }
+
+        let foundSale = await this.saleRepo.findOne({
+          where: { id: seuNumero },
+          relations: ['customer'],
+        });
+
+        if (!foundSale) {
+          const sales = await this.saleRepo
+            .createQueryBuilder('sale')
+            .leftJoinAndSelect('sale.customer', 'customer')
+            .where('sale.id LIKE :id', { id: `${seuNumero}%` })
+            .getMany();
+
+          if (sales.length === 1) {
+            foundSale = sales[0];
+          }
+        }
+
+        if (!foundSale) {
+          this.logger.warn(`Venda não encontrada para seuNumero: ${seuNumero}`);
+          continue;
+        }
+
+        await this.markSaleAsPaid(foundSale.id, 'boleto');
+        this.logger.log(`Venda ${foundSale.id} marcada como paga via webhook`);
+
+        if (foundSale.customer?.email) {
+          await this.sendPaymentConfirmationEmail(foundSale);
+        }
+
+        processed++;
       }
 
-      if (!foundSale) {
-        this.logger.warn(`Venda não encontrada para seuNumero: ${seuNumero}`);
-        return { success: false, message: 'Venda não encontrada' };
-      }
-
-      // Atualizar status da venda para 'pago'
-      foundSale.status = 'pago' as any;
-      await this.saleRepo.save(foundSale);
-      this.logger.log(`Venda ${foundSale.id} marcada como paga via webhook`);
-
-      // Registrar pagamento no financeiro
-      const valorPago = payload.cobranca?.valorTotalRecebido
-        || payload.valor?.original
-        || Number(foundSale.totalAmount);
-
-      await this.financialService.payInstallment(
-        foundSale.id,
-        Number(valorPago),
-        'boleto',
-        'webhook-inter',
-      ).catch((err) => {
-        // Se não encontrar parcela específica, tenta via query direta
-        this.logger.warn('Pagamento via payInstallment falhou, tentando via query: ' + err.message);
-      });
-
-      // Enviar email de confirmação
-      if (foundSale.customer?.email) {
-        await this.sendPaymentConfirmationEmail(foundSale);
-      }
-
-      return { success: true, message: `Venda ${foundSale.id} atualizada para pago` };
+      return { success: true, message: `${processed} evento(s) processado(s)` };
     } catch (error) {
       this.logger.error('Erro ao processar webhook: ' + error.message);
       return { success: false, message: 'Erro interno ao processar webhook' };
@@ -442,7 +508,9 @@ export class InterService {
 
       // Salvar pagamento no banco
       await this.saleRepo.manager.query(
-        `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+         WHERE NOT EXISTS (SELECT 1 FROM payments WHERE codigo_solicitacao = $4)`,
         [sale.id, customer.id || null, 'boleto', result.codigoSolicitacao || '', 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
       );
 
