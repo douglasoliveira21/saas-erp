@@ -413,17 +413,17 @@ export class InterService {
         },
         multa: {
           codigoMulta: 'PERCENTUAL',
-          taxa: 2.00,
+          taxa: Number((sale as any).multaPercentage) || 2.00,
         },
         mora: {
           codigoMora: 'TAXAMENSAL',
-          taxa: 0.03,
+          taxa: Number((sale as any).moraPercentage) || 0.03,
         },
         mensagem: {
           linha1: 'Pagamento referente a venda de servicos',
           linha2: `Venda #${sale.id.substring(0, 8)}`,
-          linha3: 'Multa: 2,00% apos vencimento',
-          linha4: 'Juros: 0,03% a.m. apos vencimento',
+          linha3: `Multa: ${(Number((sale as any).multaPercentage) || 2.00).toFixed(2)}% apos vencimento`,
+          linha4: `Juros: ${(Number((sale as any).moraPercentage) || 0.03).toFixed(2)}% a.m. apos vencimento`,
         },
       };
 

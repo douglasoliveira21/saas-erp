@@ -68,6 +68,12 @@ export class Sale {
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate: string;
 
+  @Column({ name: 'multa_percentage', type: 'decimal', precision: 5, scale: 2, default: 2.00 })
+  multaPercentage: number;
+
+  @Column({ name: 'mora_percentage', type: 'decimal', precision: 5, scale: 2, default: 0.03 })
+  moraPercentage: number;
+
   @Column({ name: 'sale_type', type: 'varchar', default: 'eventual' })
   saleType: string;
 

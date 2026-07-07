@@ -11,7 +11,7 @@ interface Item { type: 'product' | 'service'; id: string; name: string; quantity
 
 export function NewSale() {
   const navigate = useNavigate()
-  const { user, isAdmin } = useAuth()
+  const { user, isAdmin, isFinanceiro } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [services, setServices] = useState<Service[]>([])
@@ -19,6 +19,8 @@ export function NewSale() {
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [installments, setInstallments] = useState(1)
   const [dueDay, setDueDay] = useState(10)
+  const [multaPercentage, setMultaPercentage] = useState(2.00)
+  const [moraPercentage, setMoraPercentage] = useState(0.03)
   const [saleType, setSaleType] = useState<'eventual' | 'recorrente'>('eventual')
   const [commissionPct, setCommissionPct] = useState(10)
   const [observations, setObservations] = useState('')
@@ -56,6 +58,8 @@ export function NewSale() {
       setPaymentMethod(sale.paymentMethod || 'pix')
       setInstallments(sale.installments || 1)
       setDueDay(sale.dueDay || 10)
+      setMultaPercentage(sale.multaPercentage != null ? Number(sale.multaPercentage) : 2.00)
+      setMoraPercentage(sale.moraPercentage != null ? Number(sale.moraPercentage) : 0.03)
       setSaleType(sale.saleType || 'eventual')
       setObservations(sale.observations || '')
       setCommissionPct(sale.commissionPercentage || 10)
@@ -127,6 +131,8 @@ export function NewSale() {
         paymentMethod,
         installments: paymentMethod === 'boleto' ? installments : 1,
         dueDay: paymentMethod === 'boleto' ? dueDay : null,
+        multaPercentage,
+        moraPercentage,
         saleType,
         observations: orderNumber ? `Pedido #${orderNumber}${observations ? ' | ' + observations : ''}` : observations,
         subtotal,
@@ -237,6 +243,27 @@ export function NewSale() {
                   </select>
                   <p className="text-xs text-gray-400 mt-1">Mínimo 5 dias de antecedência. Dias indisponíveis aparecem bloqueados.</p>
                 </div>
+              </div>
+
+              {/* Multa e Mora */}
+              <div className="grid grid-cols-2 gap-4 mt-3 p-3 bg-orange-50 rounded-xl border border-orange-200">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Multa após vencimento (%)</label>
+                  {(isAdmin || isFinanceiro) ? (
+                    <input className="input text-sm" type="number" step="0.01" min="0" value={multaPercentage} onChange={e => setMultaPercentage(parseFloat(e.target.value) || 0)} />
+                  ) : (
+                    <div className="input bg-gray-100 text-gray-600 cursor-not-allowed text-sm">{multaPercentage.toFixed(2)}%</div>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Mora/Juros mensal (%)</label>
+                  {(isAdmin || isFinanceiro) ? (
+                    <input className="input text-sm" type="number" step="0.01" min="0" value={moraPercentage} onChange={e => setMoraPercentage(parseFloat(e.target.value) || 0)} />
+                  ) : (
+                    <div className="input bg-gray-100 text-gray-600 cursor-not-allowed text-sm">{moraPercentage.toFixed(2)}%</div>
+                  )}
+                </div>
+                <p className="col-span-2 text-xs text-orange-600">Multa e juros aplicados automaticamente no boleto após o vencimento.</p>
               </div>
             )}
 
