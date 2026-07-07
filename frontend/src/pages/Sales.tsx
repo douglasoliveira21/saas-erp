@@ -175,6 +175,7 @@ export function Sales() {
             <thead className="table-header">
               <tr>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Data</th>
+                <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Tipo</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Cliente</th>
                 {!isTecnico && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Técnico</th>}
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Pagamento</th>
@@ -185,11 +186,20 @@ export function Sales() {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="table-cell text-center text-gray-500">Nenhuma venda encontrada</td></tr>
+                <tr><td colSpan={8} className="table-cell text-center text-gray-500">Nenhuma venda encontrada</td></tr>
               ) : filtered.map(s => (
                 <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">
                     {new Date(s.createdAt).toLocaleDateString('pt-BR')}
+                  </td>
+                  <td className="table-cell">
+                    {(() => {
+                      const hasProduct = s.items?.some((i: any) => i.productId)
+                      const hasService = s.items?.some((i: any) => i.serviceId)
+                      if (hasProduct && hasService) return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">Misto</span>
+                      if (hasService) return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">Serviço</span>
+                      return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Produto</span>
+                    })()}
                   </td>
                   <td className="table-cell font-medium text-gray-900 dark:text-white">{s.customer?.name}</td>
                   {!isTecnico && <td className="table-cell text-gray-600 dark:text-gray-400">{s.technician?.name}</td>}
