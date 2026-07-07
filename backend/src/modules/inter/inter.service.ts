@@ -413,11 +413,11 @@ export class InterService {
         },
         multa: {
           codigoMulta: 'PERCENTUAL',
-          taxa: Number((sale as any).multaPercentage) || 2.00,
+          taxa: parseFloat(Number((sale as any).multaPercentage || 2).toFixed(2)),
         },
         mora: {
           codigoMora: 'TAXAMENSAL',
-          taxa: Number((sale as any).moraPercentage) || 0.03,
+          taxa: parseFloat(Number((sale as any).moraPercentage || 0.03).toFixed(2)),
         },
         mensagem: {
           linha1: 'Pagamento referente a venda de servicos',
