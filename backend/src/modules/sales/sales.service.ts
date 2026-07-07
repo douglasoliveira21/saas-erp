@@ -255,9 +255,15 @@ export class SalesService {
   }
 
   async update(id: string, updateSaleDto: any): Promise<Sale> {
-    const sale = await this.findOne(id);
-    Object.assign(sale, updateSaleDto);
-    return this.salesRepository.save(sale);
+    const sale = await this.salesRepository.findOne({ where: { id } });
+    if (!sale) throw new NotFoundException('Venda não encontrada');
+    
+    // Remover campos de relação que não devem ser sobrescritos diretamente
+    const { technician, customer, items, approver, ...safeDto } = updateSaleDto;
+    
+    Object.assign(sale, safeDto);
+    await this.salesRepository.save(sale);
+    return this.findOne(id);
   }
 
   async remove(id: string): Promise<void> {
