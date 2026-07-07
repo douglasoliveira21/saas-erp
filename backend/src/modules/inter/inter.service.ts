@@ -422,14 +422,20 @@ export class InterService {
         },
       };
 
-      // Multa e Mora - formato Inter API Cobrança v3
-      // codigoMulta: NAOTEMMULTA, VALORFIXO, PERCENTUAL
-      // codigoMora: VALORDIA, TAXAMENSAL, ISENTO
+      // Multa e Mora - Inter API Cobrança v3
       if (multaTaxa > 0) {
-        boletoData.multa = { codigoMulta: 'PERCENTUAL', quantidadeDias: 1, taxa: multaTaxa };
+        boletoData.multa = {
+          codigoMulta: 'PERCENTUAL',
+          valor: 0,
+          taxa: multaTaxa,
+        };
       }
       if (moraTaxa > 0) {
-        boletoData.mora = { codigoMora: 'TAXAMENSAL', quantidadeDias: 1, taxa: moraTaxa };
+        boletoData.mora = {
+          codigoMora: 'TAXAMENSAL',
+          valor: 0,
+          taxa: moraTaxa,
+        };
       }
 
       this.logger.log('Payload boleto: ' + JSON.stringify(boletoData));
