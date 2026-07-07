@@ -324,78 +324,206 @@ export function Fiscal() {
       const items = inv.sale?.items || []
       const chave = inv.accessKey || ''
       const chaveFormatada = chave.replace(/(.{4})/g, '$1 ').trim()
+      const tpNF = chave.length >= 23 ? (chave[22] === '0' ? '0' : '1') : '1'
+      const vTotalProd = items.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0)
 
       const printWindow = window.open('', '_blank')
       if (!printWindow) return
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DANFE - ${inv.number}</title><style>
-        body{font-family:Arial,sans-serif;margin:10px;font-size:10px;color:#000}
-        .border{border:1px solid #000;padding:4px;margin-bottom:2px}
-        .header{display:flex;gap:5px;margin-bottom:2px}
-        .header-left{flex:1;border:1px solid #000;padding:5px;text-align:center}
-        .header-center{flex:2;border:1px solid #000;padding:5px}
-        .header-right{flex:1;border:1px solid #000;padding:5px;text-align:center}
-        .row{display:flex;gap:2px;margin-bottom:2px}
-        .cell{border:1px solid #000;padding:3px;flex:1}
-        .cell label{font-size:7px;color:#333;display:block}
-        .cell span{font-size:9px;font-weight:500}
-        .title{font-weight:bold;font-size:8px;background:#eee;padding:2px 4px;border:1px solid #000;margin-bottom:2px}
-        table{width:100%;border-collapse:collapse;font-size:8px;margin-bottom:2px}
-        table th,table td{border:1px solid #000;padding:2px 4px;text-align:left}
-        table th{background:#eee;font-size:7px}
-        .chave{font-family:monospace;font-size:9px;letter-spacing:1px;text-align:center;padding:5px;border:1px solid #000;margin-bottom:2px}
-        .total{text-align:right;font-size:12px;font-weight:bold}
-        @media print{body{margin:5mm}}
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Courier New',monospace;margin:8mm;font-size:8pt;color:#000;line-height:1.2}
+        .page{width:190mm;margin:0 auto;border:2px solid #000;padding:0}
+        .section{border-bottom:2px solid #000}
+        .section:last-child{border-bottom:none}
+        .row{display:flex}
+        .col{border-right:1px solid #000;padding:2px 4px;min-height:18px}
+        .col:last-child{border-right:none}
+        .col label{display:block;font-size:5.5pt;color:#333;text-transform:uppercase;margin-bottom:1px}
+        .col span,.col p{font-size:7.5pt}
+        .col .big{font-size:10pt;font-weight:bold}
+        .header-row{display:flex;border-bottom:1px solid #000}
+        .header-left{width:35%;border-right:1px solid #000;padding:4px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+        .header-center{width:30%;border-right:1px solid #000;padding:4px;text-align:center}
+        .header-right{width:35%;padding:4px}
+        .danfe-title{font-size:14pt;font-weight:bold;letter-spacing:2px}
+        .danfe-sub{font-size:6pt;margin-top:2px}
+        .tipo-box{display:inline-block;width:12px;height:12px;border:1px solid #000;text-align:center;font-size:8pt;line-height:12px;margin:0 2px}
+        .tipo-box.active{background:#000;color:#fff}
+        .chave-box{font-family:'Courier New',monospace;font-size:7pt;word-break:break-all;letter-spacing:0.5px;margin-top:4px}
+        .section-title{background:#ddd;border-bottom:1px solid #000;padding:2px 4px;font-size:6.5pt;font-weight:bold;text-transform:uppercase}
+        table{width:100%;border-collapse:collapse}
+        table th{background:#eee;border:1px solid #000;padding:2px 3px;font-size:6pt;text-transform:uppercase;text-align:center}
+        table td{border:1px solid #000;padding:2px 3px;font-size:7pt}
+        .text-right{text-align:right}
+        .text-center{text-align:center}
+        .bold{font-weight:bold}
+        .total-row{display:flex;border-top:1px solid #000}
+        .total-cell{flex:1;border-right:1px solid #000;padding:2px 4px}
+        .total-cell:last-child{border-right:none}
+        .total-cell label{display:block;font-size:5.5pt;color:#333}
+        .total-cell span{font-size:8pt;font-weight:bold}
+        .info-box{padding:4px;min-height:40px;font-size:7pt;line-height:1.4}
+        .protocol{font-size:7pt;margin-top:3px}
+        .nf-number{font-size:11pt;font-weight:bold;margin-top:4px}
+        .serie{font-size:8pt;margin-top:2px}
+        @media print{body{margin:0},.page{border:none}}
       </style></head><body>
-        <div class="header">
-          <div class="header-left">
-            <strong>${cfg?.companyName || ''}</strong><br>
-            <span style="font-size:8px">CNPJ: ${cfg?.cnpj || ''}<br>IE: ${cfg?.stateRegistration || ''}</span>
-          </div>
-          <div class="header-center">
-            <div style="text-align:center;font-size:14px;font-weight:bold">DANFE</div>
-            <div style="text-align:center;font-size:8px">DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRONICA</div>
-            <div style="text-align:center;font-size:8px;margin-top:3px">
-              ${inv.status === 'autorizada' ? '0 - ENTRADA &nbsp;&nbsp; <strong>1 - SAIDA</strong>' : ''}
+        <div class="page">
+          <!-- HEADER -->
+          <div class="section">
+            <div class="header-row">
+              <div class="header-left">
+                <div style="font-size:10pt;font-weight:bold">${cfg?.companyName || ''}</div>
+                <div style="font-size:7pt;margin-top:4px">${cfg?.emitAddress || ''}, ${cfg?.emitNumber || ''}</div>
+                <div style="font-size:7pt">${cfg?.emitNeighborhood || ''} - CEP: ${cfg?.emitCep || ''}</div>
+                <div style="font-size:7pt;margin-top:2px">CNPJ: ${cfg?.cnpj || ''}</div>
+                <div style="font-size:7pt">IE: ${cfg?.stateRegistration || ''}</div>
+              </div>
+              <div class="header-center">
+                <div class="danfe-title">DANFE</div>
+                <div class="danfe-sub">DOCUMENTO AUXILIAR DA<br>NOTA FISCAL ELETRÔNICA</div>
+                <div style="margin-top:6px;font-size:7pt">
+                  <span class="tipo-box ${tpNF === '0' ? 'active' : ''}">0</span> ENTRADA
+                  &nbsp;&nbsp;
+                  <span class="tipo-box ${tpNF === '1' ? 'active' : ''}">1</span> SAÍDA
+                </div>
+                <div class="nf-number">Nº ${String(inv.number || 0).padStart(9, '0')}</div>
+                <div class="serie">SÉRIE ${inv.series || 1}</div>
+              </div>
+              <div class="header-right">
+                <div style="font-size:6pt;text-align:center;font-weight:bold;border:1px solid #000;padding:2px;margin-bottom:4px">CHAVE DE ACESSO</div>
+                <div class="chave-box">${chaveFormatada}</div>
+                <div style="font-size:6pt;text-align:center;margin-top:6px;border:1px solid #000;padding:2px">
+                  Consulta de autenticidade no portal nacional da NF-e<br>
+                  www.nfe.fazenda.gov.br/portal
+                </div>
+                <div class="protocol">
+                  <strong>PROTOCOLO DE AUTORIZAÇÃO:</strong><br>
+                  ${inv.protocolNumber || '-'} ${inv.issuedAt ? '- ' + new Date(inv.issuedAt).toLocaleString('pt-BR') : ''}
+                </div>
+              </div>
             </div>
-            <div style="text-align:center;font-size:10px;margin-top:3px">
-              N.: <strong>${String(inv.number).padStart(9,'0')}</strong> &nbsp; Serie: <strong>${inv.series}</strong>
+          </div>
+
+          <!-- NATUREZA / INSCRIÇÃO -->
+          <div class="section">
+            <div class="row" style="border-bottom:1px solid #000">
+              <div class="col" style="flex:3"><label>NATUREZA DA OPERAÇÃO</label><span>${tpNF === '0' ? 'COMPRA' : 'VENDA'}</span></div>
+              <div class="col" style="flex:2"><label>INSCRIÇÃO ESTADUAL</label><span>${cfg?.stateRegistration || ''}</span></div>
+              <div class="col" style="flex:2"><label>INSCRIÇÃO MUNICIPAL</label><span>${cfg?.cityRegistration || ''}</span></div>
             </div>
           </div>
-          <div class="header-right">
-            <div style="font-size:8px">CHAVE DE ACESSO</div>
-            <div style="font-family:monospace;font-size:8px;word-break:break-all">${chave}</div>
-            <div style="margin-top:5px;font-size:8px">Protocolo: ${inv.protocolNumber || '-'}</div>
+
+          <!-- DESTINATÁRIO -->
+          <div class="section">
+            <div class="section-title">DESTINATÁRIO / REMETENTE</div>
+            <div class="row" style="border-bottom:1px solid #000">
+              <div class="col" style="flex:4"><label>NOME / RAZÃO SOCIAL</label><span>${inv.recipientName || '-'}</span></div>
+              <div class="col" style="flex:2"><label>CNPJ / CPF</label><span>${inv.recipientCnpj || '-'}</span></div>
+              <div class="col" style="flex:2"><label>DATA DE EMISSÃO</label><span>${inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString('pt-BR') : '-'}</span></div>
+            </div>
+            <div class="row">
+              <div class="col" style="flex:4"><label>ENDEREÇO</label><span>${inv.sale?.customer?.address || '-'}</span></div>
+              <div class="col" style="flex:2"><label>BAIRRO</label><span>${inv.sale?.customer?.neighborhood || '-'}</span></div>
+              <div class="col" style="flex:1"><label>CEP</label><span>${inv.sale?.customer?.cep || '-'}</span></div>
+              <div class="col" style="flex:1"><label>UF</label><span>${inv.sale?.customer?.uf || 'MG'}</span></div>
+            </div>
           </div>
-        </div>
 
-        <div class="title">DESTINATARIO / REMETENTE</div>
-        <div class="row">
-          <div class="cell" style="flex:3"><label>NOME/RAZAO SOCIAL</label><span>${inv.recipientName || '-'}</span></div>
-          <div class="cell"><label>CNPJ/CPF</label><span>${inv.recipientCnpj || '-'}</span></div>
-          <div class="cell"><label>EMISSAO</label><span>${inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString('pt-BR') : '-'}</span></div>
-        </div>
+          <!-- PRODUTOS -->
+          <div class="section">
+            <div class="section-title">DADOS DOS PRODUTOS / SERVIÇOS</div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:8%">CÓDIGO</th>
+                  <th style="width:32%">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
+                  <th style="width:8%">NCM/SH</th>
+                  <th style="width:6%">CST</th>
+                  <th style="width:6%">CFOP</th>
+                  <th style="width:5%">UN</th>
+                  <th style="width:8%">QTD</th>
+                  <th style="width:10%">V. UNIT</th>
+                  <th style="width:10%">V. TOTAL</th>
+                  <th style="width:7%">V. IPI</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.map((it: any) => `<tr>
+                  <td class="text-center">${(it.productId || it.serviceId || '').substring(0,8)}</td>
+                  <td>${it.name || '-'}</td>
+                  <td class="text-center">${it.ncm || '-'}</td>
+                  <td class="text-center">102</td>
+                  <td class="text-center">${it.cfop || '5102'}</td>
+                  <td class="text-center">${it.unit || 'UN'}</td>
+                  <td class="text-right">${Number(it.quantity).toFixed(4)}</td>
+                  <td class="text-right">${Number(it.unitPrice).toFixed(2)}</td>
+                  <td class="text-right">${Number(it.totalPrice).toFixed(2)}</td>
+                  <td class="text-right">0,00</td>
+                </tr>`).join('')}
+                ${items.length < 5 ? Array(5 - items.length).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('') : ''}
+              </tbody>
+            </table>
+          </div>
 
-        <div class="title">PRODUTOS / SERVICOS</div>
-        <table>
-          <thead><tr><th>CODIGO</th><th>DESCRICAO</th><th>NCM</th><th>CFOP</th><th>UN</th><th>QTD</th><th>V.UNIT</th><th>V.TOTAL</th></tr></thead>
-          <tbody>
-            ${items.map((it: any) => `<tr><td>${it.productId?.substring(0,8) || '-'}</td><td>${it.name || '-'}</td><td>-</td><td>-</td><td>UN</td><td>${it.quantity}</td><td>${Number(it.unitPrice).toFixed(2)}</td><td>${Number(it.totalPrice).toFixed(2)}</td></tr>`).join('')}
-          </tbody>
-        </table>
+          <!-- CÁLCULO DO IMPOSTO -->
+          <div class="section">
+            <div class="section-title">CÁLCULO DO IMPOSTO</div>
+            <div class="total-row">
+              <div class="total-cell"><label>BASE CÁLC. ICMS</label><span>0,00</span></div>
+              <div class="total-cell"><label>VALOR ICMS</label><span>0,00</span></div>
+              <div class="total-cell"><label>BASE CÁLC. ICMS ST</label><span>0,00</span></div>
+              <div class="total-cell"><label>VALOR ICMS ST</label><span>0,00</span></div>
+              <div class="total-cell"><label>V. TOTAL PRODUTOS</label><span>${vTotalProd.toFixed(2)}</span></div>
+            </div>
+            <div class="total-row">
+              <div class="total-cell"><label>VALOR FRETE</label><span>0,00</span></div>
+              <div class="total-cell"><label>VALOR SEGURO</label><span>0,00</span></div>
+              <div class="total-cell"><label>DESCONTO</label><span>0,00</span></div>
+              <div class="total-cell"><label>OUTRAS DESP.</label><span>0,00</span></div>
+              <div class="total-cell"><label>VALOR IPI</label><span>0,00</span></div>
+              <div class="total-cell"><label>VALOR TOTAL DA NOTA</label><span class="big">${Number(inv.totalValue || 0).toFixed(2)}</span></div>
+            </div>
+          </div>
 
-        <div class="row">
-          <div class="cell"><label>VALOR TOTAL DOS PRODUTOS</label><span class="total">R$ ${Number(inv.totalValue || 0).toFixed(2)}</span></div>
-          <div class="cell"><label>VALOR TOTAL DA NOTA</label><span class="total">R$ ${Number(inv.totalValue || 0).toFixed(2)}</span></div>
-        </div>
+          <!-- TRANSPORTADOR -->
+          <div class="section">
+            <div class="section-title">TRANSPORTADOR / VOLUMES TRANSPORTADOS</div>
+            <div class="row">
+              <div class="col" style="flex:3"><label>RAZÃO SOCIAL</label><span>-</span></div>
+              <div class="col" style="flex:1"><label>FRETE POR CONTA</label><span>9-Sem Frete</span></div>
+              <div class="col" style="flex:2"><label>CNPJ / CPF</label><span>-</span></div>
+              <div class="col" style="flex:1"><label>UF</label><span>-</span></div>
+            </div>
+          </div>
 
-        <div class="title">DADOS ADICIONAIS</div>
-        <div class="border" style="min-height:30px;font-size:8px">
-          Documento emitido por ME ou EPP optante pelo Simples Nacional.<br>
-          Nao gera direito a credito fiscal de IPI.
-        </div>
+          <!-- FATURA / DUPLICATAS -->
+          <div class="section">
+            <div class="section-title">FATURA / DUPLICATAS</div>
+            <div class="row">
+              <div class="col"><label>NÚMERO</label><span>${String(inv.number || 0).padStart(6,'0')}</span></div>
+              <div class="col"><label>VALOR ORIGINAL</label><span>${Number(inv.totalValue || 0).toFixed(2)}</span></div>
+              <div class="col"><label>VALOR DESCONTO</label><span>0,00</span></div>
+              <div class="col"><label>VALOR LÍQUIDO</label><span>${Number(inv.totalValue || 0).toFixed(2)}</span></div>
+            </div>
+          </div>
 
-        <div style="text-align:center;font-size:7px;margin-top:5px;color:#666">
-          Gerado pelo sistema VGON ERP | ${new Date().toLocaleString('pt-BR')}
+          <!-- DADOS ADICIONAIS -->
+          <div class="section">
+            <div class="section-title">DADOS ADICIONAIS</div>
+            <div class="row">
+              <div class="col info-box" style="flex:3">
+                <label>INFORMAÇÕES COMPLEMENTARES</label>
+                <p>Documento emitido por ME ou EPP optante pelo Simples Nacional.</p>
+                <p>Não gera direito a crédito fiscal de IPI.</p>
+                ${inv.observations ? '<p>' + inv.observations + '</p>' : ''}
+              </div>
+              <div class="col info-box" style="flex:1">
+                <label>RESERVADO AO FISCO</label>
+                <p>&nbsp;</p>
+              </div>
+            </div>
+          </div>
         </div>
       </body></html>`
       printWindow.document.write(html)
