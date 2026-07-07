@@ -65,6 +65,9 @@ export class Sale {
   @Column({ name: 'due_day', type: 'int', nullable: true })
   dueDay: number;
 
+  @Column({ name: 'due_date', type: 'date', nullable: true })
+  dueDate: string;
+
   @Column({ name: 'sale_type', type: 'varchar', default: 'eventual' })
   saleType: string;
 

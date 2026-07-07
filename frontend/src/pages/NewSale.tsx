@@ -55,6 +55,7 @@ export function NewSale() {
       setCustomerId(sale.customer?.id || '')
       setPaymentMethod(sale.paymentMethod || 'pix')
       setInstallments(sale.installments || 1)
+      setDueDay(sale.dueDay || 10)
       setSaleType(sale.saleType || 'eventual')
       setObservations(sale.observations || '')
       setCommissionPct(sale.commissionPercentage || 10)
