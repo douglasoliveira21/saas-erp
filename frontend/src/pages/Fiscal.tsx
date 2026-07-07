@@ -150,6 +150,7 @@ export function Fiscal() {
         saleData: emitType === 'nfe' ? {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
           modelo: nfeModelo, tpNF: nfeTpNF, tPag: nfeTpPag,
+          installments: (sales.find(s => s.id === selectedSaleId) as any)?.installments || 1,
           recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientIE,
           items: (window as any).__nfeImportedItems || (sales.find(s => s.id === selectedSaleId)?.items || []).map((i: any) => ({
             name: i.name, quantity: i.quantity, unitPrice: i.unitPrice || i.unit_price,

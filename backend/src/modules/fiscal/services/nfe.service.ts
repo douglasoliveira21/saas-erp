@@ -435,6 +435,38 @@ export class NfeService {
     // TRANSP
     const transp = '<transp><modFrete>9</modFrete></transp>';
 
+    // COBR (cobrança - fatura e duplicatas/parcelas)
+    let cobr = '';
+    const numParcelas = Number(saleData?.installments || saleData?.parcelas) || 1;
+    if (numParcelas > 0) {
+      const vOrigFat = vProd > 0 ? vProd.toFixed(2) : '0.00';
+      let fatBlock = `<fat><nFat>${String(invoice.number).padStart(6, '0')}</nFat><vOrig>${vOrigFat}</vOrig><vDesc>0.00</vDesc><vLiq>${vOrigFat}</vLiq></fat>`;
+      
+      let dupBlocks = '';
+      const valorParcela = Math.floor((vProd / numParcelas) * 100) / 100;
+      let totalDistribuido = 0;
+
+      for (let i = 1; i <= numParcelas; i++) {
+        // Calcular data de vencimento (parcela i = i meses a partir de hoje)
+        const brNow = new Date(new Date().getTime() - 3 * 60 * 60 * 1000);
+        const vencDate = new Date(brNow);
+        vencDate.setUTCMonth(vencDate.getUTCMonth() + i);
+        // Garantir que o dia não passe do último dia do mês
+        const lastDay = new Date(vencDate.getUTCFullYear(), vencDate.getUTCMonth() + 1, 0).getDate();
+        if (vencDate.getUTCDate() > lastDay) vencDate.setUTCDate(lastDay);
+        
+        const dVenc = `${vencDate.getUTCFullYear()}-${String(vencDate.getUTCMonth()+1).padStart(2,'0')}-${String(vencDate.getUTCDate()).padStart(2,'0')}`;
+        
+        // Última parcela recebe o restante (evita centavos sobrando)
+        const vDup = i === numParcelas ? (vProd - totalDistribuido).toFixed(2) : valorParcela.toFixed(2);
+        totalDistribuido += Number(vDup);
+        
+        dupBlocks += `<dup><nDup>${String(i).padStart(3, '0')}</nDup><dVenc>${dVenc}</dVenc><vDup>${vDup}</vDup></dup>`;
+      }
+      
+      cobr = `<cobr>${fatBlock}${dupBlocks}</cobr>`;
+    }
+
     // PAG
     const tPag = saleData?.tPag || '01'; // 01=Dinheiro
     const vPagVal = vProd > 0 ? vProd.toFixed(2) : vNF;
@@ -448,8 +480,8 @@ export class NfeService {
     // INFADIC
     const infAdic = saleData?.infCpl ? `<infAdic><infCpl>${saleData.infCpl}</infCpl></infAdic>` : '';
 
-    // Montar NFe completa
-    const infNFe = `<infNFe versao="4.00" Id="NFe${accessKey}">${ide}${emit}${dest}${dets}${total}${transp}${pag}${infAdic}</infNFe>`;
+    // Montar NFe completa (ordem: ide, emit, dest, dets, total, transp, cobr, pag, infAdic)
+    const infNFe = `<infNFe versao="4.00" Id="NFe${accessKey}">${ide}${emit}${dest}${dets}${total}${transp}${cobr}${pag}${infAdic}</infNFe>`;
     return `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">${infNFe}</NFe>`;
   }
 
