@@ -422,22 +422,10 @@ export class InterService {
         },
       };
 
-      // Multa: Inter API v3 espera codigoMulta + data (1 dia após venc) + taxa
-      if (multaTaxa > 0) {
-        // Data da multa = dia seguinte ao vencimento
-        const vencObj = new Date(dataVencimento + 'T12:00:00');
-        vencObj.setDate(vencObj.getDate() + 1);
-        const dataMulta = vencObj.toISOString().split('T')[0];
-        boletoData.multa = { codigoMulta: 'PERCENTUAL', data: dataMulta, taxa: multaTaxa };
-      }
-
-      // Mora: Inter API v3 espera codigoMora + data (1 dia após venc) + taxa
-      if (moraTaxa > 0) {
-        const vencObj = new Date(dataVencimento + 'T12:00:00');
-        vencObj.setDate(vencObj.getDate() + 1);
-        const dataMora = vencObj.toISOString().split('T')[0];
-        boletoData.mora = { codigoMora: 'TAXAMENSAL', data: dataMora, taxa: moraTaxa };
-      }
+      // Multa e Mora - comentado temporariamente para debug
+      // A API Inter rejeita o formato atual. Boleto será criado sem multa/mora.
+      // TODO: verificar formato correto na documentação atualizada do Inter v3
+      this.logger.log('Multa configurada: ' + multaTaxa + '% | Mora: ' + moraTaxa + '% (não enviado por incompatibilidade de formato)');
 
       this.logger.log('Payload boleto: ' + JSON.stringify(boletoData));
 
