@@ -323,6 +323,24 @@ export class InterService {
     );
   }
 
+  private async markBoletoAsIssued(saleId: string): Promise<void> {
+    await this.saleRepo.manager.query(
+      `UPDATE sales
+       SET status = 'boleto_emitido', updated_at = NOW()
+       WHERE id = $1 AND status IN ('pendente', 'nf_emitida')`,
+      [saleId],
+    );
+
+    await this.saleRepo.manager.query(
+      `UPDATE financial_tasks
+       SET status = 'concluido',
+           completed_at = COALESCE(completed_at, NOW()),
+           observations = COALESCE(observations, 'Boleto emitido via Banco Inter')
+       WHERE sale_id = $1 AND type = 'emissao_boleto' AND status = 'pendente'`,
+      [saleId],
+    );
+  }
+
   private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<void> {
     const cobranca = interData?.cobranca || interData;
     const boleto = interData?.boleto || {};
@@ -347,6 +365,10 @@ export class InterService {
         codigoSolicitacao,
       ],
     );
+
+    if (updated[0]?.sale_id && updated[0].type === 'boleto' && localStatus !== 'cancelado') {
+      await this.markBoletoAsIssued(updated[0].sale_id);
+    }
 
     if (localStatus === 'pago' && updated[0]?.sale_id) {
       await this.markSaleAsPaid(updated[0].sale_id, updated[0].type || 'boleto');
@@ -514,19 +536,7 @@ export class InterService {
         [sale.id, customer.id || null, 'boleto', result.codigoSolicitacao || '', 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
       );
 
-      await this.saleRepo.manager.query(
-        `UPDATE sales
-         SET status = 'boleto_emitido', updated_at = NOW()
-         WHERE id = $1 AND status IN ('pendente', 'nf_emitida')`,
-        [sale.id],
-      );
-
-      await this.saleRepo.manager.query(
-        `UPDATE financial_tasks
-         SET status = 'concluido', completed_at = NOW(), observations = COALESCE(observations, 'Boleto emitido via Banco Inter')
-         WHERE sale_id = $1 AND type = 'emissao_boleto' AND status = 'pendente'`,
-        [sale.id],
-      );
+      await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente
       if (customer.email) {
