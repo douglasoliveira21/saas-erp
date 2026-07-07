@@ -105,13 +105,16 @@ export function NewSale() {
     if (paymentMethod === 'boleto') {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
-      const firstDueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay)
-      if (firstDueDate < today) {
-        firstDueDate.setMonth(firstDueDate.getMonth() + 1)
+      const currentDay = today.getDate()
+      let vencDate: Date
+      if (dueDay > currentDay) {
+        vencDate = new Date(today.getFullYear(), today.getMonth(), dueDay)
+      } else {
+        vencDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay)
       }
-      const diffDays = Math.ceil((firstDueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      const diffDays = Math.ceil((vencDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
       if (diffDays < 5) {
-        setError('A data de vencimento deve ser no mínimo 5 dias a partir de hoje')
+        setError('A data de vencimento deve ser no mínimo 5 dias a partir de hoje. Escolha outro dia.')
         return
       }
     }
@@ -203,8 +206,36 @@ export function NewSale() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Dia do Vencimento</label>
                   <select className="input" value={dueDay} onChange={e => setDueDay(parseInt(e.target.value))}>
-                    {[5,10,15,20,25,28].map(d => <option key={d} value={d}>Dia {d}</option>)}
+                    {[5,10,15,20,25,28].map(d => {
+                      const today = new Date()
+                      today.setHours(0,0,0,0)
+                      const currentDay = today.getDate()
+                      
+                      // Calcular a data real de vencimento para este dia
+                      let vencDate: Date
+                      if (d > currentDay) {
+                        // Dia ainda não passou neste mês -> vencimento é neste mês
+                        vencDate = new Date(today.getFullYear(), today.getMonth(), d)
+                      } else {
+                        // Dia já passou -> vencimento é no próximo mês
+                        vencDate = new Date(today.getFullYear(), today.getMonth() + 1, d)
+                      }
+                      
+                      // Regra: mínimo 5 dias de distância
+                      const diffDays = Math.ceil((vencDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                      const disabled = diffDays < 5
+                      
+                      // Label descritivo
+                      const mesLabel = vencDate.getMonth() === today.getMonth() ? '(este mês)' : '(próx. mês)'
+                      
+                      return (
+                        <option key={d} value={d} disabled={disabled}>
+                          Dia {d} {mesLabel}{disabled ? ' - muito próximo' : ''}
+                        </option>
+                      )
+                    })}
                   </select>
+                  <p className="text-xs text-gray-400 mt-1">Mínimo 5 dias de antecedência. Dias indisponíveis aparecem bloqueados.</p>
                 </div>
               </div>
             )}
