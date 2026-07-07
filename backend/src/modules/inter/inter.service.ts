@@ -514,6 +514,20 @@ export class InterService {
         [sale.id, customer.id || null, 'boleto', result.codigoSolicitacao || '', 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
       );
 
+      await this.saleRepo.manager.query(
+        `UPDATE sales
+         SET status = 'boleto_emitido', updated_at = NOW()
+         WHERE id = $1 AND status IN ('pendente', 'nf_emitida')`,
+        [sale.id],
+      );
+
+      await this.saleRepo.manager.query(
+        `UPDATE financial_tasks
+         SET status = 'concluido', completed_at = NOW(), observations = COALESCE(observations, 'Boleto emitido via Banco Inter')
+         WHERE sale_id = $1 AND type = 'emissao_boleto' AND status = 'pendente'`,
+        [sale.id],
+      );
+
       // Enviar email com PDF do boleto ao cliente
       if (customer.email) {
         try {
