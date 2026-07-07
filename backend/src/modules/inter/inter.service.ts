@@ -425,13 +425,13 @@ export class InterService {
       // Multa e Mora - Inter API Cobrança v3
       if (multaTaxa > 0) {
         boletoData.multa = {
-          codigoMulta: 'PERCENTUAL',
+          codigo: 'PERCENTUAL',
           taxa: multaTaxa,
         };
       }
       if (moraTaxa > 0) {
         boletoData.mora = {
-          codigoMora: 'TAXAMENSAL',
+          codigo: 'TAXAMENSAL',
           taxa: moraTaxa,
         };
       }
