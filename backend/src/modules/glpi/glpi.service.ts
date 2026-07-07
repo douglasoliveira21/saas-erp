@@ -105,7 +105,7 @@ export class GlpiService {
           '/Ticket',
           session,
           config,
-          'searchText[entities_id]=' + entityId + '&searchText[status]=5,6&range=0-200&order=DESC&sort=1'
+          'searchText[entities_id]=' + entityId + '&searchText[status]=5,6&range=0-200&order=DESC'
         );
 
         let ticketList = Array.isArray(tickets) ? tickets : tickets.data || [];
