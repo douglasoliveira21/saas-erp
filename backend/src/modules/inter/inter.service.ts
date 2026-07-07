@@ -397,7 +397,10 @@ export class InterService {
 
       const tipoPessoa = (customer.cpfCnpj?.length || 0) > 11 ? 'JURIDICA' : 'FISICA';
 
-      const boletoData = {
+      const multaTaxa = parseFloat(Number((sale as any).multaPercentage || 2).toFixed(2));
+      const moraTaxa = parseFloat(Number((sale as any).moraPercentage || 0.03).toFixed(2));
+
+      const boletoData: any = {
         seuNumero: sale.id.substring(0, 15),
         valorNominal: Number(sale.totalAmount),
         dataVencimento,
@@ -411,21 +414,30 @@ export class InterService {
           uf: customer.uf || 'MG',
           cep: (customer.cep || '32000000').replace(/\D/g, '').padEnd(8, '0').substring(0, 8),
         },
-        multa: {
-          codigoMulta: 'PERCENTUAL',
-          taxa: parseFloat(Number((sale as any).multaPercentage || 2).toFixed(2)),
-        },
-        mora: {
-          codigoMora: 'TAXAMENSAL',
-          taxa: parseFloat(Number((sale as any).moraPercentage || 0.03).toFixed(2)),
-        },
         mensagem: {
           linha1: 'Pagamento referente a venda de servicos',
           linha2: `Venda #${sale.id.substring(0, 8)}`,
-          linha3: `Multa: ${(Number((sale as any).multaPercentage) || 2.00).toFixed(2)}% apos vencimento`,
-          linha4: `Juros: ${(Number((sale as any).moraPercentage) || 0.03).toFixed(2)}% a.m. apos vencimento`,
+          linha3: `Multa: ${multaTaxa}% apos vencimento`,
+          linha4: `Juros: ${moraTaxa}% a.m. apos vencimento`,
         },
       };
+
+      // Multa: Inter API v3 espera codigoMulta + data (1 dia após venc) + taxa
+      if (multaTaxa > 0) {
+        // Data da multa = dia seguinte ao vencimento
+        const vencObj = new Date(dataVencimento + 'T12:00:00');
+        vencObj.setDate(vencObj.getDate() + 1);
+        const dataMulta = vencObj.toISOString().split('T')[0];
+        boletoData.multa = { codigoMulta: 'PERCENTUAL', data: dataMulta, taxa: multaTaxa };
+      }
+
+      // Mora: Inter API v3 espera codigoMora + data (1 dia após venc) + taxa
+      if (moraTaxa > 0) {
+        const vencObj = new Date(dataVencimento + 'T12:00:00');
+        vencObj.setDate(vencObj.getDate() + 1);
+        const dataMora = vencObj.toISOString().split('T')[0];
+        boletoData.mora = { codigoMora: 'TAXAMENSAL', data: dataMora, taxa: moraTaxa };
+      }
 
       this.logger.log('Payload boleto: ' + JSON.stringify(boletoData));
 
