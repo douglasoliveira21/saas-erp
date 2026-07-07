@@ -397,8 +397,8 @@ export class InterService {
 
       const tipoPessoa = (customer.cpfCnpj?.length || 0) > 11 ? 'JURIDICA' : 'FISICA';
 
-      const multaTaxa = parseFloat(Number((sale as any).multaPercentage || 2).toFixed(2));
-      const moraTaxa = parseFloat(Number((sale as any).moraPercentage || 0.03).toFixed(2));
+      const multaTaxa = parseFloat(Number((sale as any).multaPercentage ?? 2).toFixed(2));
+      const moraTaxa = parseFloat(Number((sale as any).moraPercentage ?? 0.03).toFixed(2));
 
       const boletoData: any = {
         seuNumero: sale.id.substring(0, 15),
@@ -426,14 +426,12 @@ export class InterService {
       if (multaTaxa > 0) {
         boletoData.multa = {
           codigoMulta: 'PERCENTUAL',
-          valor: 0,
           taxa: multaTaxa,
         };
       }
       if (moraTaxa > 0) {
         boletoData.mora = {
           codigoMora: 'TAXAMENSAL',
-          valor: 0,
           taxa: moraTaxa,
         };
       }
