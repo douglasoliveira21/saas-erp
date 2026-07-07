@@ -10,6 +10,39 @@ export class FinancialTasksService {
     private tasksRepository: Repository<FinancialTask>,
   ) {}
 
+  private async reconcileIssuedBoletoTasks(): Promise<void> {
+    await this.tasksRepository.query(
+      `UPDATE sales s
+       SET status = 'boleto_emitido', updated_at = NOW()
+       WHERE s.status IN ('pendente', 'nf_emitida')
+         AND EXISTS (
+           SELECT 1
+           FROM payments p
+           WHERE p.sale_id = s.id
+             AND p.type = 'boleto'
+             AND p.status IN ('a_receber', 'pago', 'vencido')
+             AND COALESCE(p.codigo_solicitacao, '') <> ''
+         )`,
+    );
+
+    await this.tasksRepository.query(
+      `UPDATE financial_tasks ft
+       SET status = 'concluido',
+           completed_at = COALESCE(ft.completed_at, NOW()),
+           observations = COALESCE(ft.observations, 'Boleto emitido via Banco Inter')
+       WHERE ft.type = 'emissao_boleto'
+         AND ft.status = 'pendente'
+         AND EXISTS (
+           SELECT 1
+           FROM payments p
+           WHERE p.sale_id = ft.sale_id
+             AND p.type = 'boleto'
+             AND p.status IN ('a_receber', 'pago', 'vencido')
+             AND COALESCE(p.codigo_solicitacao, '') <> ''
+         )`,
+    );
+  }
+
   async findAll(): Promise<FinancialTask[]> {
     return this.tasksRepository.find({
       relations: ['sale', 'sale.customer', 'sale.technician'],
@@ -57,6 +90,7 @@ export class FinancialTasksService {
 
   async getTodayTasks(): Promise<{ nf: FinancialTask[]; boleto: FinancialTask[]; overdue: FinancialTask[] }> {
     const today = new Date().toISOString().split('T')[0];
+    await this.reconcileIssuedBoletoTasks();
     const pending = await this.findPending();
 
     return {

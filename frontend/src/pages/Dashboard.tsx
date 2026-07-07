@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
-import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, CheckCircle } from 'lucide-react'
+import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText } from 'lucide-react'
 import { MarketTicker } from '../components/MarketTicker'
 
 interface DashboardData {
@@ -45,6 +45,11 @@ interface FinTask {
   status: string
   dueDate: string
   sale: { id: string; customer: { name: string }; totalAmount: number; paymentMethod: string }
+}
+
+const financialTaskLabels: Record<string, string> = {
+  emissao_nf: 'NF',
+  emissao_boleto: 'Boleto',
 }
 
 export function Dashboard() {
@@ -182,7 +187,7 @@ export function Dashboard() {
                 <div className="space-y-2">
                   {financialTasks.overdue.slice(0, 5).map(t => (
                     <div key={t.id} className="text-sm flex justify-between">
-                      <span className="text-gray-700">{t.type === 'emissao_nf' ? 'NF' : 'Boleto'} - {t.sale?.customer?.name}</span>
+                      <span className="text-gray-700">{financialTaskLabels[t.type] || t.type} - {t.sale?.customer?.name}</span>
                       <span className="text-red-600 font-medium text-xs">{new Date(t.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                     </div>
                   ))}
