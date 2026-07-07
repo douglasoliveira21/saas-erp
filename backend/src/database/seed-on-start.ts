@@ -1,12 +1,41 @@
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
+async function ensureOperationalTables(dataSource: DataSource): Promise<void> {
+  await dataSource.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      sale_id UUID REFERENCES sales(id) ON DELETE SET NULL,
+      customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+      type VARCHAR(20) NOT NULL,
+      codigo_solicitacao VARCHAR(100),
+      status VARCHAR(30) DEFAULT 'a_receber',
+      value DECIMAL(10, 2) NOT NULL DEFAULT 0,
+      customer_name VARCHAR(255),
+      customer_doc VARCHAR(20),
+      due_date DATE,
+      linha_digitavel TEXT,
+      pix_copia_e_cola TEXT,
+      nosso_numero VARCHAR(50),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_sale ON payments(sale_id)');
+  await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_codigo_solicitacao ON payments(codigo_solicitacao)');
+  await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)');
+  await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at)');
+}
+
 /**
  * Executa o seed automaticamente se a tabela users estiver vazia.
  * Chamado durante a inicialização do backend.
  */
 export async function seedOnStart(dataSource: DataSource): Promise<void> {
   try {
+    await ensureOperationalTables(dataSource);
+
     // Verifica se a tabela users existe e se há registros
     const queryRunner = dataSource.createQueryRunner();
 
