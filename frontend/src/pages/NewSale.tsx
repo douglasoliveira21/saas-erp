@@ -201,7 +201,7 @@ export function NewSale() {
             </div>
 
             {/* Campos de boleto */}
-            {paymentMethod === 'boleto' && (
+            {paymentMethod === 'boleto' && (<>
               <div className="grid grid-cols-2 gap-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parcelas</label>
@@ -265,7 +265,7 @@ export function NewSale() {
                 </div>
                 <p className="col-span-2 text-xs text-orange-600">Multa e juros aplicados automaticamente no boleto após o vencimento.</p>
               </div>
-            )}
+            </>)}
 
             {/* Tipo de venda */}
             <div>
