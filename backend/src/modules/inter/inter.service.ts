@@ -422,10 +422,15 @@ export class InterService {
         },
       };
 
-      // Multa e Mora - comentado temporariamente para debug
-      // A API Inter rejeita o formato atual. Boleto será criado sem multa/mora.
-      // TODO: verificar formato correto na documentação atualizada do Inter v3
-      this.logger.log('Multa configurada: ' + multaTaxa + '% | Mora: ' + moraTaxa + '% (não enviado por incompatibilidade de formato)');
+      // Multa e Mora - formato Inter API Cobrança v3
+      // codigoMulta: NAOTEMMULTA, VALORFIXO, PERCENTUAL
+      // codigoMora: VALORDIA, TAXAMENSAL, ISENTO
+      if (multaTaxa > 0) {
+        boletoData.multa = { codigoMulta: 'PERCENTUAL', quantidadeDias: 1, taxa: multaTaxa };
+      }
+      if (moraTaxa > 0) {
+        boletoData.mora = { codigoMora: 'TAXAMENSAL', quantidadeDias: 1, taxa: moraTaxa };
+      }
 
       this.logger.log('Payload boleto: ' + JSON.stringify(boletoData));
 
