@@ -226,7 +226,7 @@ export class InterService implements OnModuleInit {
 
     try {
       const response = await this.httpRequest(
-        'PATCH',
+        'POST',
         `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`,
         { motivoCancelamento },
         {
