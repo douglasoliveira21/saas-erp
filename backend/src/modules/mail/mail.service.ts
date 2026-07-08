@@ -1,60 +1,158 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
 import * as nodemailer from 'nodemailer';
+import { Repository } from 'typeorm';
+import { EmailConfig } from './entities/email-config.entity';
+
+type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
+  private configCache: EmailConfig | null = null;
 
-  constructor() {
-    const port = parseInt(process.env.MAIL_PORT || '587');
-    this.transporter = nodemailer.createTransport({
+  constructor(
+    @InjectRepository(EmailConfig)
+    private readonly configRepository: Repository<EmailConfig>,
+  ) {
+    this.transporter = this.createTransporter(this.getEnvConfig());
+  }
+
+  async onModuleInit() {
+    await this.ensureConfigTable();
+    const config = await this.getConfig();
+    this.transporter = this.createTransporter(config);
+    this.logger.log(`Mail configurado: ${config.authUser || config.fromEmail}@${config.host}:${config.port}`);
+  }
+
+  private async ensureConfigTable(): Promise<void> {
+    try {
+      await this.configRepository.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
+    } catch (error) {
+      this.logger.warn('Extensao pgcrypto nao foi criada automaticamente: ' + error.message);
+    }
+    await this.configRepository.query(`
+      CREATE TABLE IF NOT EXISTS email_configs (
+        id uuid PRIMARY KEY,
+        host varchar(255),
+        port integer DEFAULT 587,
+        secure boolean DEFAULT false,
+        auth_user varchar(255),
+        auth_pass text,
+        from_email varchar(255),
+        from_name varchar(255),
+        copy_enabled boolean DEFAULT false,
+        copy_email varchar(255),
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      )
+    `);
+  }
+
+  private getEnvConfig(): EmailConfig {
+    return this.configRepository.create({
+      id: randomUUID(),
       host: process.env.MAIL_HOST || 'mail.vgonhost.com.br',
+      port: parseInt(process.env.MAIL_PORT || '587', 10),
+      secure: parseInt(process.env.MAIL_PORT || '587', 10) === 465,
+      authUser: process.env.MAIL_USER || 'info@vgonhost.com.br',
+      authPass: process.env.MAIL_PASS || 'Vgon2018',
+      fromEmail: process.env.MAIL_FROM || process.env.MAIL_USER || 'info@vgonhost.com.br',
+      fromName: process.env.MAIL_FROM_NAME || 'VGON',
+      copyEnabled: process.env.MAIL_COPY_ENABLED === 'true',
+      copyEmail: process.env.MAIL_COPY_EMAIL || '',
+    });
+  }
+
+  private createTransporter(config: EmailConfig): nodemailer.Transporter {
+    const port = Number(config.port || 587);
+    return nodemailer.createTransport({
+      host: config.host,
       port,
-      secure: port === 465,
+      secure: Boolean(config.secure || port === 465),
       auth: {
-        user: process.env.MAIL_USER || 'info@vgonhost.com.br',
-        pass: process.env.MAIL_PASS || 'Vgon2018',
+        user: config.authUser,
+        pass: config.authPass,
       },
-      tls: { 
+      tls: {
         rejectUnauthorized: false,
         ciphers: 'SSLv3',
       },
       authMethod: 'LOGIN',
     } as any);
-    
-    this.logger.log(`Mail configurado: ${process.env.MAIL_USER}@${process.env.MAIL_HOST}:${port}`);
+  }
+
+  private async getConfig(): Promise<EmailConfig> {
+    if (this.configCache) return this.configCache;
+    await this.ensureConfigTable();
+    let config = await this.configRepository.findOne({ where: {} });
+    if (!config) {
+      config = await this.configRepository.save(this.getEnvConfig());
+    }
+    this.configCache = config;
+    return config;
+  }
+
+  async getPublicConfig(): Promise<any> {
+    const config = await this.getConfig();
+    return {
+      id: config.id,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      authUser: config.authUser,
+      fromEmail: config.fromEmail,
+      fromName: config.fromName,
+      copyEnabled: config.copyEnabled,
+      copyEmail: config.copyEmail,
+      hasPassword: Boolean(config.authPass),
+    };
+  }
+
+  async updateConfig(body: any): Promise<any> {
+    await this.ensureConfigTable();
+    let config = await this.configRepository.findOne({ where: {} });
+    if (!config) config = this.configRepository.create(this.getEnvConfig());
+
+    config.host = body.host || '';
+    config.port = Number(body.port || 587);
+    config.secure = Boolean(body.secure);
+    config.authUser = body.authUser || '';
+    if (body.authPass) config.authPass = body.authPass;
+    config.fromEmail = body.fromEmail || body.authUser || '';
+    config.fromName = body.fromName || 'VGON';
+    config.copyEnabled = Boolean(body.copyEnabled);
+    config.copyEmail = body.copyEmail || '';
+
+    const saved = await this.configRepository.save(config);
+    this.configCache = saved;
+    this.transporter = this.createTransporter(saved);
+    return this.getPublicConfig();
   }
 
   async sendMail(to: string, subject: string, html: string): Promise<boolean> {
+    return this.sendMailWithAttachment(to, subject, html, []);
+  }
+
+  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = []): Promise<boolean> {
     try {
+      const config = await this.getConfig();
+      const fromName = config.fromName || 'VGON';
+      const fromEmail = config.fromEmail || config.authUser;
       await this.transporter.sendMail({
-        from: process.env.MAIL_FROM || 'info@vgonhost.com.br',
+        from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
         to,
+        cc: config.copyEnabled && config.copyEmail ? config.copyEmail : undefined,
         subject,
         html,
+        attachments,
       });
       this.logger.log('Email enviado para ' + to);
       return true;
     } catch (e) {
       this.logger.error('Erro ao enviar email para ' + to + ': ' + e.message);
-      return false;
-    }
-  }
-
-  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: Array<{ filename: string; content: Buffer; contentType: string }>): Promise<boolean> {
-    try {
-      await this.transporter.sendMail({
-        from: process.env.MAIL_FROM || 'info@vgonhost.com.br',
-        to,
-        subject,
-        html,
-        attachments,
-      });
-      this.logger.log('Email com anexo enviado para ' + to);
-      return true;
-    } catch (e) {
-      this.logger.error('Erro ao enviar email com anexo para ' + to + ': ' + e.message);
       return false;
     }
   }

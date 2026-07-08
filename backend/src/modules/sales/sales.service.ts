@@ -14,6 +14,8 @@ import { InterService } from '../inter/inter.service';
 import { NfeService } from '../fiscal/services/nfe.service';
 import { NfseService } from '../fiscal/services/nfse.service';
 
+type MailAttachment = { filename: string; content: Buffer; contentType: string };
+
 @Injectable()
 export class SalesService {
   constructor(
@@ -236,6 +238,106 @@ export class SalesService {
     } catch {}
 
     return this.findOne(id);
+  }
+
+  async sendCustomerDocuments(id: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
+    const sale = await this.findOne(id);
+    const customer = sale.customer as any;
+
+    if (!customer?.email) {
+      throw new BadRequestException('Cliente sem email cadastrado');
+    }
+
+    const attachments: MailAttachment[] = [];
+    const attachmentNames: string[] = [];
+
+    const invoices = await this.dataSource.query(
+      `SELECT id, type, number, series, access_key, certificate_id, xml_authorized, xml_sent, total_value
+       FROM invoices
+       WHERE sale_id = $1 AND status = 'autorizada'
+       ORDER BY issued_at DESC NULLS LAST, created_at DESC`,
+      [id],
+    );
+
+    for (const invoice of invoices) {
+      const label = invoice.type === 'nfse' ? 'NFSe' : 'NFe';
+      const number = invoice.number || 'nota';
+      const xml = invoice.xml_authorized || invoice.xml_sent;
+
+      if (xml) {
+        const filename = `${label}_${number}_serie${invoice.series || 1}.xml`;
+        attachments.push({
+          filename,
+          content: Buffer.from(xml, 'utf-8'),
+          contentType: 'application/xml',
+        });
+        attachmentNames.push(filename);
+      }
+
+      if (invoice.type === 'nfse' && invoice.access_key && invoice.certificate_id) {
+        try {
+          const pdf = await this.nfseService.downloadPdf(invoice.access_key, invoice.certificate_id);
+          const filename = `NFSe_${number}_serie${invoice.series || 1}.pdf`;
+          attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
+          attachmentNames.push(filename);
+        } catch {}
+      }
+    }
+
+    const payments = await this.dataSource.query(
+      `SELECT codigo_solicitacao
+       FROM payments
+       WHERE sale_id = $1 AND type = 'boleto' AND status != 'cancelado'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [id],
+    );
+
+    if (payments[0]?.codigo_solicitacao) {
+      try {
+        const pdf = await this.interService.getBoletoPdf(payments[0].codigo_solicitacao);
+        const filename = `boleto-${payments[0].codigo_solicitacao.substring(0, 8)}.pdf`;
+        attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
+        attachmentNames.push(filename);
+      } catch {}
+    }
+
+    if (attachments.length === 0) {
+      throw new BadRequestException('Nenhum boleto ou nota fiscal autorizada encontrada para envio');
+    }
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #2563eb; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0;">Documentos da Venda</h1>
+        </div>
+        <div style="background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+          <p style="color: #4b5563;">Ola ${customer.name || 'Cliente'},</p>
+          <p style="color: #4b5563;">Segue em anexo a documentacao da venda #${sale.id.substring(0, 8)}.</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr><td style="padding: 8px; color: #6b7280;">Valor:</td><td style="padding: 8px; font-weight: bold; color: #059669;">R$ ${Number(sale.totalAmount).toFixed(2)}</td></tr>
+            <tr><td style="padding: 8px; color: #6b7280;">Cliente:</td><td style="padding: 8px;">${customer.name || ''}</td></tr>
+          </table>
+          <p style="color: #4b5563;">Arquivos enviados:</p>
+          <ul style="color: #4b5563;">${attachmentNames.map(name => `<li>${name}</li>`).join('')}</ul>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #9ca3af; font-size: 12px; text-align: center;">VGON Solucoes em Informatica</p>
+        </div>
+      </div>
+    `;
+
+    const sent = await this.mailService.sendMailWithAttachment(
+      customer.email,
+      `Documentos da venda #${sale.id.substring(0, 8)} - VGON`,
+      html,
+      attachments,
+    );
+
+    if (!sent) {
+      throw new BadRequestException('Falha ao enviar email para o cliente');
+    }
+
+    return { success: true, sent, attachments: attachmentNames };
   }
 
   private async cancelExternalDocuments(saleId: string): Promise<void> {

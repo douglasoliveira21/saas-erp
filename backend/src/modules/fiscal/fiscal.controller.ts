@@ -259,7 +259,7 @@ export class FiscalController {
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
       // Enviar NFS-e por email ao cliente
-      try {
+      if (false) try {
         const customerEmail = body.serviceData?.recipientEmail;
         if (customerEmail && result.accessKey) {
           const pdfBuffer = await this.nfseService.downloadPdf(result.accessKey, body.certId);

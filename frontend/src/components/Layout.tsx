@@ -28,6 +28,7 @@ import {
   Star,
   Repeat,
   ClipboardList,
+  Mail,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -86,6 +87,7 @@ export function Layout() {
     ]},
     { title: 'Administração', items: [
       { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },
+      { name: 'Email', href: '/email-settings', icon: Mail, roles: ['admin'] },
     ]},
   ]
 

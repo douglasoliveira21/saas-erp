@@ -789,7 +789,7 @@ export class InterService implements OnModuleInit {
       await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente
-      if (customer.email) {
+      if (false && customer.email) {
         try {
           // Buscar PDF do boleto
           const pdfBuffer = await this.getBoletoPdf(result.codigoSolicitacao);

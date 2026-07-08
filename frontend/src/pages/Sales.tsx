@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit } from 'lucide-react'
+import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit, Send } from 'lucide-react'
 
 interface Sale {
   id: string
@@ -43,6 +43,7 @@ export function Sales() {
   const [dateTo, setDateTo] = useState(() => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth()+1, 0); return last.getFullYear() + '-' + String(last.getMonth()+1).padStart(2,'0') + '-' + String(last.getDate()).padStart(2,'0') })
   const [selected, setSelected] = useState<Sale | null>(null)
   const [error, setError] = useState('')
+  const [sendingEmailId, setSendingEmailId] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -95,6 +96,22 @@ export function Sales() {
       const msg = e.response?.data?.message || e.response?.data?.error || JSON.stringify(e.response?.data) || `Erro ao gerar ${type}`
       setError(msg)
       alert('Erro: ' + msg)
+    }
+  }
+
+  async function sendDocuments(id: string) {
+    setSendingEmailId(id)
+    setError('')
+    try {
+      const res = await api.post(`/sales/${id}/send-documents`)
+      const count = res.data?.attachments?.length || 0
+      alert(`Email enviado para o cliente com ${count} anexo(s).`)
+    } catch (e: any) {
+      const msg = e.response?.data?.message || 'Erro ao enviar email para o cliente'
+      setError(msg)
+      alert('Erro: ' + msg)
+    } finally {
+      setSendingEmailId('')
     }
   }
 
@@ -212,6 +229,11 @@ export function Sales() {
                       )}
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida'].includes(s.status) && s.paymentMethod === 'boleto' && (
                         <button onClick={() => generatePayment(s.id, 'boleto')} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><CreditCard className="w-4 h-4" /></button>
+                      )}
+                      {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
+                        <button onClick={() => sendDocuments(s.id)} disabled={sendingEmailId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
+                          <Send className={'w-4 h-4 ' + (sendingEmailId === s.id ? 'animate-pulse' : '')} />
+                        </button>
                       )}
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'boleto_emitido'].includes(s.status) && (
                         <button onClick={() => markPaid(s.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar Pagamento"><DollarSign className="w-4 h-4" /></button>

@@ -55,6 +55,12 @@ export class SalesController {
     return this.salesService.cancel(id);
   }
 
+  @Post(':id/send-documents')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendDocuments(@Param('id') id: string) {
+    return this.salesService.sendCustomerDocuments(id);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateSaleDto: any) {
     return this.salesService.update(id, updateSaleDto);

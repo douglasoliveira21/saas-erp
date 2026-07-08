@@ -31,6 +31,7 @@ import { VendasRecorrentes } from './pages/VendasRecorrentes'
 import { Cashback } from './pages/Cashback'
 import { Fidelidade } from './pages/Fidelidade'
 import { Assinaturas } from './pages/Assinaturas'
+import { EmailSettings } from './pages/EmailSettings'
 
 function App() {
   return (
@@ -69,6 +70,7 @@ function App() {
             <Route path="/cashback" element={<Cashback />} />
             <Route path="/fidelidade" element={<Fidelidade />} />
             <Route path="/assinaturas" element={<Assinaturas />} />
+            <Route path="/email-settings" element={<EmailSettings />} />
           </Route>
         </Routes>
       </AuthProvider>
