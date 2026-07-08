@@ -119,8 +119,8 @@ export function Layout() {
   const sidebarContent = (onClick?: () => void) => (
     <>
       {/* Logo */}
-      <div className="flex items-center h-16 px-5 border-b border-gray-100 flex-shrink-0">
-        <img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" alt="VGON ERP" className="h-9 object-contain" />
+      <div className="flex items-center justify-center h-20 px-5 border-b border-gray-100 flex-shrink-0">
+        <img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" alt="VGON ERP" className="h-14 object-contain" />
       </div>
 
       {/* Nav */}
