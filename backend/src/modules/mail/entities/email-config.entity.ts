@@ -32,6 +32,36 @@ export class EmailConfig {
   @Column({ name: 'copy_email', length: 255, nullable: true })
   copyEmail: string;
 
+  @Column({ length: 30, default: 'smtp' })
+  provider: string;
+
+  @Column({ name: 'microsoft_tenant_id', length: 255, nullable: true })
+  microsoftTenantId: string;
+
+  @Column({ name: 'microsoft_client_id', length: 255, nullable: true })
+  microsoftClientId: string;
+
+  @Column({ name: 'microsoft_client_secret', type: 'text', nullable: true })
+  microsoftClientSecret: string;
+
+  @Column({ name: 'microsoft_redirect_uri', type: 'text', nullable: true })
+  microsoftRedirectUri: string;
+
+  @Column({ name: 'microsoft_refresh_token', type: 'text', nullable: true })
+  microsoftRefreshToken: string;
+
+  @Column({ name: 'microsoft_access_token', type: 'text', nullable: true })
+  microsoftAccessToken: string;
+
+  @Column({ name: 'microsoft_token_expires_at', type: 'timestamp', nullable: true })
+  microsoftTokenExpiresAt: Date;
+
+  @Column({ name: 'microsoft_user_email', length: 255, nullable: true })
+  microsoftUserEmail: string;
+
+  @Column({ name: 'microsoft_state', length: 100, nullable: true })
+  microsoftState: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

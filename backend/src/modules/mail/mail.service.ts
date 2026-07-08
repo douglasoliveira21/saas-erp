@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import * as https from 'https';
 import * as nodemailer from 'nodemailer';
 import { Repository } from 'typeorm';
 import { EmailConfig } from './entities/email-config.entity';
@@ -45,10 +46,34 @@ export class MailService implements OnModuleInit {
         from_name varchar(255),
         copy_enabled boolean DEFAULT false,
         copy_email varchar(255),
+        provider varchar(30) DEFAULT 'smtp',
+        microsoft_tenant_id varchar(255),
+        microsoft_client_id varchar(255),
+        microsoft_client_secret text,
+        microsoft_redirect_uri text,
+        microsoft_refresh_token text,
+        microsoft_access_token text,
+        microsoft_token_expires_at timestamp,
+        microsoft_user_email varchar(255),
+        microsoft_state varchar(100),
         created_at timestamp DEFAULT now(),
         updated_at timestamp DEFAULT now()
       )
     `);
+    await this.ensureColumn('provider', "varchar(30) DEFAULT 'smtp'");
+    await this.ensureColumn('microsoft_tenant_id', 'varchar(255)');
+    await this.ensureColumn('microsoft_client_id', 'varchar(255)');
+    await this.ensureColumn('microsoft_client_secret', 'text');
+    await this.ensureColumn('microsoft_redirect_uri', 'text');
+    await this.ensureColumn('microsoft_refresh_token', 'text');
+    await this.ensureColumn('microsoft_access_token', 'text');
+    await this.ensureColumn('microsoft_token_expires_at', 'timestamp');
+    await this.ensureColumn('microsoft_user_email', 'varchar(255)');
+    await this.ensureColumn('microsoft_state', 'varchar(100)');
+  }
+
+  private async ensureColumn(name: string, definition: string): Promise<void> {
+    await this.configRepository.query(`ALTER TABLE email_configs ADD COLUMN IF NOT EXISTS ${name} ${definition}`);
   }
 
   private getEnvConfig(): EmailConfig {
@@ -63,6 +88,11 @@ export class MailService implements OnModuleInit {
       fromName: process.env.MAIL_FROM_NAME || 'VGON',
       copyEnabled: process.env.MAIL_COPY_ENABLED === 'true',
       copyEmail: process.env.MAIL_COPY_EMAIL || '',
+      provider: process.env.MAIL_PROVIDER || 'smtp',
+      microsoftTenantId: process.env.MICROSOFT_TENANT_ID || 'common',
+      microsoftClientId: process.env.MICROSOFT_CLIENT_ID || '',
+      microsoftClientSecret: process.env.MICROSOFT_CLIENT_SECRET || '',
+      microsoftRedirectUri: process.env.MICROSOFT_REDIRECT_URI || '',
     });
   }
 
@@ -107,6 +137,13 @@ export class MailService implements OnModuleInit {
       fromName: config.fromName,
       copyEnabled: config.copyEnabled,
       copyEmail: config.copyEmail,
+      provider: config.provider || 'smtp',
+      microsoftTenantId: config.microsoftTenantId || 'common',
+      microsoftClientId: config.microsoftClientId || '',
+      microsoftRedirectUri: config.microsoftRedirectUri || '',
+      microsoftUserEmail: config.microsoftUserEmail || '',
+      microsoftConnected: Boolean(config.microsoftRefreshToken),
+      hasMicrosoftClientSecret: Boolean(config.microsoftClientSecret),
       hasPassword: Boolean(config.authPass),
     };
   }
@@ -125,6 +162,11 @@ export class MailService implements OnModuleInit {
     config.fromName = body.fromName || 'VGON';
     config.copyEnabled = Boolean(body.copyEnabled);
     config.copyEmail = body.copyEmail || '';
+    config.provider = body.provider || 'smtp';
+    config.microsoftTenantId = body.microsoftTenantId || 'common';
+    config.microsoftClientId = body.microsoftClientId || '';
+    if (body.microsoftClientSecret) config.microsoftClientSecret = body.microsoftClientSecret;
+    config.microsoftRedirectUri = body.microsoftRedirectUri || '';
 
     const saved = await this.configRepository.save(config);
     this.configCache = saved;
@@ -139,6 +181,12 @@ export class MailService implements OnModuleInit {
   async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = []): Promise<boolean> {
     try {
       const config = await this.getConfig();
+      if ((config.provider || 'smtp') === 'microsoft365') {
+        await this.sendMicrosoftMail(config, to, subject, html, attachments);
+        this.logger.log('Email Microsoft 365 enviado para ' + to);
+        return true;
+      }
+
       const fromName = config.fromName || 'VGON';
       const fromEmail = config.fromEmail || config.authUser;
       await this.transporter.sendMail({
@@ -154,6 +202,199 @@ export class MailService implements OnModuleInit {
     } catch (e) {
       this.logger.error('Erro ao enviar email para ' + to + ': ' + e.message);
       return false;
+    }
+  }
+
+  async getMicrosoftAuthUrl(redirectUri?: string): Promise<{ url: string; state: string }> {
+    const config = await this.getConfig();
+    const tenant = config.microsoftTenantId || 'common';
+    const state = randomUUID();
+    config.microsoftState = state;
+    if (redirectUri) config.microsoftRedirectUri = redirectUri;
+    await this.configRepository.save(config);
+    this.configCache = config;
+
+    const params = new URLSearchParams({
+      client_id: config.microsoftClientId || '',
+      response_type: 'code',
+      redirect_uri: redirectUri || config.microsoftRedirectUri || '',
+      response_mode: 'query',
+      scope: 'offline_access User.Read Mail.Send',
+      state,
+      prompt: 'select_account',
+    });
+
+    return {
+      url: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params.toString()}`,
+      state,
+    };
+  }
+
+  async connectMicrosoft(code: string, state?: string, redirectUri?: string): Promise<any> {
+    const config = await this.getConfig();
+    if (config.microsoftState && state && config.microsoftState !== state) {
+      throw new Error('Estado de autenticacao Microsoft invalido');
+    }
+
+    const token = await this.requestMicrosoftToken(config, {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri || config.microsoftRedirectUri || '',
+    });
+
+    config.microsoftAccessToken = token.access_token;
+    config.microsoftRefreshToken = token.refresh_token || config.microsoftRefreshToken;
+    config.microsoftTokenExpiresAt = new Date(Date.now() + Number(token.expires_in || 3600) * 1000);
+    config.microsoftRedirectUri = redirectUri || config.microsoftRedirectUri;
+    config.provider = 'microsoft365';
+    config.microsoftState = null;
+
+    try {
+      const me = await this.microsoftJsonRequest('GET', '/v1.0/me', config.microsoftAccessToken);
+      config.microsoftUserEmail = me.mail || me.userPrincipalName || '';
+      config.fromEmail = config.microsoftUserEmail || config.fromEmail;
+    } catch (error) {
+      this.logger.warn('Nao foi possivel obter usuario Microsoft: ' + error.message);
+    }
+
+    const saved = await this.configRepository.save(config);
+    this.configCache = saved;
+    return this.getPublicConfig();
+  }
+
+  async disconnectMicrosoft(): Promise<any> {
+    const config = await this.getConfig();
+    config.microsoftAccessToken = null;
+    config.microsoftRefreshToken = null;
+    config.microsoftTokenExpiresAt = null;
+    config.microsoftUserEmail = null;
+    config.microsoftState = null;
+    if (config.provider === 'microsoft365') config.provider = 'smtp';
+    const saved = await this.configRepository.save(config);
+    this.configCache = saved;
+    return this.getPublicConfig();
+  }
+
+  private async getMicrosoftAccessToken(config: EmailConfig): Promise<string> {
+    if (
+      config.microsoftAccessToken &&
+      config.microsoftTokenExpiresAt &&
+      config.microsoftTokenExpiresAt.getTime() > Date.now() + 60000
+    ) {
+      return config.microsoftAccessToken;
+    }
+
+    if (!config.microsoftRefreshToken) {
+      throw new Error('Conta Microsoft 365 nao conectada');
+    }
+
+    const token = await this.requestMicrosoftToken(config, {
+      grant_type: 'refresh_token',
+      refresh_token: config.microsoftRefreshToken,
+    });
+
+    config.microsoftAccessToken = token.access_token;
+    config.microsoftRefreshToken = token.refresh_token || config.microsoftRefreshToken;
+    config.microsoftTokenExpiresAt = new Date(Date.now() + Number(token.expires_in || 3600) * 1000);
+    const saved = await this.configRepository.save(config);
+    this.configCache = saved;
+    return saved.microsoftAccessToken;
+  }
+
+  private requestMicrosoftToken(config: EmailConfig, values: Record<string, string>): Promise<any> {
+    const tenant = config.microsoftTenantId || 'common';
+    const body = new URLSearchParams({
+      client_id: config.microsoftClientId || '',
+      client_secret: config.microsoftClientSecret || '',
+      scope: 'offline_access User.Read Mail.Send',
+      ...values,
+    }).toString();
+
+    return this.httpsJsonRequest(
+      'POST',
+      `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  private async sendMicrosoftMail(config: EmailConfig, to: string, subject: string, html: string, attachments: MailAttachment[]): Promise<void> {
+    const token = await this.getMicrosoftAccessToken(config);
+    const messageAttachments = attachments.map((attachment) => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: attachment.filename,
+      contentType: attachment.contentType,
+      contentBytes: attachment.content.toString('base64'),
+    }));
+
+    const message: any = {
+      subject,
+      body: { contentType: 'HTML', content: html },
+      toRecipients: this.toGraphRecipients(to),
+      attachments: messageAttachments,
+    };
+
+    if (config.copyEnabled && config.copyEmail) {
+      message.ccRecipients = this.toGraphRecipients(config.copyEmail);
+    }
+
+    await this.microsoftJsonRequest('POST', '/v1.0/me/sendMail', token, {
+      message,
+      saveToSentItems: true,
+    });
+  }
+
+  private toGraphRecipients(value: string): Array<{ emailAddress: { address: string } }> {
+    return String(value || '')
+      .split(/[;,]/)
+      .map(email => email.trim())
+      .filter(Boolean)
+      .map(email => ({ emailAddress: { address: email } }));
+  }
+
+  private microsoftJsonRequest(method: string, path: string, token: string, body?: any): Promise<any> {
+    return this.httpsJsonRequest(method, `https://graph.microsoft.com${path}`, body, {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    });
+  }
+
+  private httpsJsonRequest(method: string, urlValue: string, body?: any, headers: Record<string, string> = {}): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const url = new URL(urlValue);
+      const payload = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+      const req = https.request({
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method,
+        headers: {
+          ...headers,
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', chunk => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks).toString();
+          const data = raw ? this.safeJson(raw) : {};
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.error_description || data?.error?.message || data?.error || raw || `HTTP ${res.statusCode}`));
+          }
+        });
+      });
+      req.on('error', reject);
+      if (payload) req.write(payload);
+      req.end();
+    });
+  }
+
+  private safeJson(raw: string): any {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
     }
   }
 
