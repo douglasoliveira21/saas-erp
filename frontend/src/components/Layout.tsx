@@ -29,6 +29,7 @@ import {
   Repeat,
   ClipboardList,
   Mail,
+  ArrowDownUp,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -81,6 +82,7 @@ export function Layout() {
       { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Financeiro', href: '/financeiro', icon: DollarSign, roles: ['admin', 'financeiro'] },
       { name: 'Pagamentos', href: '/pagamentos', icon: CreditCard, roles: ['admin', 'financeiro'] },
+      { name: 'Conciliação', href: '/conciliacao', icon: ArrowDownUp, roles: ['admin', 'financeiro'] },
       { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },
       { name: 'Módulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
       { name: 'Relatórios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },

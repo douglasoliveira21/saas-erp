@@ -22,6 +22,7 @@ import { Profile } from './pages/Profile'
 import { Fiscal } from './pages/Fiscal'
 import { Financial } from './pages/Financial'
 import { Payments } from './pages/Payments'
+import { Reconciliation } from './pages/Reconciliation'
 import { Vehicles } from './pages/Vehicles'
 import { Purchases } from './pages/Purchases'
 import { Pdv } from './pages/Pdv'
@@ -62,6 +63,7 @@ function App() {
             <Route path="/fiscal" element={<Fiscal />} />
             <Route path="/financeiro" element={<Financial />} />
             <Route path="/pagamentos" element={<Payments />} />
+            <Route path="/conciliacao" element={<Reconciliation />} />
             <Route path="/compras" element={<Purchases />} />
             <Route path="/pdv" element={<Pdv />} />
             <Route path="/orcamentos" element={<Orcamentos />} />

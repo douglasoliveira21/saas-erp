@@ -537,20 +537,22 @@ export class InterService implements OnModuleInit {
     return boleto;
   }
 
-  async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; failed: number }> {
+  async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; paid: number; failed: number; details: any[] }> {
     if (this.reconciliationRunning) {
-      return { checked: 0, updated: 0, failed: 0 };
+      return { checked: 0, updated: 0, paid: 0, failed: 0, details: [] };
     }
 
     this.reconciliationRunning = true;
     let checked = 0;
     let updated = 0;
+    let paid = 0;
     let failed = 0;
+    const details: any[] = [];
 
     try {
       const limit = Math.max(Number(process.env.INTER_RECONCILE_BATCH_SIZE || 50), 1);
       const payments = await this.saleRepo.manager.query(
-        `SELECT id, sale_id, codigo_solicitacao, status
+        `SELECT id, sale_id, codigo_solicitacao, status, customer_name
          FROM payments
          WHERE type = 'boleto'
            AND status IN ('a_receber', 'vencido')
@@ -570,7 +572,16 @@ export class InterService implements OnModuleInit {
         try {
           const boleto = await this.getBoleto(payment.codigo_solicitacao);
           const statusUpdate = await this.applyPaymentStatus(payment.codigo_solicitacao, boleto);
-          if (statusUpdate.changed) updated++;
+          if (statusUpdate.changed) {
+            updated++;
+            if (statusUpdate.newStatus === 'pago') paid++;
+            details.push({
+              codigo: payment.codigo_solicitacao,
+              oldStatus: payment.status,
+              newStatus: statusUpdate.newStatus,
+              customer: payment.customer_name || '',
+            });
+          }
 
           await this.auditInter('inter.reconcile_payment', statusUpdate.saleId || payment.sale_id || null, {
             source,
@@ -589,10 +600,10 @@ export class InterService implements OnModuleInit {
         }
       }
 
-      const result = { checked, updated, failed };
+      const result = { checked, updated, paid, failed, details };
       await this.auditInter('inter.reconcile_finished', null, {
         source,
-        result,
+        result: { checked, updated, paid, failed },
       });
       return result;
     } finally {
