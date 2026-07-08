@@ -53,9 +53,9 @@ export function Login() {
         <div>
           <div className="flex items-center gap-3 mb-12">
             <img
-              src="https://vgon.com.br/wp-content/uploads/2026/07/Logo-ERP-scaled.png"
+              src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png"
               alt="VGON ERP"
-              className="h-12 object-contain"
+              className="h-24 object-contain"
             />
           </div>
 
@@ -111,9 +111,9 @@ export function Login() {
             {/* Logo */}
             <div className="mt-5 flex justify-center">
               <img
-                src="https://vgon.com.br/wp-content/uploads/2026/07/Logo-ERP-scaled.png"
+                src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png"
                 alt="VGON ERP"
-                className="h-16 object-contain drop-shadow-sm"
+                className="h-14 object-contain drop-shadow-sm"
               />
             </div>
           </div>
