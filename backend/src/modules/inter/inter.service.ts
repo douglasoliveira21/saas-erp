@@ -873,6 +873,48 @@ export class InterService implements OnModuleInit {
   }
 
   /**
+   * Busca extrato bancário da conta Inter via API.
+   * GET /banking/v2/extrato?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD
+   */
+  async getExtrato(dataInicio: string, dataFim: string): Promise<any> {
+    // Token com scope de extrato
+    let token: string;
+    try {
+      const params = new URLSearchParams();
+      params.append('client_id', process.env.INTER_CLIENT_ID);
+      params.append('client_secret', process.env.INTER_CLIENT_SECRET);
+      params.append('scope', 'extrato.read');
+      params.append('grant_type', 'client_credentials');
+      const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      });
+      token = tokenRes.access_token;
+    } catch (error) {
+      this.logger.error('Erro ao obter token para extrato: ' + JSON.stringify(error.data || error.message));
+      throw new HttpException(
+        'Falha ao autenticar para extrato. Verifique se o escopo "extrato.read" está habilitado na aplicação API do Inter.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.logger.log(`Buscando extrato Inter: ${dataInicio} a ${dataFim}`);
+
+    try {
+      const response = await this.httpRequest('GET', `/banking/v2/extrato?dataInicio=${dataInicio}&dataFim=${dataFim}`, null, {
+        Authorization: `Bearer ${token}`,
+      });
+
+      return response;
+    } catch (error) {
+      this.logger.error('Erro ao buscar extrato: ' + JSON.stringify(error.data || error));
+      throw new HttpException(
+        error.data?.message || error.data?.title || 'Falha ao buscar extrato do Banco Inter',
+        error.status || HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  /**
    * Obtém PDF do boleto
    */
   async getBoletoPdf(codigoSolicitacao: string): Promise<Buffer> {

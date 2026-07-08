@@ -20,6 +20,12 @@ export class ReconciliationController {
     return this.service.importOFX(content, body.bankAccount || 'inter');
   }
 
+  @Post('import-inter')
+  async importFromInter(@Body() body: { startDate: string; endDate: string }) {
+    if (!body.startDate || !body.endDate) throw new Error('Informe startDate e endDate');
+    return this.service.importFromInterAPI(body.startDate, body.endDate);
+  }
+
   @Post('auto-reconcile')
   async autoReconcile(@Body() body: { startDate: string; endDate: string; toleranceDays?: number; minScore?: number }) {
     return this.service.autoReconcile(body.startDate, body.endDate, body.toleranceDays || 3, body.minScore || 80);

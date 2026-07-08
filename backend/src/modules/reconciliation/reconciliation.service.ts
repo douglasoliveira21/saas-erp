@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, DataSource } from 'typeorm';
 import { BankStatement } from './entities/bank-statement.entity';
+import { InterService } from '../inter/inter.service';
 
 @Injectable()
 export class ReconciliationService {
@@ -11,7 +12,59 @@ export class ReconciliationService {
     @InjectRepository(BankStatement)
     private statementsRepo: Repository<BankStatement>,
     private dataSource: DataSource,
+    private interService: InterService,
   ) {}
+
+  // Import from Inter API (extrato)
+  async importFromInterAPI(startDate: string, endDate: string): Promise<{ imported: number; duplicates: number }> {
+    const extrato = await this.interService.getExtrato(startDate, endDate);
+    const batch = 'INTER-API-' + Date.now();
+    let imported = 0;
+    let duplicates = 0;
+
+    // O extrato do Inter retorna { transacoes: [...] } ou diretamente array
+    const transacoes = extrato.transacoes || extrato || [];
+
+    for (const tx of transacoes) {
+      // Campos do extrato Inter: dataEntrada, tipoTransacao, tipoOperacao, valor, titulo, descricao
+      const transactionId = tx.idTransacao || tx.codigoTransacao || `INTER-${tx.dataEntrada}-${tx.valor}-${Math.random().toString(36).slice(2, 8)}`;
+      
+      // Verificar duplicata
+      const existing = await this.statementsRepo.findOne({ where: { transactionId, bankAccount: 'inter' } });
+      if (existing) { duplicates++; continue; }
+
+      const amount = Math.abs(Number(tx.valor));
+      const type = tx.tipoOperacao === 'C' || tx.tipoOperacao === 'CREDITO' || Number(tx.valor) > 0 ? 'credito' : 'debito';
+      const description = tx.titulo || tx.descricao || tx.tipoTransacao || '';
+      const memo = tx.descricao || tx.detalhamento || '';
+
+      // Formatar data (pode vir como DD/MM/YYYY ou YYYY-MM-DD)
+      let date = tx.dataEntrada || tx.dataMovimento || '';
+      if (date.includes('/')) {
+        const parts = date.split('/');
+        date = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+
+      const stmt = this.statementsRepo.create({
+        transactionId,
+        date,
+        amount,
+        type,
+        description,
+        memo,
+        documentNumber: tx.codigoTransacao || tx.numeroDocumento || '',
+        bankAccount: 'inter',
+        status: 'pendente',
+        importBatch: batch,
+        category: this.categorizeTransaction(description, memo),
+      });
+
+      await this.statementsRepo.save(stmt);
+      imported++;
+    }
+
+    return { imported, duplicates };
+  }
 
   // Import OFX file
   async importOFX(content: string, bankAccount: string): Promise<{ imported: number; duplicates: number }> {

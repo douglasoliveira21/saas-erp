@@ -65,6 +65,16 @@ export function Reconciliation() {
     finally { setImporting(false) }
   }
 
+  async function importFromInter() {
+    setImporting(true); setError(''); setSuccess('')
+    try {
+      const res = await api.post('/reconciliation/import-inter', { startDate, endDate })
+      setSuccess(`Extrato Inter importado: ${res.data.imported} lançamento(s), ${res.data.duplicates} duplicata(s) ignorada(s)`)
+      loadData()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao buscar extrato do Inter. Verifique se o escopo "extrato.read" está habilitado.') }
+    finally { setImporting(false) }
+  }
+
   async function autoReconcile() {
     setReconciling(true); setError(''); setSuccess('')
     try {
@@ -126,6 +136,9 @@ export function Reconciliation() {
             <Upload className="w-4 h-4" /> {importing ? 'Importando...' : 'Importar OFX'}
             <input type="file" accept=".ofx,.OFX" className="hidden" onChange={e => e.target.files?.[0] && importOFX(e.target.files[0])} disabled={importing} />
           </label>
+          <button onClick={importFromInter} disabled={importing} className="btn btn-secondary flex items-center gap-2">
+            <DollarSign className="w-4 h-4" /> {importing ? 'Buscando...' : 'Extrato Inter'}
+          </button>
           <button onClick={autoReconcile} disabled={reconciling} className="btn btn-primary flex items-center gap-2">
             <RefreshCw className={'w-4 h-4 ' + (reconciling ? 'animate-spin' : '')} />
             {reconciling ? 'Conciliando...' : 'Conciliar Auto'}
