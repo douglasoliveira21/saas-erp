@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
 import { Plus, Search, Edit, Trash2, X, Check, Clock } from 'lucide-react'
 
 interface Service {
@@ -17,7 +16,6 @@ interface Service {
 const emptyForm = { name: '', description: '', salePrice: 0, operationalCost: 0, taxPercentage: 0, estimatedTime: 60 }
 
 export function Services() {
-  const { isAdmin } = useAuth()
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

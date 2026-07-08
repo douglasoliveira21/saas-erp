@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { RefreshCw, AlertTriangle, Clock, DollarSign, CheckCircle, XCircle, Filter, Settings, Save, Eye, EyeOff } from 'lucide-react'
+import { RefreshCw, AlertTriangle, Clock, DollarSign, CheckCircle, XCircle, Settings, Save, Eye, EyeOff } from 'lucide-react'
 
 interface Ticket {
   id: string
@@ -26,16 +26,6 @@ interface SlaReport {
   totalCharge: number
   byCustomer: { name: string; tickets: number; exceeded: number; charge: number }[]
 }
-
-interface GlpiConfig {
-  id?: string
-  apiUrl: string
-  appToken: string
-  userToken: string
-  lastSync?: string
-}
-
-const glpiStatus: Record<number, string> = { 1: 'Novo', 2: 'Em atendimento', 3: 'Planejado', 4: 'Pendente', 5: 'Solucionado', 6: 'Fechado' }
 
 export function Sla() {
   const { isAdmin } = useAuth()

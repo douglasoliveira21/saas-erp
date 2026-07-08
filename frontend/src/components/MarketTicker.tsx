@@ -107,7 +107,6 @@ export function MarketTicker() {
 
       // Agora tentar buscar Ibovespa, S&P 500, Nasdaq via APIs alternativas
       try {
-        const indicesRes = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL').then(() => true).catch(() => false)
         // Tentar brapi sem token (funciona como demo)
         const brapiRes = await fetch('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d')
         if (brapiRes.ok) {

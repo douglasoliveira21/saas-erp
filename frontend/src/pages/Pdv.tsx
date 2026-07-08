@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Trash2, Check, Search, ShoppingCart, DollarSign, X } from 'lucide-react'
+import { Trash2, Search, ShoppingCart, DollarSign } from 'lucide-react'
 
 interface Product { id: string; name: string; code: string; salePrice: number; taxPercentage: number; purchasePrice: number; quantity: number }
 interface Service { id: string; name: string; salePrice: number; taxPercentage: number; operationalCost: number }

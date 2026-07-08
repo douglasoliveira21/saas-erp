@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
-import { Search, ClipboardList, Plus, Check, X } from 'lucide-react'
+import { Search, ClipboardList } from 'lucide-react'
 
 export function PreVendas() {
-  const { user } = useAuth()
   const [preVendas, setPreVendas] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

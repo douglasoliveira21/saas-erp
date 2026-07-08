@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
-import { User, Lock, Mail, Check, Eye, EyeOff } from 'lucide-react'
+import { User, Lock, Check, Eye, EyeOff } from 'lucide-react'
 
 export function Profile() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const [name, setName] = useState(user?.name || '')
   const [email, setEmail] = useState(user?.email || '')
   const [currentPassword, setCurrentPassword] = useState('')

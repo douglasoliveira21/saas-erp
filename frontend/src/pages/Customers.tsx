@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
 import { Plus, Search, Edit, Trash2, X, Check, Loader2 } from 'lucide-react'
 
 interface Customer {
@@ -26,7 +25,6 @@ interface GlpiEntity { id: number; name: string }
 const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', observations: '', glpiEntityId: '' }
 
 export function Customers() {
-  const { isAdmin, isFinanceiro } = useAuth()
   const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)

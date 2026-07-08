@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, Receipt, CreditCard, Edit } from 'lucide-react'
+import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit } from 'lucide-react'
 
 interface Sale {
   id: string
@@ -64,13 +64,6 @@ export function Sales() {
   async function markPaid(id: string) {
     try {
       await api.patch(`/sales/${id}/mark-paid`)
-      load(); setSelected(null)
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro') }
-  }
-
-  async function markBoleto(id: string) {
-    try {
-      await api.patch(`/sales/${id}/boleto-emitido`)
       load(); setSelected(null)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro') }
   }

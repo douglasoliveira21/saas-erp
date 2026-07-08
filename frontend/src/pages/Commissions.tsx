@@ -41,7 +41,6 @@ export function Commissions() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [selectedSale, setSelectedSale] = useState<any>(null)
-  const [loadingSale, setLoadingSale] = useState(false)
 
   useEffect(() => {
     load()
@@ -56,18 +55,11 @@ export function Commissions() {
     finally { setLoading(false) }
   }
 
-  async function approve(id: string) {
-    try { await api.patch(`/commissions/${id}/approve`); load() }
-    catch (e: any) { setError(e.response?.data?.message || 'Erro ao aprovar') }
-  }
-
   async function viewSale(saleId: string) {
-    setLoadingSale(true)
     try {
       const res = await api.get('/sales/' + saleId)
       setSelectedSale(res.data)
     } catch { setError('Erro ao carregar venda') }
-    finally { setLoadingSale(false) }
   }
 
   async function pay(id: string) {
@@ -122,17 +114,6 @@ export function Commissions() {
       setShowModal(false); load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao criar') }
     finally { setSaving(false) }
-  }
-
-  async function generateMonthly() {
-    const month = new Date().toISOString().slice(0, 7)
-    if (!confirm('Gerar comissoes fixas para ' + month + '?')) return
-    try {
-      const res = await api.post('/commissions/generate-monthly', { month })
-      if (res.data.created === 0) { setError('Todas as comissoes fixas deste mes ja foram geradas'); return }
-      alert(res.data.created + ' comissao(oes) gerada(s) - Total: R$ ' + Number(res.data.total).toFixed(2))
-      load()
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao gerar') }
   }
 
   const monthOptions = Array.from({ length: 13 }, (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); const v = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); const l = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); return { val: v, label: l.charAt(0).toUpperCase() + l.slice(1) } })

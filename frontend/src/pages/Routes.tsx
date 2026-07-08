@@ -6,8 +6,6 @@ import { Plus, Search, CheckCircle, XCircle, DollarSign, MapPin, Filter, X, Chec
 interface RouteLeg { id?: string; origin: string; destination: string; km: string | number }
 interface VehicleOption { id: string; plate: string; brand: string; model: string; ratePerKm: number }
 interface Route { id: string; technician: { id: string; name: string }; vehicle: VehicleOption | null; description: string; origin: string; destination: string; km: number; ratePerKm: number; totalValue: number; status: string; observations: string; routeDate: string; legs: RouteLeg[] }
-interface Summary { totalKm: number; totalValue: number; pendente: number; aprovado: number; pago: number; count: number }
-
 const statusLabels: Record<string, string> = { pendente: 'Pendente', aprovado: 'Aprovado', pago: 'Pago', cancelado: 'Cancelado' }
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', aprovado: 'bg-blue-100 text-blue-700', pago: 'bg-green-100 text-green-700', cancelado: 'bg-red-100 text-red-700' }
 const emptyLeg = (): RouteLeg => ({ origin: '', destination: '', km: '' })
@@ -16,7 +14,6 @@ export function Routes() {
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
   const canManage = isAdmin || isFinanceiro
   const [routes, setRoutes] = useState<Route[]>([])
-  const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -48,14 +45,12 @@ export function Routes() {
 
   async function load() {
     try {
-      const [r, s, v, u] = await Promise.all([
+      const [r, v, u] = await Promise.all([
         api.get('/routes'),
-        api.get('/routes/summary'),
         api.get('/vehicles/by-technician/' + (user?.id || '')).catch(() => ({ data: [] })),
         canManage ? api.get('/users').then(res => ({ data: res.data.filter((u: any) => u.active) })) : Promise.resolve({ data: [] }),
       ])
       setRoutes(r.data)
-      setSummary(s.data)
       setVehicles(v.data)
       setAllUsers(u.data)
       // Se tem apenas 1 veículo, pré-selecionar e setar o rate
@@ -117,17 +112,9 @@ export function Routes() {
     catch (e: any) { setError(e.response?.data?.message || 'Erro') } finally { setSaving(false) }
   }
 
-  async function approve(id: string) { try { await api.patch('/routes/' + id + '/approve'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
   async function pay(id: string) { try { await api.patch('/routes/' + id + '/pay'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
   async function cancel(id: string) { if (!confirm('Cancelar?')) return; try { await api.patch('/routes/' + id + '/cancel'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
   async function remove(id: string) { if (!confirm('Remover?')) return; try { await api.delete('/routes/' + id); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
-
-  async function approveMonth() {
-    const [y, m] = monthFilter.split('-')
-    if (!confirm('Aprovar todas pendentes do mes?')) return
-    try { const r = await api.patch('/routes/approve-month?year=' + y + '&month=' + m); if (r.data.count === 0) { setError('Nenhuma pendente neste mes'); return }; alert(r.data.count + ' rota(s) aprovada(s) - R$ ' + Number(r.data.total).toFixed(2)); load() }
-    catch (e: any) { setError(e.response?.data?.message || 'Erro') }
-  }
 
   async function payMonth() {
     const [y, m] = monthFilter.split('-')

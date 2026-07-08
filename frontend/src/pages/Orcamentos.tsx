@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, Eye, Trash2, Check, X, DollarSign, FileText, Send } from 'lucide-react'
+import { Plus, Search, FileText } from 'lucide-react'
 
 interface Orcamento {
   id: string
@@ -15,68 +14,36 @@ interface Orcamento {
 }
 
 export function Orcamentos() {
-  const { isAdmin, isFinanceiro, user } = useAuth()
   const [orcamentos, setOrcamentos] = useState<Orcamento[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
-  const [showModal, setShowModal] = useState(false)
-  const [customers, setCustomers] = useState<any[]>([])
-  const [products, setProducts] = useState<any[]>([])
-  const [services, setServices] = useState<any[]>([])
-  const [form, setForm] = useState({ customerId: '', validDays: '30', observations: '' })
-  const [items, setItems] = useState<any[]>([])
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     try {
-      const [oRes, cRes, pRes, sRes] = await Promise.all([
-        api.get('/sales', { params: { status: 'orcamento' } }).catch(() => ({ data: [] })),
-        api.get('/customers'),
-        api.get('/products'),
-        api.get('/services'),
-      ])
-      setOrcamentos(oRes.data.filter((s: any) => s.saleType === 'orcamento' || s.status === 'orcamento'))
-      setCustomers(cRes.data); setProducts(pRes.data); setServices(sRes.data)
-    } catch { setError('Erro ao carregar orçamentos') }
-    finally { setLoading(false) }
+      const res = await api.get('/sales', { params: { status: 'orcamento' } }).catch(() => ({ data: [] }))
+      setOrcamentos(res.data.filter((s: any) => s.saleType === 'orcamento' || s.status === 'orcamento'))
+    } catch {
+      setError('Erro ao carregar orcamentos')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  async function createOrcamento() {
-    if (!form.customerId || items.length === 0) { setError('Selecione cliente e itens'); return }
-    setSaving(true)
-    try {
-      const subtotal = items.reduce((s: number, i: any) => s + i.unitPrice * i.quantity, 0)
-      const taxAmount = items.reduce((s: number, i: any) => s + (i.unitPrice * i.quantity * (i.taxPercentage || 0) / 100), 0)
-      await api.post('/sales', {
-        customerId: form.customerId,
-        technicianId: user?.id,
-        paymentMethod: 'pix',
-        saleType: 'orcamento',
-        status: 'orcamento',
-        observations: form.observations || `Orçamento válido por ${form.validDays} dias`,
-        subtotal, taxAmount, totalAmount: subtotal + taxAmount,
-        netProfit: 0, commissionPercentage: 0, commissionAmount: 0,
-        items: items.map((i: any) => ({
-          ...(i.type === 'product' ? { productId: i.id } : { serviceId: i.id }),
-          name: i.name, quantity: i.quantity, unitPrice: i.unitPrice,
-          totalPrice: i.unitPrice * i.quantity, taxPercentage: i.taxPercentage || 0,
-          taxAmount: i.unitPrice * i.quantity * (i.taxPercentage || 0) / 100,
-          costPrice: i.costPrice || 0, netProfit: 0,
-        }))
-      })
-      setShowModal(false); setItems([]); load()
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao criar orçamento') }
-    finally { setSaving(false) }
-  }
+  const filtered = orcamentos.filter(o =>
+    o.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
+    o.observations?.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Orçamentos</h1>
-        <button onClick={() => { setForm({ customerId: '', validDays: '30', observations: '' }); setItems([]); setError(''); setShowModal(true) }} className="btn btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Novo Orçamento</button>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Orcamentos</h1>
+        <button onClick={() => setError('Fluxo de novo orcamento ainda nao implementado.')} className="btn btn-primary flex items-center gap-2">
+          <Plus className="w-4 h-4" /> Novo Orcamento
+        </button>
       </div>
 
       <div className="card mb-6">
@@ -90,9 +57,9 @@ export function Orcamentos() {
 
       <div className="card text-center py-12 text-gray-500">
         <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-        <p className="font-medium">Orçamentos</p>
-        <p className="text-sm mt-1">Crie orçamentos para enviar aos clientes. Quando aprovados, converta em venda.</p>
-        <p className="text-sm mt-1">{orcamentos.length} orçamento(s) encontrado(s)</p>
+        <p className="font-medium">Orcamentos</p>
+        <p className="text-sm mt-1">Crie orcamentos para enviar aos clientes. Quando aprovados, converta em venda.</p>
+        <p className="text-sm mt-1">{loading ? 'Carregando...' : `${filtered.length} orcamento(s) encontrado(s)`}</p>
       </div>
     </div>
   )

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { useAuth } from '../contexts/AuthContext'
 import { Plus, Search, Edit, Trash2, X, Check, AlertTriangle } from 'lucide-react'
 
 interface Product {
@@ -25,7 +24,6 @@ interface Product {
 const emptyForm = { name: '', code: '', category: '', quantity: 0, purchasePrice: 0, salePrice: 0, taxPercentage: 0, supplier: '', minStock: 5, description: '', ncm: '', cfop: '5102', cest: '', unit: 'UN' }
 
 export function Products() {
-  const { isAdmin } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')

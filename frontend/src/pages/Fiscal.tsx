@@ -1217,13 +1217,6 @@ function FiscalConfigForm() {
     }
   }
 
-  async function save() {
-    setSaving(true); setMsg('')
-    try { await api.patch('/fiscal/config', cfg); setMsg('Configuracao salva!') }
-    catch { setMsg('Erro ao salvar') }
-    finally { setSaving(false) }
-  }
-
   if (!cfg) return <div className="card text-center py-8">Carregando...</div>
 
   return (
