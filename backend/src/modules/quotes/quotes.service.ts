@@ -143,75 +143,208 @@ export class QuotesService {
     const q = await this.findOne(id);
     const items = q.items || [];
     const customer = q.customer;
+    const createdBy = q.createdBy;
+    const quoteNumber = String(q.number).padStart(4, '0');
+    const dataEmissao = new Date(q.createdAt).toLocaleDateString('pt-BR');
+    const validadeDate = new Date(q.validUntil + 'T12:00:00');
+    const hoje = new Date();
+    const diffDays = Math.ceil((validadeDate.getTime() - hoje.getTime()) / (1000*60*60*24));
+    const validadeLabel = diffDays > 0 ? `${diffDays} dias` : 'Expirado';
+    const totalFormatted = Number(q.totalAmount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const discountValue = Number(q.subtotal) * Number(q.discount) / 100;
 
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orcamento #${q.number}</title>
+    const itemsHtml = items.map((item: any, i: number) => `
+      <tr>
+        <td style="text-align:center;font-weight:600;color:#0754B8">${String(i+1).padStart(2,'0')}</td>
+        <td>
+          <div style="font-weight:600;color:#0F172A">${item.name}</div>
+          ${item.description ? `<div style="font-size:10px;color:#64748B;margin-top:2px">${item.description}</div>` : ''}
+        </td>
+        <td style="text-align:center">${item.quantity}</td>
+        <td style="text-align:center">${item.unit || 'Un'}</td>
+        <td style="text-align:right">R$ ${Number(item.unitPrice).toFixed(2)}</td>
+        <td style="text-align:right;font-weight:600">R$ ${Number(item.totalPrice).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento #${quoteNumber} - VGON</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Arial,sans-serif;color:#333;line-height:1.5;padding:40px}
-.header{display:flex;justify-content:space-between;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #7c3aed}
-.company{font-size:20px;font-weight:bold;color:#7c3aed}
-.quote-info{text-align:right}
-.quote-number{font-size:24px;font-weight:bold;color:#7c3aed}
-.badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:bold;background:#fef3c7;color:#92400e}
-.badge.aprovado{background:#d1fae5;color:#065f46}
-.section{margin:20px 0}
-.section-title{font-size:14px;font-weight:bold;color:#7c3aed;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
-.customer-info{background:#f8fafc;padding:15px;border-radius:8px;border:1px solid #e2e8f0}
-table{width:100%;border-collapse:collapse;margin:20px 0}
-th{background:#7c3aed;color:white;padding:10px 12px;text-align:left;font-size:12px;text-transform:uppercase}
-td{padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px}
-tr:nth-child(even){background:#f8fafc}
-.totals{margin-top:20px;text-align:right}
-.totals .row{display:flex;justify-content:flex-end;gap:40px;padding:6px 0}
-.totals .total-final{font-size:20px;font-weight:bold;color:#7c3aed;border-top:2px solid #7c3aed;padding-top:10px;margin-top:10px}
-.conditions{margin-top:30px;padding:15px;background:#f5f3ff;border-radius:8px;border:1px solid #ddd6fe}
-.footer{margin-top:40px;text-align:center;color:#9ca3af;font-size:11px;border-top:1px solid #e2e8f0;padding-top:15px}
-.validity{margin-top:15px;padding:10px;background:#fef3c7;border-radius:8px;text-align:center;font-size:12px;color:#92400e}
+body{font-family:'Inter',sans-serif;color:#0F172A;line-height:1.4;background:#fff}
+.page{width:210mm;min-height:297mm;margin:0 auto;position:relative;overflow:hidden}
+
+/* HEADER */
+.header{display:flex;min-height:140px;position:relative}
+.header-left{width:50%;background:linear-gradient(135deg,#03172B 0%,#062440 100%);padding:25px 30px;position:relative;clip-path:polygon(0 0,100% 0,85% 100%,0 100%)}
+.header-left::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cpath d='M10 10h5v5h-5zM30 20h3v3h-3zM60 15h4v4h-4zM80 30h3v3h-3zM20 50h5v5h-5zM50 60h3v3h-3zM70 70h4v4h-4zM40 80h3v3h-3z' fill='%23168BFF' opacity='0.08'/%3E%3Cpath d='M15 12.5h15M65 17h10M22.5 52.5h10' stroke='%23168BFF' stroke-width='0.5' opacity='0.1'/%3E%3C/svg%3E");opacity:0.5}
+.header-right{flex:1;padding:20px 30px;display:flex;flex-direction:column;justify-content:center}
+.logo{position:relative;z-index:1}
+.logo-icon{display:inline-block;width:36px;height:36px;background:linear-gradient(135deg,#0754B8,#168BFF);border-radius:8px;margin-right:10px;vertical-align:middle}
+.logo-text{font-size:18px;font-weight:800;color:#fff;letter-spacing:-0.5px;vertical-align:middle}
+.logo-sub{font-size:11px;color:#54B7FF;font-weight:500;letter-spacing:2px;margin-top:2px;margin-left:48px}
+.slogan{position:relative;z-index:1;margin-top:20px;font-size:11px;color:rgba(255,255,255,0.7);font-weight:400}
+.slogan strong{color:#54B7FF;font-weight:600}
+.quote-title{font-size:32px;font-weight:800;color:#03172B;letter-spacing:-1px}
+.quote-title-line{width:60px;height:3px;background:linear-gradient(90deg,#0754B8,#168BFF);border-radius:2px;margin-top:6px;position:relative}
+.quote-title-line::after{content:'';position:absolute;right:-6px;top:-3px;width:9px;height:9px;border-radius:50%;background:#168BFF}
+.info-grid{margin-top:14px;font-size:11px}
+.info-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #F1F5F9}
+.info-label{font-weight:600;color:#64748B;min-width:100px;text-transform:uppercase;font-size:9px;letter-spacing:0.5px}
+.info-value{color:#0F172A;font-weight:500}
+
+/* CARDS */
+.cards-row{display:flex;gap:12px;margin:12px 20px}
+.card{flex:1;border:1px solid #D9E2EC;border-radius:8px;padding:14px 16px;background:#fff}
+.card-title{font-size:11px;font-weight:700;color:#0754B8;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.card-title::before{content:'';display:inline-block;width:4px;height:14px;background:linear-gradient(180deg,#0754B8,#168BFF);border-radius:2px}
+.card-row{font-size:10.5px;padding:3px 0;display:flex;gap:6px}
+.card-row .label{font-weight:600;color:#64748B;min-width:80px}
+.card-row .value{color:#0F172A}
+
+/* TABLE */
+.table-section{margin:12px 20px}
+.table-title{font-size:11px;font-weight:700;color:#0754B8;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.table-title::before{content:'';display:inline-block;width:4px;height:14px;background:linear-gradient(180deg,#0754B8,#168BFF);border-radius:2px}
+table{width:100%;border-collapse:collapse;font-size:10.5px}
+thead tr{background:linear-gradient(90deg,#03172B,#0754B8)}
+th{color:#fff;padding:8px 10px;text-align:left;font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
+td{padding:9px 10px;border-bottom:1px solid #E8EDF2}
+tbody tr:nth-child(even){background:#F7F9FC}
+
+/* INVESTMENT */
+.invest-row{display:flex;gap:12px;margin:12px 20px}
+.invest-card{flex:1;border:1px solid #D9E2EC;border-radius:8px;padding:14px 16px}
+.invest-panel{background:linear-gradient(135deg,#03172B,#062440);border-radius:6px;padding:16px;text-align:center;position:relative;overflow:hidden}
+.invest-panel::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Ccircle cx='30' cy='30' r='20' stroke='%23168BFF' stroke-width='0.3' fill='none' opacity='0.2'/%3E%3C/svg%3E");opacity:0.4}
+.invest-label{font-size:8px;color:#54B7FF;text-transform:uppercase;letter-spacing:1px;font-weight:600;position:relative}
+.invest-value{font-size:28px;font-weight:800;color:#fff;margin-top:4px;position:relative}
+.invest-ext{font-size:9px;color:rgba(255,255,255,0.6);margin-top:4px;position:relative}
+.invest-line{width:40px;height:2px;background:#168BFF;margin:8px auto 0;border-radius:1px;position:relative}
+.conditions-list{font-size:10px;list-style:none}
+.conditions-list li{padding:4px 0;padding-left:14px;position:relative;border-bottom:1px solid #F1F5F9}
+.conditions-list li::before{content:'';position:absolute;left:0;top:9px;width:6px;height:6px;border-radius:50%;background:#168BFF}
+.conditions-list .label{font-weight:600;color:#0F172A}
+.conditions-list .value{color:#64748B}
+
+/* OBSERVATIONS */
+.obs-section{margin:12px 20px}
+.obs-card{border:1px solid #D9E2EC;border-radius:8px;padding:14px 16px}
+.obs-text{font-size:10px;color:#64748B;line-height:1.5}
+.signature-line{border-top:1px solid #64748B;width:200px;margin-top:20px;margin-left:auto;padding-top:4px;text-align:center;font-size:8px;color:#64748B;text-transform:uppercase;letter-spacing:0.5px}
+
+/* FOOTER */
+.footer{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(90deg,#03172B,#062440);padding:14px 30px;display:flex;align-items:center;justify-content:space-between}
+.footer-logo{font-size:11px;font-weight:700;color:#fff}
+.footer-logo-sub{font-size:8px;color:#54B7FF;letter-spacing:1px}
+.footer-info{display:flex;gap:20px;font-size:9px;color:rgba(255,255,255,0.7)}
+.footer-info span{display:flex;align-items:center;gap:4px}
+
+@media print{
+  body{margin:0}
+  .page{width:100%;min-height:auto}
+}
 </style></head><body>
-<div class="header">
-  <div><div class="company">VGON Soluções em Informática</div><div style="font-size:12px;color:#666;margin-top:4px">CNPJ: Consultar | Contagem/MG</div></div>
-  <div class="quote-info">
-    <div class="quote-number">Orçamento #${String(q.number).padStart(4, '0')}</div>
-    <div style="font-size:12px;color:#666;margin-top:4px">Data: ${new Date(q.createdAt).toLocaleDateString('pt-BR')}</div>
-    <div style="margin-top:6px"><span class="badge ${q.status}">${q.status.toUpperCase()}</span></div>
+<div class="page">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon"></span>
+        <span class="logo-text">VGON</span>
+        <div class="logo-sub">SOLUÇÕES EM TI</div>
+      </div>
+      <div class="slogan">TECNOLOGIA QUE <strong>CONECTA</strong>,<br>SOLUÇÕES QUE <strong>TRANSFORMAM</strong>.</div>
+    </div>
+    <div class="header-right">
+      <div class="quote-title">ORÇAMENTO</div>
+      <div class="quote-title-line"></div>
+      <div class="info-grid">
+        <div class="info-row"><span class="info-label">Nº Orçamento:</span><span class="info-value">${new Date(q.createdAt).getFullYear()}-${quoteNumber}</span></div>
+        <div class="info-row"><span class="info-label">Data:</span><span class="info-value">${dataEmissao}</span></div>
+        <div class="info-row"><span class="info-label">Validade:</span><span class="info-value">${validadeLabel}</span></div>
+        <div class="info-row"><span class="info-label">Consultor:</span><span class="info-value">${createdBy?.name || 'VGON'}</span></div>
+        <div class="info-row"><span class="info-label">E-mail:</span><span class="info-value">${createdBy?.email || 'contato@vgon.com.br'}</span></div>
+      </div>
+    </div>
   </div>
-</div>
 
-<div class="section">
-  <div class="section-title">Cliente</div>
-  <div class="customer-info">
-    <strong>${customer?.name || ''}</strong><br>
-    ${customer?.cpfCnpj ? 'CPF/CNPJ: ' + customer.cpfCnpj + '<br>' : ''}
-    ${customer?.email ? 'Email: ' + customer.email + '<br>' : ''}
-    ${customer?.phone ? 'Telefone: ' + customer.phone + '<br>' : ''}
-    ${customer?.address ? 'Endereço: ' + customer.address : ''}
+  <!-- DADOS DO CLIENTE + ESCOPO -->
+  <div class="cards-row">
+    <div class="card">
+      <div class="card-title">DADOS DO CLIENTE</div>
+      <div class="card-row"><span class="label">Razão Social:</span><span class="value">${customer?.name || '-'}</span></div>
+      ${customer?.cpfCnpj ? `<div class="card-row"><span class="label">CPF/CNPJ:</span><span class="value">${customer.cpfCnpj}</span></div>` : ''}
+      ${customer?.email ? `<div class="card-row"><span class="label">E-mail:</span><span class="value">${customer.email}</span></div>` : ''}
+      ${customer?.phone ? `<div class="card-row"><span class="label">Telefone:</span><span class="value">${customer.phone}</span></div>` : ''}
+      ${customer?.address ? `<div class="card-row"><span class="label">Endereço:</span><span class="value">${customer.address}</span></div>` : ''}
+    </div>
+    <div class="card">
+      <div class="card-title">OBJETIVO / ESCOPO</div>
+      <p style="font-size:10px;color:#64748B;line-height:1.5">Apresentamos abaixo nossa proposta comercial para prestação de serviços e soluções em Tecnologia da Informação, conforme necessidades identificadas.</p>
+    </div>
   </div>
-</div>
 
-<div class="section">
-  <div class="section-title">Itens do Orçamento</div>
-  <table>
-    <thead><tr><th>#</th><th>Descrição</th><th>Qtd</th><th>Valor Unit.</th><th>Total</th></tr></thead>
-    <tbody>
-      ${items.map((item: any, i: number) => `<tr><td>${i + 1}</td><td>${item.name}${item.description ? '<br><small style="color:#666">' + item.description + '</small>' : ''}</td><td>${item.quantity}</td><td>R$ ${Number(item.unitPrice).toFixed(2)}</td><td>R$ ${Number(item.totalPrice).toFixed(2)}</td></tr>`).join('')}
-    </tbody>
-  </table>
-</div>
+  <!-- TABELA DE ITENS -->
+  <div class="table-section">
+    <div class="table-title">ITENS / SERVIÇOS</div>
+    <table>
+      <thead><tr><th>Item</th><th>Descrição do Serviço / Solução</th><th style="text-align:center">Qtde.</th><th style="text-align:center">Unid.</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Valor Total</th></tr></thead>
+      <tbody>${itemsHtml}</tbody>
+    </table>
+  </div>
 
-<div class="totals">
-  <div class="row"><span>Subtotal:</span><span>R$ ${Number(q.subtotal).toFixed(2)}</span></div>
-  ${Number(q.discount) > 0 ? `<div class="row"><span>Desconto (${q.discount}%):</span><span>- R$ ${(Number(q.subtotal) * Number(q.discount) / 100).toFixed(2)}</span></div>` : ''}
-  <div class="row total-final"><span>Total:</span><span>R$ ${Number(q.totalAmount).toFixed(2)}</span></div>
-</div>
+  <!-- INVESTIMENTO + CONDIÇÕES -->
+  <div class="invest-row">
+    <div class="invest-card">
+      <div class="card-title">INVESTIMENTO</div>
+      <div class="invest-panel">
+        <div class="invest-label">VALOR TOTAL DO ORÇAMENTO</div>
+        <div class="invest-value">${totalFormatted}</div>
+        ${Number(q.discount) > 0 ? `<div class="invest-ext">Desconto de ${q.discount}% aplicado (- R$ ${discountValue.toFixed(2)})</div>` : ''}
+        <div class="invest-line"></div>
+      </div>
+    </div>
+    <div class="invest-card">
+      <div class="card-title">CONDIÇÕES COMERCIAIS</div>
+      <ul class="conditions-list">
+        ${q.paymentConditions ? `<li><span class="label">Pagamento:</span> <span class="value">${q.paymentConditions}</span></li>` : '<li><span class="label">Pagamento:</span> <span class="value">A combinar</span></li>'}
+        <li><span class="label">Validade:</span> <span class="value">${new Date(q.validUntil + 'T12:00:00').toLocaleDateString('pt-BR')}</span></li>
+        <li><span class="label">Início:</span> <span class="value">Até 5 dias úteis após aprovação</span></li>
+        <li><span class="label">Garantia:</span> <span class="value">Conforme contrato de serviço</span></li>
+      </ul>
+    </div>
+  </div>
 
-${q.paymentConditions ? `<div class="conditions"><div class="section-title">Condições de Pagamento</div><p style="font-size:13px">${q.paymentConditions}</p></div>` : ''}
-${q.observations ? `<div class="section"><div class="section-title">Observações</div><p style="font-size:13px">${q.observations}</p></div>` : ''}
+  <!-- OBSERVAÇÕES -->
+  ${q.observations ? `
+  <div class="obs-section">
+    <div class="obs-card">
+      <div class="card-title">OBSERVAÇÕES</div>
+      <p class="obs-text">${q.observations}</p>
+      <div class="signature-line">Assinatura / Carimbo do Cliente</div>
+    </div>
+  </div>` : `
+  <div class="obs-section">
+    <div class="obs-card">
+      <div class="card-title">OBSERVAÇÕES</div>
+      <p class="obs-text">Este orçamento foi elaborado com base nas informações fornecidas pelo cliente e pode ser ajustado conforme novas necessidades. Estamos à disposição para esclarecer quaisquer dúvidas.</p>
+      <div class="signature-line">Assinatura / Carimbo do Cliente</div>
+    </div>
+  </div>`}
 
-<div class="validity">⏰ Validade deste orçamento: <strong>${new Date(q.validUntil + 'T12:00:00').toLocaleDateString('pt-BR')}</strong></div>
-
-<div class="footer">
-  <p>VGON Soluções em Informática | Contagem/MG</p>
-  <p>Este documento é um orçamento e não gera compromisso financeiro até a aprovação.</p>
+  <!-- FOOTER -->
+  <div class="footer">
+    <div>
+      <div class="footer-logo">VGON</div>
+      <div class="footer-logo-sub">SOLUÇÕES EM TI</div>
+    </div>
+    <div class="footer-info">
+      <span>douglas.oliveira@vgon.com.br</span>
+      <span>www.vgon.com.br</span>
+      <span>Contagem/MG</span>
+    </div>
+  </div>
 </div>
 </body></html>`;
   }
