@@ -30,6 +30,7 @@ import {
   ClipboardList,
   Mail,
   ArrowDownUp,
+  BarChart3,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -41,7 +42,7 @@ export function Layout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [financeiroOpen, setFinanceiroOpen] = useState(
-    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports', '/contas-pagar'].includes(location.pathname)
+    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports', '/contas-pagar', '/dre'].includes(location.pathname)
   )
   const [vendasOpen, setVendasOpen] = useState(
     ['/sales', '/sales/new', '/pdv', '/orcamentos', '/pre-vendas', '/vendas-recorrentes', '/cashback', '/fidelidade', '/assinaturas'].includes(location.pathname)
@@ -87,6 +88,7 @@ export function Layout() {
       { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },
       { name: 'Módulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
       { name: 'Relatórios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },
+      { name: 'DRE', href: '/dre', icon: BarChart3, roles: ['admin', 'financeiro'] },
     ]},
     { title: 'Administração', items: [
       { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },

@@ -34,6 +34,7 @@ import { Fidelidade } from './pages/Fidelidade'
 import { Assinaturas } from './pages/Assinaturas'
 import { EmailSettings } from './pages/EmailSettings'
 import { Bills } from './pages/Bills'
+import { Dre } from './pages/Dre'
 
 function App() {
   return (
@@ -75,6 +76,7 @@ function App() {
             <Route path="/assinaturas" element={<Assinaturas />} />
             <Route path="/email-settings" element={<EmailSettings />} />
             <Route path="/contas-pagar" element={<Bills />} />
+            <Route path="/dre" element={<Dre />} />
           </Route>
         </Routes>
       </AuthProvider>
