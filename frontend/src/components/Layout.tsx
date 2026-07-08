@@ -120,10 +120,7 @@ export function Layout() {
     <>
       {/* Logo */}
       <div className="flex items-center h-16 px-5 border-b border-gray-100 flex-shrink-0">
-        <div className="w-8 h-8 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-sm">
-          <span className="text-white font-bold text-sm">G</span>
-        </div>
-        <span className="ml-3 text-[15px] font-bold text-gray-900 tracking-tight">Gestão TI</span>
+        <img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" alt="VGON ERP" className="h-9 object-contain" />
       </div>
 
       {/* Nav */}
