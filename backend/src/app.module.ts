@@ -21,6 +21,7 @@ import { FinancialModule } from './modules/financial/financial.module';
 import { InterModule } from './modules/inter/inter.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 
@@ -50,6 +51,7 @@ import { HealthController } from './health.controller';
     InterModule,
     VehiclesModule,
     PurchasesModule,
+    ReconciliationModule,
   ],
   controllers: [HealthController],
 })
