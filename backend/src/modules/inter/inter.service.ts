@@ -790,12 +790,18 @@ export class InterService implements OnModuleInit {
       const result = await this.createBoleto(boletoData);
 
       // Salvar pagamento no banco
-      await this.saleRepo.manager.query(
-        `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero)
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-         WHERE NOT EXISTS (SELECT 1 FROM payments WHERE codigo_solicitacao = $4)`,
-        [sale.id, customer.id || null, 'boleto', result.codigoSolicitacao || '', 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
+      const codigoSol = result.codigoSolicitacao || '';
+      // Check if payment already exists
+      const existingPayment = await this.saleRepo.manager.query(
+        `SELECT id FROM payments WHERE codigo_solicitacao = $1 LIMIT 1`, [codigoSol]
       );
+      if (existingPayment.length === 0) {
+        await this.saleRepo.manager.query(
+          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
+        );
+      }
 
       await this.markBoletoAsIssued(sale.id);
 
