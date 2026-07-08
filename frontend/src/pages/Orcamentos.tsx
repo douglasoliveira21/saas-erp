@@ -114,7 +114,7 @@ export function Orcamentos() {
 
   function openPdf(id: string) {
     const token = localStorage.getItem('@GestaoTI:token')
-    window.open(`/api/quotes/${id}/pdf?token=${token}`, '_blank')
+    window.open(`/api/quotes-public/${id}/pdf?token=${token}`, '_blank')
   }
 
   const filtered = quotes.filter(q => {

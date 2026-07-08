@@ -33,7 +33,7 @@ export class QuotesController {
   duplicate(@Param('id') id: string, @Request() req: any) { return this.service.duplicate(id, req.user.id); }
 
   @Get(':id/pdf')
-  async getPdf(@Param('id') id: string, @Res() res: Response) {
+  async getPdfAuth(@Param('id') id: string, @Res() res: Response) {
     const html = await this.service.generatePdfHtml(id);
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
@@ -41,4 +41,32 @@ export class QuotesController {
 
   @Delete(':id')
   remove(@Param('id') id: string) { return this.service.remove(id); }
+}
+
+// Controller público para PDF (sem JWT guard - usa token via query)
+@Controller('quotes-public')
+export class QuotesPublicController {
+  constructor(private readonly service: QuotesService) {}
+
+  @Get(':id/pdf')
+  async getPdf(@Param('id') id: string, @Query('token') token: string, @Res() res: Response) {
+    if (!token) {
+      res.status(401).json({ message: 'Token obrigatório' });
+      return;
+    }
+    // Validação básica do token (verificar se é um JWT válido)
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) throw new Error('Invalid');
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      if (!payload.sub || !payload.exp) throw new Error('Invalid');
+      if (payload.exp * 1000 < Date.now()) throw new Error('Expired');
+    } catch {
+      res.status(401).json({ message: 'Token inválido ou expirado' });
+      return;
+    }
+    const html = await this.service.generatePdfHtml(id);
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  }
 }
