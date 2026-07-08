@@ -10,6 +10,9 @@ import { FinancialTask } from '../financial-tasks/entities/financial-task.entity
 import { MailService } from '../mail/mail.service';
 import { FinancialService } from '../financial/financial.service';
 import { User } from '../users/entities/user.entity';
+import { InterService } from '../inter/inter.service';
+import { NfeService } from '../fiscal/services/nfe.service';
+import { NfseService } from '../fiscal/services/nfse.service';
 
 @Injectable()
 export class SalesService {
@@ -27,6 +30,9 @@ export class SalesService {
     private dataSource: DataSource,
     private mailService: MailService,
     private financialService: FinancialService,
+    private interService: InterService,
+    private nfeService: NfeService,
+    private nfseService: NfseService,
   ) {}
 
   async create(createSaleDto: any): Promise<Sale> {
@@ -213,33 +219,11 @@ export class SalesService {
     if (['finalizado', 'cancelado'].includes(sale.status as string)) {
       throw new BadRequestException('Esta venda nao pode ser cancelada');
     }
+
+    await this.cancelExternalDocuments(id);
+
     sale.status = 'cancelado' as any;
     await this.salesRepository.save(sale);
-
-    // Cancelar boleto no Banco Inter (se existir)
-    try {
-      const payments = await this.dataSource.query(
-        `SELECT codigo_solicitacao, type FROM payments WHERE sale_id = $1 AND status != 'cancelado'`, [id]
-      );
-      for (const payment of payments) {
-        await this.dataSource.query(
-          `UPDATE payments SET status = 'cancelado', updated_at = NOW() WHERE sale_id = $1`, [id]
-        );
-      }
-    } catch {}
-
-    // Cancelar nota fiscal (se existir autorizada)
-    try {
-      const invoices = await this.dataSource.query(
-        `SELECT id, type, access_key, certificate_id, status FROM invoices WHERE sale_id = $1 AND status = 'autorizada'`, [id]
-      );
-      for (const inv of invoices) {
-        // Marcar como cancelada no banco (o cancelamento real na SEFAZ/Cidade360 precisa ser feito manualmente pelo prazo)
-        await this.dataSource.query(
-          `UPDATE invoices SET status = 'cancelada', cancel_reason = 'Cancelamento automatico por cancelamento da venda', canceled_at = NOW() WHERE id = $1`, [inv.id]
-        );
-      }
-    } catch {}
 
     // Cancelar contas a receber
     try {
@@ -252,6 +236,31 @@ export class SalesService {
     } catch {}
 
     return this.findOne(id);
+  }
+
+  private async cancelExternalDocuments(saleId: string): Promise<void> {
+    const reason = `Cancelamento da venda ${saleId.substring(0, 8)}`;
+
+    await this.interService.cancelPaymentsForSale(saleId, 'ACERTOS');
+
+    const invoices = await this.dataSource.query(
+      `SELECT id, type, certificate_id
+       FROM invoices
+       WHERE sale_id = $1 AND status = 'autorizada'`,
+      [saleId],
+    );
+
+    for (const invoice of invoices) {
+      if (!invoice.certificate_id) {
+        throw new BadRequestException(`Nota fiscal ${invoice.id} sem certificado vinculado para cancelamento`);
+      }
+
+      if (invoice.type === 'nfse') {
+        await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id);
+      } else {
+        await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id);
+      }
+    }
   }
 
   async update(id: string, updateSaleDto: any): Promise<Sale> {

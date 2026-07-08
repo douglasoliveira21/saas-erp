@@ -158,7 +158,7 @@ export class NfseService {
     try {
       // Montar XML de evento de cancelamento
       const cnpj = (config.cnpj || '').replace(/\D/g, '');
-      const cancelXml = this.buildCancelEventXml(invoice, cnpj, reason);
+      const cancelXml = this.buildCancelEventXml(invoice, cnpj, reason, config.environment);
       // Assinar XML de cancelamento com certificado
       const signedCancelXml = await this.signCancelXml(cancelXml, certId);
       const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedCancelXml, 'utf-8')).toString('base64');
@@ -291,7 +291,7 @@ export class NfseService {
     return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${invoice.recipientName || ''}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${serviceData?.discriminacao || 'Servicos de informatica'}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>1</tpRetISSQN></tribMun><totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores></infDPS></DPS>`;
   }
 
-  private buildCancelEventXml(invoice: Invoice, cnpj: string, reason: string): string {
+  private buildCancelEventXml(invoice: Invoice, cnpj: string, reason: string, tpAmb: number): string {
     const now = new Date();
     const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -299,7 +299,7 @@ export class NfseService {
     // TSIdPedRegEvt: PRE + chNFSe(50) + tpEvento(6) = 59 chars (pattern: PRE[0-9]{56})
     const chNFSe = (invoice.accessKey || '').replace(/\D/g, '').slice(0, 50);
     const eventId = 'PRE' + chNFSe + '101101';
-    return `<pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infPedReg Id="${eventId}"><tpAmb>1</tpAmb><verAplic>VGON-ERP-1.0</verAplic><dhEvento>${dhEvento}</dhEvento><CNPJAutor>${cnpj}</CNPJAutor><chNFSe>${chNFSe}</chNFSe><e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>9</cMotivo><xMotivo>${reason}</xMotivo></e101101></infPedReg></pedRegEvento>`;
+    return `<pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infPedReg Id="${eventId}"><tpAmb>${tpAmb}</tpAmb><verAplic>VGON-ERP-1.0</verAplic><dhEvento>${dhEvento}</dhEvento><CNPJAutor>${cnpj}</CNPJAutor><chNFSe>${chNFSe}</chNFSe><e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>9</cMotivo><xMotivo>${reason}</xMotivo></e101101></infPedReg></pedRegEvento>`;
   }
 
   private async signCancelXml(xml: string, certId: string): Promise<string> {

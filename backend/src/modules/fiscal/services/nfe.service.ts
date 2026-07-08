@@ -287,6 +287,7 @@ export class NfeService {
         invoice.cancelReason = reason;
         invoice.canceledAt = new Date();
         invoice.cancelProtocol = this.extractFromBlock(response, 'retEvento', 'nProt') || '';
+        invoice.xmlCancel = response;
       } else {
         throw new Error(`${cStat}: ${xMotivo}`);
       }

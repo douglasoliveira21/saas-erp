@@ -212,6 +212,78 @@ export class InterService {
   /**
    * Cria cobrança PIX imediata via POST /pix/v2/cob
    */
+  /**
+   * Cancela uma cobranca emitida no Banco Inter.
+   * A API de Cobranca v3 usa o codigoSolicitacao como identificador da baixa.
+   */
+  async cancelBoleto(codigoSolicitacao: string, motivoCancelamento = 'ACERTOS'): Promise<any> {
+    const token = await this.getAccessToken();
+
+    this.logger.log(`Cancelando boleto no Banco Inter: ${codigoSolicitacao}`);
+
+    try {
+      const response = await this.httpRequest(
+        'PATCH',
+        `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`,
+        { motivoCancelamento },
+        {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      await this.saleRepo.manager.query(
+        `UPDATE payments
+         SET status = 'cancelado', updated_at = NOW()
+         WHERE codigo_solicitacao = $1`,
+        [codigoSolicitacao],
+      );
+
+      this.logger.log(`Boleto cancelado no Banco Inter: ${codigoSolicitacao}`);
+      return response || { success: true };
+    } catch (error) {
+      const errorDetail = JSON.stringify(error.data || error.message || error);
+      this.logger.error('Erro ao cancelar boleto no Banco Inter: ' + errorDetail);
+
+      try {
+        const boleto = await this.getBoleto(codigoSolicitacao);
+        const cobranca = boleto?.cobranca || boleto;
+        const situacao = cobranca?.situacao || boleto?.situacao || boleto?.status;
+        if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
+          await this.saleRepo.manager.query(
+            `UPDATE payments
+             SET status = 'cancelado', updated_at = NOW()
+             WHERE codigo_solicitacao = $1`,
+            [codigoSolicitacao],
+          );
+          return boleto;
+        }
+      } catch {}
+
+      throw new HttpException(
+        'Falha ao cancelar boleto no Banco Inter: ' + (error.data?.detail || error.data?.message || error.data?.title || errorDetail),
+        error.status || HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  async cancelPaymentsForSale(saleId: string, motivoCancelamento = 'ACERTOS'): Promise<void> {
+    const payments = await this.saleRepo.manager.query(
+      `SELECT codigo_solicitacao, type, status
+       FROM payments
+       WHERE sale_id = $1
+         AND status NOT IN ('cancelado', 'pago')
+         AND COALESCE(codigo_solicitacao, '') <> ''`,
+      [saleId],
+    );
+
+    for (const payment of payments) {
+      if (payment.type === 'boleto') {
+        await this.cancelBoleto(payment.codigo_solicitacao, motivoCancelamento);
+      }
+    }
+  }
+
   async createPixImmediate(data: {
     calendario?: { expiracao: number };
     valor: { original: string };
