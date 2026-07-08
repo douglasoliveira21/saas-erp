@@ -41,7 +41,7 @@ export function Layout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [financeiroOpen, setFinanceiroOpen] = useState(
-    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports'].includes(location.pathname)
+    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports', '/contas-pagar'].includes(location.pathname)
   )
   const [vendasOpen, setVendasOpen] = useState(
     ['/sales', '/sales/new', '/pdv', '/orcamentos', '/pre-vendas', '/vendas-recorrentes', '/cashback', '/fidelidade', '/assinaturas'].includes(location.pathname)
@@ -81,6 +81,7 @@ export function Layout() {
     { title: 'Financeiro', expandable: true, items: [
       { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
       { name: 'Financeiro', href: '/financeiro', icon: DollarSign, roles: ['admin', 'financeiro'] },
+      { name: 'Contas a Pagar', href: '/contas-pagar', icon: Receipt, roles: ['admin', 'financeiro'] },
       { name: 'Pagamentos', href: '/pagamentos', icon: CreditCard, roles: ['admin', 'financeiro'] },
       { name: 'Conciliação', href: '/conciliacao', icon: ArrowDownUp, roles: ['admin', 'financeiro'] },
       { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },

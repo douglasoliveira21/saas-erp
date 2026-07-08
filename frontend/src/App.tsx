@@ -33,6 +33,7 @@ import { Cashback } from './pages/Cashback'
 import { Fidelidade } from './pages/Fidelidade'
 import { Assinaturas } from './pages/Assinaturas'
 import { EmailSettings } from './pages/EmailSettings'
+import { Bills } from './pages/Bills'
 
 function App() {
   return (
@@ -73,6 +74,7 @@ function App() {
             <Route path="/fidelidade" element={<Fidelidade />} />
             <Route path="/assinaturas" element={<Assinaturas />} />
             <Route path="/email-settings" element={<EmailSettings />} />
+            <Route path="/contas-pagar" element={<Bills />} />
           </Route>
         </Routes>
       </AuthProvider>
