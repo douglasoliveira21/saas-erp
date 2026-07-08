@@ -1,4 +1,4 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as https from 'https';
@@ -7,6 +7,7 @@ import * as path from 'path';
 import { Sale } from '../sales/entities/sale.entity';
 import { FinancialService } from '../financial/financial.service';
 import { MailService } from '../mail/mail.service';
+import { AuditService } from '../audit/audit.service';
 
 interface TokenCache {
   accessToken: string;
@@ -14,17 +15,19 @@ interface TokenCache {
 }
 
 @Injectable()
-export class InterService {
+export class InterService implements OnModuleInit {
   private readonly logger = new Logger(InterService.name);
   private tokenCache: TokenCache | null = null;
   private agent: https.Agent;
   private readonly baseUrl: string;
+  private reconciliationRunning = false;
 
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepo: Repository<Sale>,
     private readonly financialService: FinancialService,
     private readonly mailService: MailService,
+    private readonly auditService: AuditService,
   ) {
     const environment = process.env.INTER_ENVIRONMENT || 'sandbox';
     this.baseUrl = environment === 'production'
@@ -239,6 +242,12 @@ export class InterService {
         [codigoSolicitacao],
       );
 
+      await this.auditInter('inter.boleto_cancelado', null, {
+        codigoSolicitacao,
+        motivoCancelamento,
+        response,
+      });
+
       this.logger.log(`Boleto cancelado no Banco Inter: ${codigoSolicitacao}`);
       return response || { success: true };
     } catch (error) {
@@ -256,6 +265,11 @@ export class InterService {
              WHERE codigo_solicitacao = $1`,
             [codigoSolicitacao],
           );
+          await this.auditInter('inter.boleto_cancelado_confirmado', null, {
+            codigoSolicitacao,
+            motivoCancelamento,
+            boleto,
+          });
           return boleto;
         }
       } catch {}
@@ -264,6 +278,47 @@ export class InterService {
         'Falha ao cancelar boleto no Banco Inter: ' + (error.data?.detail || error.data?.message || error.data?.title || errorDetail),
         error.status || HttpStatus.BAD_REQUEST,
       );
+    }
+  }
+
+  onModuleInit() {
+    const enabled = process.env.INTER_AUTO_RECONCILE !== 'false';
+    if (!enabled) return;
+    if (!process.env.INTER_CLIENT_ID || !process.env.INTER_CLIENT_SECRET) {
+      this.logger.warn('Conciliacao automatica Inter desativada: credenciais nao configuradas');
+      return;
+    }
+
+    const configuredInterval = Number(process.env.INTER_RECONCILE_INTERVAL_MINUTES || 30);
+    const intervalMinutes = Number.isFinite(configuredInterval) ? configuredInterval : 30;
+    const intervalMs = Math.max(intervalMinutes, 5) * 60 * 1000;
+
+    setTimeout(() => this.runScheduledReconciliation('startup'), 15000);
+    setInterval(() => this.runScheduledReconciliation('interval'), intervalMs);
+  }
+
+  private async auditInter(action: string, entityId: string | null, data: any): Promise<void> {
+    try {
+      await this.auditService.create({
+        action,
+        entity: 'inter',
+        entityId,
+        newData: data,
+      });
+    } catch (error) {
+      this.logger.warn('Falha ao registrar auditoria Inter: ' + error.message);
+    }
+  }
+
+  private async runScheduledReconciliation(source: string): Promise<void> {
+    try {
+      await this.reconcilePendingPayments(source);
+    } catch (error) {
+      this.logger.error('Erro na conciliacao automatica Inter: ' + error.message);
+      await this.auditInter('inter.reconcile_error', null, {
+        source,
+        error: error.message,
+      });
     }
   }
 
@@ -413,12 +468,27 @@ export class InterService {
     );
   }
 
-  private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<void> {
+  private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<{
+    saleId?: string;
+    type?: string;
+    oldStatus?: string;
+    newStatus: string;
+    changed: boolean;
+    situacao?: string;
+  }> {
     const cobranca = interData?.cobranca || interData;
     const boleto = interData?.boleto || {};
     const pix = interData?.pix || {};
     const situacao = cobranca?.situacao || interData?.situacao || interData?.status;
     const localStatus = this.getLocalPaymentStatus(situacao);
+
+    const previous = await this.saleRepo.manager.query(
+      `SELECT sale_id, type, status
+       FROM payments
+       WHERE codigo_solicitacao = $1
+       LIMIT 1`,
+      [codigoSolicitacao],
+    );
 
     const updated = await this.saleRepo.manager.query(
       `UPDATE payments
@@ -445,12 +515,89 @@ export class InterService {
     if (localStatus === 'pago' && updated[0]?.sale_id) {
       await this.markSaleAsPaid(updated[0].sale_id, updated[0].type || 'boleto');
     }
+
+    return {
+      saleId: updated[0]?.sale_id || previous[0]?.sale_id,
+      type: updated[0]?.type || previous[0]?.type,
+      oldStatus: previous[0]?.status,
+      newStatus: localStatus,
+      changed: Boolean(previous[0]) && previous[0].status !== localStatus,
+      situacao,
+    };
   }
 
   async syncBoletoStatus(codigoSolicitacao: string): Promise<any> {
     const boleto = await this.getBoleto(codigoSolicitacao);
-    await this.applyPaymentStatus(codigoSolicitacao, boleto);
+    const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
+    await this.auditInter('inter.status_sync', statusUpdate.saleId || null, {
+      codigoSolicitacao,
+      statusUpdate,
+      source: 'manual',
+    });
     return boleto;
+  }
+
+  async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; failed: number }> {
+    if (this.reconciliationRunning) {
+      return { checked: 0, updated: 0, failed: 0 };
+    }
+
+    this.reconciliationRunning = true;
+    let checked = 0;
+    let updated = 0;
+    let failed = 0;
+
+    try {
+      const limit = Math.max(Number(process.env.INTER_RECONCILE_BATCH_SIZE || 50), 1);
+      const payments = await this.saleRepo.manager.query(
+        `SELECT id, sale_id, codigo_solicitacao, status
+         FROM payments
+         WHERE type = 'boleto'
+           AND status IN ('a_receber', 'vencido')
+           AND COALESCE(codigo_solicitacao, '') <> ''
+         ORDER BY updated_at ASC NULLS FIRST, created_at ASC
+         LIMIT $1`,
+        [limit],
+      );
+
+      await this.auditInter('inter.reconcile_started', null, {
+        source,
+        total: payments.length,
+      });
+
+      for (const payment of payments) {
+        checked++;
+        try {
+          const boleto = await this.getBoleto(payment.codigo_solicitacao);
+          const statusUpdate = await this.applyPaymentStatus(payment.codigo_solicitacao, boleto);
+          if (statusUpdate.changed) updated++;
+
+          await this.auditInter('inter.reconcile_payment', statusUpdate.saleId || payment.sale_id || null, {
+            source,
+            paymentId: payment.id,
+            codigoSolicitacao: payment.codigo_solicitacao,
+            statusUpdate,
+          });
+        } catch (error) {
+          failed++;
+          await this.auditInter('inter.reconcile_payment_error', payment.sale_id || null, {
+            source,
+            paymentId: payment.id,
+            codigoSolicitacao: payment.codigo_solicitacao,
+            error: error.message,
+          });
+        }
+      }
+
+      const result = { checked, updated, failed };
+      await this.auditInter('inter.reconcile_finished', null, {
+        source,
+        result,
+      });
+      return result;
+    } finally {
+      this.reconciliationRunning = false;
+    }
   }
 
   /**
@@ -459,6 +606,7 @@ export class InterService {
    */
   async handleWebhook(payload: any): Promise<{ success: boolean; message: string }> {
     this.logger.log('Webhook recebido do Banco Inter: ' + JSON.stringify(payload));
+    await this.auditInter('inter.webhook_received', null, { payload });
 
     try {
       const events = Array.isArray(payload) ? payload : [payload];
@@ -467,7 +615,12 @@ export class InterService {
       for (const event of events) {
         const codigoSolicitacao = event.codigoSolicitacao || event.cobranca?.codigoSolicitacao;
         if (codigoSolicitacao) {
-          await this.applyPaymentStatus(codigoSolicitacao, event);
+          const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, event);
+          await this.auditInter('inter.webhook_processed', statusUpdate.saleId || null, {
+            codigoSolicitacao,
+            statusUpdate,
+            event,
+          });
           processed++;
           continue;
         }
@@ -477,10 +630,20 @@ export class InterService {
 
         if (!seuNumero) {
           this.logger.warn('Webhook sem identificador de venda (seuNumero/txid/codigoSolicitacao)');
+          await this.auditInter('inter.webhook_ignored', null, {
+            reason: 'missing_identifier',
+            event,
+          });
           continue;
         }
 
         if (this.getLocalPaymentStatus(situacao) !== 'pago') {
+          await this.auditInter('inter.webhook_ignored', null, {
+            reason: 'not_paid',
+            seuNumero,
+            situacao,
+            event,
+          });
           this.logger.log(`Webhook com situação "${situacao}" - ignorando (não é pagamento confirmado)`);
           processed++;
           continue;
@@ -505,10 +668,21 @@ export class InterService {
 
         if (!foundSale) {
           this.logger.warn(`Venda não encontrada para seuNumero: ${seuNumero}`);
+          await this.auditInter('inter.webhook_ignored', null, {
+            reason: 'sale_not_found',
+            seuNumero,
+            situacao,
+            event,
+          });
           continue;
         }
 
         await this.markSaleAsPaid(foundSale.id, 'boleto');
+        await this.auditInter('inter.webhook_sale_paid', foundSale.id, {
+          seuNumero,
+          situacao,
+          event,
+        });
         this.logger.log(`Venda ${foundSale.id} marcada como paga via webhook`);
 
         if (foundSale.customer?.email) {
@@ -521,6 +695,10 @@ export class InterService {
       return { success: true, message: `${processed} evento(s) processado(s)` };
     } catch (error) {
       this.logger.error('Erro ao processar webhook: ' + error.message);
+      await this.auditInter('inter.webhook_error', null, {
+        payload,
+        error: error.message,
+      });
       return { success: false, message: 'Erro interno ao processar webhook' };
     }
   }

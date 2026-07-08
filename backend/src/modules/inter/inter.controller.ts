@@ -97,6 +97,20 @@ export class InterController {
   }
 
   /**
+   * POST /api/inter/reconcile
+   * Concilia automaticamente boletos pendentes com o Banco Inter.
+   */
+  @Post('reconcile')
+  @UseGuards(JwtAuthGuard)
+  async reconcile() {
+    const result = await this.interService.reconcilePendingPayments('manual');
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  /**
    * POST /api/inter/webhook
    * Recebe notificações de pagamento do Banco Inter.
    * NÃO requer autenticação JWT (chamado pelo Inter).

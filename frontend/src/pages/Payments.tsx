@@ -25,6 +25,7 @@ export function Payments() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
+  const [reconciling, setReconciling] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -77,6 +78,21 @@ export function Payments() {
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao consultar') }
   }
 
+  async function reconcileInter() {
+    setReconciling(true)
+    setError('')
+    try {
+      const res = await api.post('/inter/reconcile')
+      const data = res.data?.data || res.data
+      alert(`Conciliacao concluida: ${data.checked || 0} verificado(s), ${data.updated || 0} atualizado(s), ${data.failed || 0} erro(s).`)
+      load()
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao conciliar pagamentos')
+    } finally {
+      setReconciling(false)
+    }
+  }
+
   const filtered = payments.filter(p => {
     if (!search) return true
     const s = search.toLowerCase()
@@ -92,7 +108,12 @@ export function Payments() {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Pagamentos</h1>
           <p className="text-sm text-gray-500 mt-1">Boletos e PIX emitidos via Banco Inter</p>
         </div>
-        <button onClick={load} className="btn btn-secondary flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+        <div className="flex gap-2">
+          <button onClick={reconcileInter} disabled={reconciling} className="btn btn-secondary flex items-center gap-2">
+            <RefreshCw className={'w-4 h-4 ' + (reconciling ? 'animate-spin' : '')} /> Conciliar Inter
+          </button>
+          <button onClick={load} className="btn btn-secondary flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+        </div>
       </div>
 
       <div className="card mb-6">
