@@ -23,6 +23,7 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { QuotesModule } from './modules/quotes/quotes.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 
@@ -54,6 +55,7 @@ import { HealthController } from './health.controller';
     PurchasesModule,
     ReconciliationModule,
     SuppliersModule,
+    QuotesModule,
   ],
   controllers: [HealthController],
 })
