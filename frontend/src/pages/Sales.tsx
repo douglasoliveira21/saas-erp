@@ -44,6 +44,10 @@ export function Sales() {
   const [selected, setSelected] = useState<Sale | null>(null)
   const [error, setError] = useState('')
   const [sendingEmailId, setSendingEmailId] = useState('')
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [emailSaleId, setEmailSaleId] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [emailSending, setEmailSending] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -99,19 +103,27 @@ export function Sales() {
     }
   }
 
-  async function sendDocuments(id: string) {
-    setSendingEmailId(id)
+  function openEmailModal(id: string) {
+    const sale = sales.find(s => s.id === id)
+    setEmailSaleId(id)
+    setEmailBody(`Olá ${sale?.customer?.name || ''},\n\nSegue em anexo os documentos referentes ao atendimento realizado.\n\nQualquer dúvida estamos à disposição.\n\nAtenciosamente,\nEquipe VGON`)
+    setShowEmailModal(true)
+  }
+
+  async function sendDocuments() {
+    setEmailSending(true)
     setError('')
     try {
-      const res = await api.post(`/sales/${id}/send-documents`)
+      const res = await api.post(`/sales/${emailSaleId}/send-documents`, { body: emailBody })
       const count = res.data?.attachments?.length || 0
       alert(`Email enviado para o cliente com ${count} anexo(s).`)
+      setShowEmailModal(false)
     } catch (e: any) {
       const msg = e.response?.data?.message || 'Erro ao enviar email para o cliente'
       setError(msg)
       alert('Erro: ' + msg)
     } finally {
-      setSendingEmailId('')
+      setEmailSending(false)
     }
   }
 
@@ -231,7 +243,7 @@ export function Sales() {
                         <button onClick={() => generatePayment(s.id, 'boleto')} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><CreditCard className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
-                        <button onClick={() => sendDocuments(s.id)} disabled={sendingEmailId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
+                        <button onClick={() => openEmailModal(s.id)} disabled={sendingEmailId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
                           <Send className={'w-4 h-4 ' + (sendingEmailId === s.id ? 'animate-pulse' : '')} />
                         </button>
                       )}
@@ -255,6 +267,55 @@ export function Sales() {
           </table>
         )}
       </div>
+
+      {/* Modal enviar email */}
+      {showEmailModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Enviar Documentos por Email</h2>
+                <p className="text-sm text-gray-500 mt-0.5">NF e boleto serão enviados como anexo automaticamente</p>
+              </div>
+              <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-600">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destinatário</label>
+                <div className="input bg-gray-50 text-gray-600 cursor-not-allowed">
+                  {sales.find(s => s.id === emailSaleId)?.customer?.email || 'Email não cadastrado'}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem (corpo do email)</label>
+                <textarea
+                  className="input min-h-[150px] text-sm"
+                  rows={6}
+                  value={emailBody}
+                  onChange={e => setEmailBody(e.target.value)}
+                  placeholder="Escreva a mensagem que será enviada junto com os documentos..."
+                />
+              </div>
+              <div className="p-3 bg-blue-50 rounded-xl text-sm text-blue-700">
+                <p className="font-medium mb-1">📎 Anexos automáticos:</p>
+                <ul className="list-disc list-inside text-xs space-y-0.5 text-blue-600">
+                  <li>Nota Fiscal (PDF/XML) — se emitida</li>
+                  <li>Boleto (PDF) — se gerado</li>
+                </ul>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+              <button onClick={() => setShowEmailModal(false)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={sendDocuments} disabled={emailSending} className="btn btn-primary flex items-center gap-2">
+                {emailSending ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Send className="w-4 h-4" />}
+                {emailSending ? 'Enviando...' : 'Enviar Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal detalhes */}
       {selected && <SaleDetailModal sale={selected} onClose={() => setSelected(null)} isAdmin={isAdmin} isFinanceiro={isFinanceiro} approve={approve} cancel={cancel} />}

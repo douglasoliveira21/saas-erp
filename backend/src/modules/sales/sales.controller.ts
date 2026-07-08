@@ -57,8 +57,8 @@ export class SalesController {
 
   @Post(':id/send-documents')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  sendDocuments(@Param('id') id: string) {
-    return this.salesService.sendCustomerDocuments(id);
+  sendDocuments(@Param('id') id: string, @Body() body: any) {
+    return this.salesService.sendCustomerDocuments(id, body?.body);
   }
 
   @Patch(':id')

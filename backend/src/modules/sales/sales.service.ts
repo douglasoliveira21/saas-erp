@@ -240,7 +240,7 @@ export class SalesService {
     return this.findOne(id);
   }
 
-  async sendCustomerDocuments(id: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
+  async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
     const sale = await this.findOne(id);
     const customer = sale.customer as any;
 
@@ -306,14 +306,17 @@ export class SalesService {
       throw new BadRequestException('Nenhum boleto ou nota fiscal autorizada encontrada para envio');
     }
 
+    const bodyHtml = customBody
+      ? customBody.replace(/\n/g, '<br>')
+      : `Segue em anexo a documentacao da venda #${sale.id.substring(0, 8)}.`;
+
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: #2563eb; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
           <h1 style="color: white; margin: 0;">Documentos da Venda</h1>
         </div>
         <div style="background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-          <p style="color: #4b5563;">Ola ${customer.name || 'Cliente'},</p>
-          <p style="color: #4b5563;">Segue em anexo a documentacao da venda #${sale.id.substring(0, 8)}.</p>
+          <div style="color: #4b5563; white-space: pre-line; margin-bottom: 20px;">${bodyHtml}</div>
           <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
             <tr><td style="padding: 8px; color: #6b7280;">Valor:</td><td style="padding: 8px; font-weight: bold; color: #059669;">R$ ${Number(sale.totalAmount).toFixed(2)}</td></tr>
             <tr><td style="padding: 8px; color: #6b7280;">Cliente:</td><td style="padding: 8px;">${customer.name || ''}</td></tr>
