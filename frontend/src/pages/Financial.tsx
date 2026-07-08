@@ -59,6 +59,8 @@ export function Financial() {
   const [expenseCategory, setExpenseCategory] = useState('outros')
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().split('T')[0])
   const [expenseIsForecast, setExpenseIsForecast] = useState(false)
+  const [expenseIsRecurring, setExpenseIsRecurring] = useState(false)
+  const [expenseMonths, setExpenseMonths] = useState(12)
   const [savingExpense, setSavingExpense] = useState(false)
 
   // Card Fees
@@ -178,17 +180,30 @@ export function Financial() {
     if (!expenseDescription.trim() || !expenseValue || Number(expenseValue) <= 0) { setError('Preencha descrição e valor da despesa'); return }
     setSavingExpense(true)
     try {
-      await api.post('/financial/movements', {
-        type: 'despesa',
-        category: expenseCategory,
-        description: expenseDescription.trim(),
-        value: Number(expenseValue),
-        date: expenseDate,
-        isForecast: expenseIsForecast,
-      })
+      if (expenseIsRecurring) {
+        // Criar despesa recorrente (mensal)
+        await api.post('/financial/movements/recurring', {
+          type: 'despesa',
+          category: expenseCategory,
+          description: expenseDescription.trim(),
+          value: Number(expenseValue),
+          date: expenseDate,
+          months: expenseMonths,
+        })
+      } else {
+        await api.post('/financial/movements', {
+          type: 'despesa',
+          category: expenseCategory,
+          description: expenseDescription.trim(),
+          value: Number(expenseValue),
+          date: expenseDate,
+          isForecast: expenseIsForecast,
+        })
+      }
       setShowExpenseModal(false)
       setExpenseDescription(''); setExpenseValue(''); setExpenseCategory('outros')
       setExpenseDate(new Date().toISOString().split('T')[0]); setExpenseIsForecast(false)
+      setExpenseIsRecurring(false); setExpenseMonths(12)
       loadTab()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao salvar despesa') }
     finally { setSavingExpense(false) }
@@ -719,9 +734,24 @@ export function Financial() {
                 <input className="input" type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)} />
               </div>
               <div className="flex items-center gap-3">
-                <input type="checkbox" id="expForecast" checked={expenseIsForecast} onChange={e => setExpenseIsForecast(e.target.checked)} className="w-4 h-4 text-primary-600 rounded" />
+                <input type="checkbox" id="expForecast" checked={expenseIsForecast} onChange={e => setExpenseIsForecast(e.target.checked)} className="w-4 h-4 text-primary-600 rounded" disabled={expenseIsRecurring} />
                 <label htmlFor="expForecast" className="text-sm text-gray-700 dark:text-gray-300">Despesa prevista (não realizada ainda)</label>
               </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="expRecurring" checked={expenseIsRecurring} onChange={e => { setExpenseIsRecurring(e.target.checked); if (e.target.checked) setExpenseIsForecast(false) }} className="w-4 h-4 text-primary-600 rounded" />
+                <label htmlFor="expRecurring" className="text-sm text-gray-700 dark:text-gray-300">Despesa mensal (recorrente)</label>
+              </div>
+              {expenseIsRecurring && (
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
+                  <div>
+                    <label className="block text-xs font-medium text-blue-700 mb-1">Repetir por quantos meses?</label>
+                    <select className="input" value={expenseMonths} onChange={e => setExpenseMonths(parseInt(e.target.value))}>
+                      {[3,6,9,12,18,24].map(m => <option key={m} value={m}>{m} meses</option>)}
+                    </select>
+                  </div>
+                  <p className="text-xs text-blue-600">O sistema criará {expenseMonths} lançamentos (1 por mês). Cada mês pode ser editado individualmente sem afetar os outros.</p>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
               <button onClick={() => setShowExpenseModal(false)} className="btn btn-primary bg-gray-200 text-gray-700 hover:bg-gray-300">Cancelar</button>

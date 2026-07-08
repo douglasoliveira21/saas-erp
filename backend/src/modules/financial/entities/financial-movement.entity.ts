@@ -53,6 +53,12 @@ export class FinancialMovement {
   @Column({ name: 'is_forecast', type: 'boolean', default: false })
   isForecast: boolean;
 
+  @Column({ name: 'is_recurring', type: 'boolean', default: false })
+  isRecurring: boolean;
+
+  @Column({ name: 'recurring_group_id', type: 'varchar', length: 100, nullable: true })
+  recurringGroupId: string;
+
   @Column({ type: 'text', nullable: true })
   observations: string;
 

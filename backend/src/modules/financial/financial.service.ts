@@ -451,6 +451,68 @@ export class FinancialService implements OnModuleInit {
     return this.movementRepo.save(movement);
   }
 
+  async createManualMovement(data: any, userId: string) {
+    const movement = this.movementRepo.create({
+      ...data,
+      createdBy: userId,
+      isForecast: data.isForecast || false,
+      isRecurring: data.isRecurring || false,
+    });
+    return this.movementRepo.save(movement);
+  }
+
+  /**
+   * Cria despesa recorrente (mensal).
+   * Gera lançamentos individuais para cada mês no período especificado.
+   * Cada mês tem seu próprio registro e pode ser editado independentemente.
+   */
+  async createRecurringMovement(data: any, userId: string): Promise<{ created: number; groupId: string }> {
+    const months = data.months || 12; // Quantos meses gerar (padrão 12)
+    const groupId = 'REC-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const baseDate = new Date(data.date + 'T12:00:00');
+    let created = 0;
+
+    for (let i = 0; i < months; i++) {
+      const movDate = new Date(baseDate);
+      movDate.setMonth(movDate.getMonth() + i);
+      const dateStr = movDate.toISOString().split('T')[0];
+
+      const movement = this.movementRepo.create({
+        type: data.type || 'despesa',
+        category: data.category || 'outros',
+        description: data.description || 'Despesa recorrente',
+        value: Number(data.value),
+        date: dateStr,
+        paymentMethod: data.paymentMethod || 'transferencia',
+        isForecast: i > 0, // Primeiro mês é real, demais são previsão
+        isRecurring: true,
+        recurringGroupId: groupId,
+        observations: data.observations || null,
+        createdBy: userId,
+      });
+
+      await this.movementRepo.save(movement);
+      created++;
+    }
+
+    return { created, groupId };
+  }
+
+  async updateMovement(id: string, data: any) {
+    const movement = await this.movementRepo.findOne({ where: { id } });
+    if (!movement) throw new NotFoundException('Lançamento não encontrado');
+    // Atualiza apenas o lançamento específico (não afeta outros meses do grupo)
+    Object.assign(movement, data);
+    return this.movementRepo.save(movement);
+  }
+
+  async deleteMovement(id: string) {
+    const movement = await this.movementRepo.findOne({ where: { id } });
+    if (!movement) throw new NotFoundException('Lançamento não encontrado');
+    await this.movementRepo.remove(movement);
+    return { message: 'Lançamento removido' };
+  }
+
   async deleteCardFee(id: string) {
     const fee = await this.cardFeeRepo.findOne({ where: { id } });
     if (!fee) {

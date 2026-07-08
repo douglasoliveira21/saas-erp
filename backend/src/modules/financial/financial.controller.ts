@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -153,6 +154,30 @@ export class FinancialController {
   }
 
   // ==================== Sync ====================
+
+  @Post('movements')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  createMovementEndpoint(@Body() body: any, @Request() req: any) {
+    return this.financialService.createManualMovement(body, req.user.id);
+  }
+
+  @Post('movements/recurring')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  createRecurringMovement(@Body() body: any, @Request() req: any) {
+    return this.financialService.createRecurringMovement(body, req.user.id);
+  }
+
+  @Patch('movements/:id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  updateMovement(@Param('id') id: string, @Body() body: any) {
+    return this.financialService.updateMovement(id, body);
+  }
+
+  @Delete('movements/:id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  deleteMovement(@Param('id') id: string) {
+    return this.financialService.deleteMovement(id);
+  }
 
   @Post('sync-sales')
   @Roles(UserRole.ADMIN)
