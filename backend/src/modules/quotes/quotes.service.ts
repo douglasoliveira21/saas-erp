@@ -185,22 +185,18 @@ body{font-family:'Inter',sans-serif;color:#0F172A;line-height:1.4;background:#ff
 
 /* HEADER */
 .header{display:flex;min-height:140px;position:relative}
-.header-left{width:50%;background:linear-gradient(135deg,#03172B 0%,#062440 100%);padding:25px 30px;position:relative;clip-path:polygon(0 0,100% 0,85% 100%,0 100%)}
-.header-left::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cpath d='M10 10h5v5h-5zM30 20h3v3h-3zM60 15h4v4h-4zM80 30h3v3h-3zM20 50h5v5h-5zM50 60h3v3h-3zM70 70h4v4h-4zM40 80h3v3h-3z' fill='%23168BFF' opacity='0.08'/%3E%3Cpath d='M15 12.5h15M65 17h10M22.5 52.5h10' stroke='%23168BFF' stroke-width='0.5' opacity='0.1'/%3E%3C/svg%3E");opacity:0.5}
-.header-right{flex:1;padding:20px 30px;display:flex;flex-direction:column;justify-content:center}
+.header-left{width:50%;background:#ffffff;padding:25px 30px;position:relative;clip-path:polygon(0 0,100% 0,85% 100%,0 100%);display:flex;align-items:center;justify-content:center}
+.header-right{flex:1;background:linear-gradient(135deg,#03172B 0%,#062440 100%);padding:20px 30px;display:flex;flex-direction:column;justify-content:center;position:relative}
+.header-right::before{content:'';position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cpath d='M10 10h5v5h-5zM30 20h3v3h-3zM60 15h4v4h-4zM80 30h3v3h-3zM20 50h5v5h-5zM50 60h3v3h-3zM70 70h4v4h-4zM40 80h3v3h-3z' fill='%23168BFF' opacity='0.08'/%3E%3Cpath d='M15 12.5h15M65 17h10M22.5 52.5h10' stroke='%23168BFF' stroke-width='0.5' opacity='0.1'/%3E%3C/svg%3E");opacity:0.5}
 .logo{position:relative;z-index:1}
-.logo-icon{display:inline-block;width:36px;height:36px;background:linear-gradient(135deg,#0754B8,#168BFF);border-radius:8px;margin-right:10px;vertical-align:middle}
-.logo-text{font-size:18px;font-weight:800;color:#fff;letter-spacing:-0.5px;vertical-align:middle}
-.logo-sub{font-size:11px;color:#54B7FF;font-weight:500;letter-spacing:2px;margin-top:2px;margin-left:48px}
-.slogan{position:relative;z-index:1;margin-top:20px;font-size:11px;color:rgba(255,255,255,0.7);font-weight:400}
-.slogan strong{color:#54B7FF;font-weight:600}
-.quote-title{font-size:32px;font-weight:800;color:#03172B;letter-spacing:-1px}
-.quote-title-line{width:60px;height:3px;background:linear-gradient(90deg,#0754B8,#168BFF);border-radius:2px;margin-top:6px;position:relative}
-.quote-title-line::after{content:'';position:absolute;right:-6px;top:-3px;width:9px;height:9px;border-radius:50%;background:#168BFF}
-.info-grid{margin-top:14px;font-size:11px}
-.info-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #F1F5F9}
-.info-label{font-weight:600;color:#64748B;min-width:100px;text-transform:uppercase;font-size:9px;letter-spacing:0.5px}
-.info-value{color:#0F172A;font-weight:500}
+.slogan{display:none}
+.quote-title{font-size:32px;font-weight:800;color:#ffffff;letter-spacing:-1px;position:relative}
+.quote-title-line{width:60px;height:3px;background:linear-gradient(90deg,#54B7FF,#168BFF);border-radius:2px;margin-top:6px;position:relative}
+.quote-title-line::after{content:'';position:absolute;right:-6px;top:-3px;width:9px;height:9px;border-radius:50%;background:#54B7FF}
+.info-grid{margin-top:14px;font-size:11px;position:relative}
+.info-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.1)}
+.info-label{font-weight:600;color:rgba(255,255,255,0.6);min-width:100px;text-transform:uppercase;font-size:9px;letter-spacing:0.5px}
+.info-value{color:#ffffff;font-weight:500}
 
 /* CARDS */
 .cards-row{display:flex;gap:12px;margin:12px 20px}
@@ -245,7 +241,6 @@ tbody tr:nth-child(even){background:#F7F9FC}
 /* FOOTER */
 .footer{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(90deg,#03172B,#062440);padding:14px 30px;display:flex;align-items:center;justify-content:space-between}
 .footer-logo{font-size:11px;font-weight:700;color:#fff}
-.footer-logo-sub{font-size:8px;color:#54B7FF;letter-spacing:1px}
 .footer-info{display:flex;gap:20px;font-size:9px;color:rgba(255,255,255,0.7)}
 .footer-info span{display:flex;align-items:center;gap:4px}
 
@@ -259,11 +254,8 @@ tbody tr:nth-child(even){background:#F7F9FC}
   <div class="header">
     <div class="header-left">
       <div class="logo">
-        ${companyLogo ? `<img src="${companyLogo}" style="height:40px;margin-right:10px;vertical-align:middle;border-radius:6px" />` : '<span class="logo-icon"></span>'}
-        <span class="logo-text">${companyName.split(' ')[0] || 'VGON'}</span>
-        <div class="logo-sub">SOLUÇÕES EM TI</div>
+        ${companyLogo ? `<img src="${companyLogo}" style="height:70px;border-radius:6px" />` : `<img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" style="height:70px" />`}
       </div>
-      <div class="slogan">TECNOLOGIA QUE <strong>CONECTA</strong>,<br>SOLUÇÕES QUE <strong>TRANSFORMAM</strong>.</div>
     </div>
     <div class="header-right">
       <div class="quote-title">ORÇAMENTO</div>
@@ -345,8 +337,7 @@ tbody tr:nth-child(even){background:#F7F9FC}
   <!-- FOOTER -->
   <div class="footer">
     <div>
-      <div class="footer-logo">${companyName.split(' ')[0] || 'VGON'}</div>
-      <div class="footer-logo-sub">SOLUÇÕES EM TI</div>
+      <div class="footer-logo">${companyName || 'VGON'}</div>
     </div>
     <div class="footer-info">
       ${companyPhone ? `<span>${companyPhone}</span>` : ''}
