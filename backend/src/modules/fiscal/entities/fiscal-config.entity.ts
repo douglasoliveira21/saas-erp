@@ -76,6 +76,9 @@ export class FiscalConfig {
   @Column({ name: 'nfce_csc_token', length: 100, nullable: true })
   nfceCscToken: string;
 
+  @Column({ name: 'company_logo', type: 'text', nullable: true })
+  companyLogo: string; // base64 encoded logo image
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

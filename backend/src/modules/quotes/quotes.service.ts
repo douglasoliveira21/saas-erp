@@ -144,6 +144,15 @@ export class QuotesService {
     const items = q.items || [];
     const customer = q.customer;
     const createdBy = q.createdBy;
+
+    // Get company config (logo)
+    const configResult = await this.dataSource.query(`SELECT company_name, cnpj, company_logo, emit_address, emit_number, emit_neighborhood, emit_cep, emit_phone, city_registration FROM fiscal_config LIMIT 1`);
+    const config = configResult?.[0] || {};
+    const companyName = config.company_name || 'VGON Soluções em Informática';
+    const companyCnpj = config.cnpj || '';
+    const companyLogo = config.company_logo || '';
+    const companyAddress = [config.emit_address, config.emit_number, config.emit_neighborhood].filter(Boolean).join(', ');
+    const companyPhone = config.emit_phone || '';
     const quoteNumber = String(q.number).padStart(4, '0');
     const dataEmissao = new Date(q.createdAt).toLocaleDateString('pt-BR');
     const validadeDate = new Date(q.validUntil + 'T12:00:00');
@@ -250,8 +259,8 @@ tbody tr:nth-child(even){background:#F7F9FC}
   <div class="header">
     <div class="header-left">
       <div class="logo">
-        <span class="logo-icon"></span>
-        <span class="logo-text">VGON</span>
+        ${companyLogo ? `<img src="${companyLogo}" style="height:40px;margin-right:10px;vertical-align:middle;border-radius:6px" />` : '<span class="logo-icon"></span>'}
+        <span class="logo-text">${companyName.split(' ')[0] || 'VGON'}</span>
         <div class="logo-sub">SOLUÇÕES EM TI</div>
       </div>
       <div class="slogan">TECNOLOGIA QUE <strong>CONECTA</strong>,<br>SOLUÇÕES QUE <strong>TRANSFORMAM</strong>.</div>
@@ -336,13 +345,13 @@ tbody tr:nth-child(even){background:#F7F9FC}
   <!-- FOOTER -->
   <div class="footer">
     <div>
-      <div class="footer-logo">VGON</div>
+      <div class="footer-logo">${companyName.split(' ')[0] || 'VGON'}</div>
       <div class="footer-logo-sub">SOLUÇÕES EM TI</div>
     </div>
     <div class="footer-info">
-      <span>douglas.oliveira@vgon.com.br</span>
-      <span>www.vgon.com.br</span>
-      <span>Contagem/MG</span>
+      ${companyPhone ? `<span>${companyPhone}</span>` : ''}
+      <span>${createdBy?.email || 'contato@vgon.com.br'}</span>
+      ${companyAddress ? `<span>${companyAddress}</span>` : '<span>Contagem/MG</span>'}
     </div>
   </div>
 </div>

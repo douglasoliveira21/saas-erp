@@ -1369,6 +1369,37 @@ function FiscalConfigForm() {
         </div>
       </div>
 
+      {/* Logo da Empresa */}
+      <h4 className="font-medium text-gray-700 mt-4">Logo da Empresa (PDF/Orçamentos)</h4>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Upload Logo</label>
+          <input
+            type="file"
+            accept="image/*"
+            className="input text-sm"
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              if (file.size > 500000) { alert('Imagem muito grande. Máximo 500KB.'); return }
+              const reader = new FileReader()
+              reader.onload = () => { setCfg({...cfg, companyLogo: reader.result as string}) }
+              reader.readAsDataURL(file)
+            }}
+          />
+          <p className="text-xs text-gray-400 mt-1">PNG ou JPG, máximo 500KB. Aparece no PDF do orçamento.</p>
+        </div>
+        <div>
+          {cfg.companyLogo && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Preview</label>
+              <img src={cfg.companyLogo} alt="Logo" className="h-16 rounded border border-gray-200 bg-white p-1" />
+              <button onClick={() => setCfg({...cfg, companyLogo: ''})} className="text-xs text-red-500 mt-1 hover:underline">Remover logo</button>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex justify-end">
         <button onClick={save} disabled={saving} className="btn btn-primary flex items-center gap-2">
           {saving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Plus, Search, FileText, CheckCircle, XCircle, Copy, ShoppingCart, Trash2, Filter, Eye } from 'lucide-react'
+import { Plus, Search, FileText, CheckCircle, XCircle, Copy, ShoppingCart, Trash2, Filter, Eye, Download } from 'lucide-react'
 
 interface QuoteItem {
   name: string
@@ -245,7 +245,12 @@ export function Orcamentos() {
                     </td>
                     <td className="table-cell">
                       <div className="flex gap-1 flex-wrap">
-                        <button onClick={() => openPdf(q.id)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Ver PDF"><Eye className="w-4 h-4" /></button>
+                        <button onClick={() => openPdf(q.id)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Ver/Imprimir PDF"><Eye className="w-4 h-4" /></button>
+                        <button onClick={() => { 
+                          const token = localStorage.getItem('@GestaoTI:token')
+                          const w = window.open(`/api/quotes-public/${q.id}/pdf?token=${token}`, '_blank')
+                          if (w) setTimeout(() => w.print(), 1000)
+                        }} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Download PDF"><Download className="w-4 h-4" /></button>
                         {q.status === 'pendente' && !isExpired && (
                           <button onClick={() => handleApprove(q.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Aprovar"><CheckCircle className="w-4 h-4" /></button>
                         )}
