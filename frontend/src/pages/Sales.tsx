@@ -239,8 +239,11 @@ export function Sales() {
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'pago', 'finalizado'].includes(s.status) && (
                         <button onClick={() => window.location.href = '/fiscal?emit=' + s.id} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Emitir Nota Fiscal"><FileText className="w-4 h-4" /></button>
                       )}
-                      {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida'].includes(s.status) && s.paymentMethod === 'boleto' && (
+                      {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida'].includes(s.status) && (
                         <button onClick={() => generatePayment(s.id, 'boleto')} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><CreditCard className="w-4 h-4" /></button>
+                      )}
+                      {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida'].includes(s.status) && (
+                        <button onClick={() => generatePayment(s.id, 'pix')} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Gerar PIX"><DollarSign className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
                         <button onClick={() => openEmailModal(s.id)} disabled={sendingEmailId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
