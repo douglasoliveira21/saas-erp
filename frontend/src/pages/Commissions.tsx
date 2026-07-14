@@ -231,6 +231,7 @@ export function Commissions() {
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Valor</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Status</th>
                 {canManage && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>}
+                {!canManage && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ver</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -244,18 +245,17 @@ export function Commissions() {
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">{c.description || `${c.percentage}% sobre R$ ${Number(c.baseValue).toFixed(2)}`}</td>
                   <td className="table-cell font-semibold text-gray-900 dark:text-white">R$ {Number(c.amount).toFixed(2)}</td>
                   <td className="table-cell"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[c.status]}`}>{statusLabels[c.status]}</span></td>
-                  {canManage && (
-                    <td className="table-cell">
-                      <div className="flex gap-1">
-                        {c.sale && <button onClick={() => viewSale(c.sale!.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver venda"><Eye className="w-4 h-4" /></button>}
-                        {c.status === 'pendente' && <button onClick={() => pay(c.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar pagamento"><DollarSign className="w-4 h-4" /></button>}
-                        {!['paga', 'cancelada'].includes(c.status) && <button onClick={() => cancel(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>}
-                        {isAdmin && c.status === 'cancelada' && (
-                          <button onClick={async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
-                        )}
-                      </div>
-                    </td>
-                  )}
+                  <td className="table-cell">
+                    <div className="flex gap-1">
+                      {c.sale && <button onClick={() => viewSale(c.sale!.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver venda"><Eye className="w-4 h-4" /></button>}
+                      {!c.sale && c.description && <button onClick={() => alert('Descrição: ' + c.description + (c.observations ? '\nObs: ' + c.observations : ''))} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver descrição"><Eye className="w-4 h-4" /></button>}
+                      {canManage && c.status === 'pendente' && <button onClick={() => pay(c.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar pagamento"><DollarSign className="w-4 h-4" /></button>}
+                      {canManage && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => cancel(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>}
+                      {isAdmin && c.status === 'cancelada' && (
+                        <button onClick={async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
