@@ -44,7 +44,7 @@ export function Commissions() {
 
   useEffect(() => {
     load()
-    if (canManage) api.get('/users').then(r => setTechnicians(r.data.filter((u: any) => u.active)))
+    api.get('/users').then(r => setTechnicians(r.data.filter((u: any) => u.active))).catch(() => {})
   }, [])
 
   async function load() {
@@ -332,10 +332,14 @@ export function Commissions() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Técnico *</label>
-                <select className="input" value={form.technicianId} onChange={e => setForm({ ...form, technicianId: e.target.value })}>
-                  <option value="">Selecione...</option>
-                  {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
+                {canManage ? (
+                  <select className="input" value={form.technicianId} onChange={e => setForm({ ...form, technicianId: e.target.value })}>
+                    <option value="">Selecione...</option>
+                    {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                ) : (
+                  <div className="input bg-gray-100 cursor-not-allowed">{user?.name || 'Você'}</div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição *</label>
