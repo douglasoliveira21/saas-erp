@@ -143,6 +143,11 @@ export function Commissions() {
             </button>
           </div>
         )}
+        {!canManage && (
+          <button onClick={() => { setForm({ technicianId: user?.id || '', description: '', baseValue: 0, percentage: 10, observations: '' }); setCommissionType('avulsa'); setError(''); setShowModal(true) }} className="btn btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> Nova Comissao
+          </button>
+        )}
       </div>
 
       {/* Resumo */}
