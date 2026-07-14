@@ -41,6 +41,7 @@ export function Commissions() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [selectedSale, setSelectedSale] = useState<any>(null)
+  const [selectedCommission, setSelectedCommission] = useState<Commission | null>(null)
 
   useEffect(() => {
     load()
@@ -248,7 +249,7 @@ export function Commissions() {
                   <td className="table-cell">
                     <div className="flex gap-1">
                       {c.sale && <button onClick={() => viewSale(c.sale!.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver venda"><Eye className="w-4 h-4" /></button>}
-                      {!c.sale && c.description && <button onClick={() => alert('Descrição: ' + c.description + (c.observations ? '\nObs: ' + c.observations : ''))} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver descrição"><Eye className="w-4 h-4" /></button>}
+                      {!c.sale && <button onClick={() => setSelectedCommission(c)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver comissão"><Eye className="w-4 h-4" /></button>}
                       {canManage && c.status === 'pendente' && <button onClick={() => pay(c.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar pagamento"><DollarSign className="w-4 h-4" /></button>}
                       {canManage && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => cancel(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>}
                       {isAdmin && c.status === 'cancelada' && (
@@ -309,6 +310,48 @@ export function Commissions() {
         </div>
       )}
 
+      {/* Modal detalhes da comissão avulsa/fixa */}
+      {selectedCommission && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Detalhes da Comissão</h2>
+              <button onClick={() => setSelectedCommission(null)}><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="text-gray-500">Técnico:</span> <span className="font-medium">{selectedCommission.technician?.name}</span></div>
+                <div><span className="text-gray-500">Tipo:</span> <span className={`px-2 py-1 rounded-full text-xs font-medium ${selectedCommission.type === 'fixa' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'}`}>{selectedCommission.type === 'fixa' ? 'Fixa' : 'Avulsa'}</span></div>
+                <div><span className="text-gray-500">Status:</span> <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[selectedCommission.status]}`}>{statusLabels[selectedCommission.status]}</span></div>
+                <div><span className="text-gray-500">Data:</span> <span className="font-medium">{new Date(selectedCommission.createdAt).toLocaleDateString('pt-BR')}</span></div>
+                <div><span className="text-gray-500">Valor base:</span> <span className="font-medium">R$ {Number(selectedCommission.baseValue).toFixed(2)}</span></div>
+                {selectedCommission.type === 'avulsa' && (
+                  <div><span className="text-gray-500">Percentual:</span> <span className="font-medium">{Number(selectedCommission.percentage)}%</span></div>
+                )}
+                <div><span className="text-gray-500">Comissão:</span> <span className="font-bold text-green-600">R$ {Number(selectedCommission.amount).toFixed(2)}</span></div>
+                {selectedCommission.type === 'fixa' && (
+                  <div><span className="text-gray-500">Recorrência:</span> <span className="font-medium">Mensal</span></div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Descrição</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-300">{selectedCommission.description || 'Sem descrição'}</p>
+              </div>
+
+              {selectedCommission.observations && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Observações</h3>
+                  <p className="text-sm text-gray-500 italic">{selectedCommission.observations}</p>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700">
+              <button onClick={() => setSelectedCommission(null)} className="btn btn-secondary">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg mx-4">
@@ -379,3 +422,4 @@ export function Commissions() {
     </div>
   )
 }
+
