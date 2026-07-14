@@ -11,7 +11,7 @@ export class CommissionsController {
   constructor(private readonly commissionsService: CommissionsService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   create(@Body() createCommissionDto: any) {
     return this.commissionsService.create(createCommissionDto);
   }
