@@ -28,6 +28,7 @@ export function NewSale() {
   const [itemType, setItemType] = useState<'product' | 'service'>('product')
   const [selectedId, setSelectedId] = useState('')
   const [qty, setQty] = useState(1)
+  const [itemUnitPrice, setItemUnitPrice] = useState(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
@@ -81,17 +82,35 @@ export function NewSale() {
 
   function addItem() {
     if (!selectedId) { setError('Selecione um item'); return }
+    if (itemUnitPrice < 0) { setError('O valor unitário não pode ser negativo'); return }
     setError('')
     if (itemType === 'product') {
       const p = products.find(x => x.id === selectedId)!
-      setItems([...items, { type: 'product', id: p.id, name: p.name, quantity: qty, unitPrice: Number(p.salePrice), taxPercentage: Number(p.taxPercentage), costPrice: Number(p.purchasePrice) }])
+      setItems([...items, { type: 'product', id: p.id, name: p.name, quantity: qty, unitPrice: itemUnitPrice, taxPercentage: Number(p.taxPercentage), costPrice: Number(p.purchasePrice) }])
     } else {
       const s = services.find(x => x.id === selectedId)!
       setItems([...items, { type: 'service', id: s.id, name: s.name, quantity: qty, unitPrice: Number(s.salePrice), taxPercentage: Number(s.taxPercentage), costPrice: Number(s.operationalCost) }])
     }
-    setSelectedId(''); setQty(1)
+    setSelectedId(''); setQty(1); setItemUnitPrice(0)
   }
 
+  function selectItem(id: string) {
+    setSelectedId(id)
+    if (!id) {
+      setItemUnitPrice(0)
+      return
+    }
+    const selected = itemType === 'product'
+      ? products.find(product => product.id === id)
+      : services.find(service => service.id === id)
+    setItemUnitPrice(Number(selected?.salePrice || 0))
+  }
+
+  function changeItemType(type: 'product' | 'service') {
+    setItemType(type)
+    setSelectedId('')
+    setItemUnitPrice(0)
+  }
   function removeItem(i: number) { setItems(items.filter((_, idx) => idx !== i)) }
 
   const subtotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
@@ -304,12 +323,13 @@ export function NewSale() {
           <div className="card space-y-4">
             <h2 className="font-semibold text-gray-900 dark:text-white">Adicionar Itens</h2>
             <div className="flex gap-2 mb-2">
-              <button onClick={() => setItemType('product')} className={`px-3 py-1 rounded-lg text-sm font-medium ${itemType === 'product' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Produto</button>
-              <button onClick={() => setItemType('service')} className={`px-3 py-1 rounded-lg text-sm font-medium ${itemType === 'service' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Serviço</button>
+              <button onClick={() => changeItemType('product')} className={`px-3 py-1 rounded-lg text-sm font-medium ${itemType === 'product' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Produto</button>
+              <button onClick={() => changeItemType('service')} className={`px-3 py-1 rounded-lg text-sm font-medium ${itemType === 'service' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Serviço</button>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-end">
               <div className="flex-1">
-                <select className="input" value={selectedId} onChange={e => setSelectedId(e.target.value)}>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Item</label>
+                <select className="input" value={selectedId} onChange={e => selectItem(e.target.value)}>
                   <option value="">Selecione {itemType === 'product' ? 'produto' : 'serviço'}...</option>
                   {itemType === 'product'
                     ? products.map(p => <option key={p.id} value={p.id}>{p.name} — R$ {Number(p.salePrice).toFixed(2)} (estoque: {p.quantity})</option>)
@@ -318,11 +338,20 @@ export function NewSale() {
                 </select>
               </div>
               <div className="w-24">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Qtd.</label>
                 <input className="input" type="number" min={1} value={qty} onChange={e => setQty(parseInt(e.target.value) || 1)} placeholder="Qtd" />
               </div>
+              {itemType === 'product' && (
+                <div className="w-36">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Valor unitário</label>
+                  <input className="input" type="number" min={0} step="0.01" value={itemUnitPrice} onChange={e => setItemUnitPrice(parseFloat(e.target.value) || 0)} disabled={!selectedId} />
+                </div>
+              )}
               <button onClick={addItem} className="btn btn-primary flex items-center gap-1"><Plus className="w-4 h-4" /> Add</button>
             </div>
-
+            {itemType === 'product' && selectedId && (
+              <p className="text-xs text-gray-500">Este valor será usado somente nesta venda e não altera o preço cadastrado do produto.</p>
+            )}
             {/* Lista de itens */}
             {items.length > 0 && (
               <table className="w-full text-sm mt-2">
