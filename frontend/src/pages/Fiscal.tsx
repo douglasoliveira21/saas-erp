@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
+import JsBarcode from 'jsbarcode'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
 interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
@@ -324,6 +325,18 @@ export function Fiscal() {
       const items = inv.sale?.items || []
       const chave = inv.accessKey || ''
       const chaveFormatada = chave.replace(/(.{4})/g, '$1 ').trim()
+      let codigoBarras = ''
+      if (/^\d{44}$/.test(chave)) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        JsBarcode(svg, chave, {
+          format: 'CODE128',
+          displayValue: false,
+          height: 42,
+          margin: 0,
+          width: 1.35,
+        })
+        codigoBarras = svg.outerHTML
+      }
       const tpNF = chave.length >= 23 ? (chave[22] === '0' ? '0' : '1') : '1'
       const vTotalProd = items.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0)
 
@@ -349,6 +362,8 @@ export function Fiscal() {
         .danfe-sub{font-size:6pt;margin-top:2px}
         .tipo-box{display:inline-block;width:12px;height:12px;border:1px solid #000;text-align:center;font-size:8pt;line-height:12px;margin:0 2px}
         .tipo-box.active{background:#000;color:#fff}
+        .barcode{height:12mm;margin:2px auto 3px;overflow:hidden;text-align:center}
+        .barcode svg{display:block;width:100%;height:100%}
         .chave-box{font-family:'Courier New',monospace;font-size:7pt;word-break:break-all;letter-spacing:0.5px;margin-top:4px}
         .section-title{background:#ddd;border-bottom:1px solid #000;padding:2px 4px;font-size:6.5pt;font-weight:bold;text-transform:uppercase}
         table{width:100%;border-collapse:collapse}
@@ -393,6 +408,7 @@ export function Fiscal() {
               </div>
               <div class="header-right">
                 <div style="font-size:6pt;text-align:center;font-weight:bold;border:1px solid #000;padding:2px;margin-bottom:4px">CHAVE DE ACESSO</div>
+                ${codigoBarras ? `<div class="barcode" aria-label="Código de barras da chave de acesso">${codigoBarras}</div>` : ''}
                 <div class="chave-box">${chaveFormatada}</div>
                 <div style="font-size:6pt;text-align:center;margin-top:6px;border:1px solid #000;padding:2px">
                   Consulta de autenticidade no portal nacional da NF-e<br>
