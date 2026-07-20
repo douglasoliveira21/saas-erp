@@ -15,6 +15,7 @@ import { User } from '../users/entities/user.entity';
 import { InterService } from '../inter/inter.service';
 import { NfeService } from '../fiscal/services/nfe.service';
 import { NfseService } from '../fiscal/services/nfse.service';
+import { AuditService } from '../audit/audit.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -37,9 +38,10 @@ export class SalesService {
     private interService: InterService,
     private nfeService: NfeService,
     private nfseService: NfseService,
+    private auditService: AuditService,
   ) {}
 
-  async create(createSaleDto: any): Promise<Sale> {
+  async create(createSaleDto: any, userId?: string): Promise<Sale> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -166,7 +168,21 @@ export class SalesService {
         }
       } catch { /* nao bloquear venda se email falhar */ }
 
-      return this.findOne(savedSale.id);
+      const created = await this.findOne(savedSale.id);
+      await this.auditService.safeCreate({
+        userId,
+        action: 'sale.created',
+        entity: 'sale',
+        entityId: savedSale.id,
+        newData: {
+          saleId: savedSale.id,
+          customerId: saleData.customerId,
+          totalAmount: saleData.totalAmount,
+          paymentMethod: saleData.paymentMethod,
+          items,
+        },
+      });
+      return created;
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;
@@ -230,11 +246,21 @@ export class SalesService {
 
   async markPaid(id: string, userId: string): Promise<Sale> {
     const sale = await this.findOne(id);
+    const oldStatus = sale.status;
     if (!['pendente', 'nf_emitida', 'boleto_emitido'].includes(sale.status as string)) {
       throw new BadRequestException('Esta venda nao pode ser marcada como paga');
     }
     sale.status = 'pago' as any;
-    return this.salesRepository.save(sale);
+    const saved = await this.salesRepository.save(sale);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'sale.paid',
+      entity: 'sale',
+      entityId: id,
+      oldData: { status: oldStatus },
+      newData: { status: saved.status },
+    });
+    return saved;
   }
 
   async finalize(id: string): Promise<Sale> {
@@ -262,6 +288,8 @@ export class SalesService {
         throw new BadRequestException('Venda finalizada não pode ser cancelada');
       }
 
+      const oldStatus = sale.status;
+
       const paidCommission = await queryRunner.manager.findOne(Commission, {
         where: { saleId: id, status: CommissionStatus.PAGA },
       });
@@ -271,7 +299,7 @@ export class SalesService {
 
       const alreadyCancelled = sale.status === 'cancelado' as any;
       if (!alreadyCancelled) {
-        await this.cancelExternalDocuments(id);
+        await this.cancelExternalDocuments(id, cancelledBy);
       }
 
       const previousReversal = await queryRunner.manager.findOne(StockMovement, {
@@ -340,6 +368,18 @@ export class SalesService {
       );
 
       await queryRunner.commitTransaction();
+      await this.auditService.safeCreate({
+        userId: cancelledBy,
+        action: 'sale.cancelled',
+        entity: 'sale',
+        entityId: id,
+        oldData: { status: oldStatus },
+        newData: {
+          status: 'cancelado',
+          externalDocumentsCancelled: !alreadyCancelled,
+          stockReverted: !previousReversal,
+        },
+      });
       return this.findOne(id);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -451,7 +491,7 @@ export class SalesService {
     return { success: true, sent, attachments: attachmentNames };
   }
 
-  private async cancelExternalDocuments(saleId: string): Promise<void> {
+  private async cancelExternalDocuments(saleId: string, userId?: string): Promise<void> {
     const reason = `Cancelamento da venda ${saleId.substring(0, 8)}`;
 
     await this.interService.cancelPaymentsForSale(saleId, 'ACERTOS');
@@ -469,16 +509,17 @@ export class SalesService {
       }
 
       if (invoice.type === 'nfse') {
-        await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id);
+        await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id, userId);
       } else {
-        await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id);
+        await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id, userId);
       }
     }
   }
 
-  async update(id: string, updateSaleDto: any): Promise<Sale> {
+  async update(id: string, updateSaleDto: any, userId?: string): Promise<Sale> {
     const sale = await this.salesRepository.findOne({ where: { id } });
     if (!sale) throw new NotFoundException('Venda não encontrada');
+    const oldData = { ...sale };
     
     // Remover campos de relação que não devem ser sobrescritos diretamente
     const { technician, customer, items, approver, ...safeDto } = updateSaleDto;
@@ -534,10 +575,19 @@ export class SalesService {
       }
     }
 
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'sale.updated',
+      entity: 'sale',
+      entityId: id,
+      oldData,
+      newData: safeDto,
+    });
+    return updated;
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId?: string): Promise<void> {
     const sale = await this.findOne(id);
     if (sale.status !== 'cancelado' as any) {
       throw new BadRequestException('Apenas vendas canceladas podem ser excluidas');
@@ -559,5 +609,13 @@ export class SalesService {
     await this.dataSource.query('DELETE FROM stock_movements WHERE sale_id = $1', [id]);
     await this.dataSource.query('DELETE FROM sale_items WHERE sale_id = $1', [id]);
     await this.salesRepository.remove(sale);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'sale.deleted',
+      entity: 'sale',
+      entityId: id,
+      oldData: sale,
+      newData: { deleted: true },
+    });
   }
 }

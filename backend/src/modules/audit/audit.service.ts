@@ -16,6 +16,14 @@ export class AuditService {
     return Array.isArray(saved) ? saved[0] : saved;
   }
 
+  async safeCreate(createAuditLogDto: any): Promise<void> {
+    try {
+      await this.create(createAuditLogDto);
+    } catch {
+      // Auditoria nao deve bloquear a operacao principal.
+    }
+  }
+
   async findAll(): Promise<AuditLog[]> {
     return this.auditLogsRepository.find({
       relations: ['user'],

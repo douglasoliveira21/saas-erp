@@ -7,6 +7,7 @@ import { FinancialMovement } from './entities/financial-movement.entity';
 import { CardFee } from './entities/card-fee.entity';
 import { CustomerCredit } from './entities/customer-credit.entity';
 import { Sale } from '../sales/entities/sale.entity';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class FinancialService implements OnModuleInit {
@@ -41,6 +42,7 @@ export class FinancialService implements OnModuleInit {
     private readonly cardFeeRepo: Repository<CardFee>,
     @InjectRepository(CustomerCredit)
     private readonly creditRepo: Repository<CustomerCredit>,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -104,6 +106,8 @@ export class FinancialService implements OnModuleInit {
       throw new NotFoundException('Parcela não encontrada');
     }
 
+    const oldData = { ...installment };
+
     if (installment.status === 'pago' || installment.status === 'cancelado') {
       throw new BadRequestException('Parcela já está paga ou cancelada');
     }
@@ -143,6 +147,20 @@ export class FinancialService implements OnModuleInit {
       }),
     );
 
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.installment_paid',
+      entity: 'installment',
+      entityId: installment.id,
+      oldData,
+      newData: {
+        paidValue: installment.paidValue,
+        status: installment.status,
+        paymentMethod,
+        value,
+      },
+    });
+
     return installment;
   }
 
@@ -158,6 +176,8 @@ export class FinancialService implements OnModuleInit {
     if (!account) {
       throw new NotFoundException('Conta a receber não encontrada');
     }
+
+    const oldData = { ...account };
 
     if (account.status === 'cancelado') {
       throw new BadRequestException('Conta já está cancelada');
@@ -199,6 +219,19 @@ export class FinancialService implements OnModuleInit {
       );
     }
 
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.account_cancelled',
+      entity: 'account_receivable',
+      entityId: account.id,
+      oldData,
+      newData: {
+        status: account.status,
+        cancelReason: reason,
+        pendingValue: account.pendingValue,
+      },
+    });
+
     return account;
   }
 
@@ -222,7 +255,15 @@ export class FinancialService implements OnModuleInit {
       createdBy: userId,
     });
 
-    return this.creditRepo.save(credit);
+    const saved = await this.creditRepo.save(credit);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.customer_credit_created',
+      entity: 'customer_credit',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
   }
 
   /**
@@ -448,7 +489,15 @@ export class FinancialService implements OnModuleInit {
 
   async createMovement(data: Partial<FinancialMovement>) {
     const movement = this.movementRepo.create(data);
-    return this.movementRepo.save(movement);
+    const saved = await this.movementRepo.save(movement);
+    await this.auditService.safeCreate({
+      userId: data.createdBy,
+      action: 'financial.movement_created',
+      entity: 'financial_movement',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
   }
 
   async createManualMovement(data: any, userId: string) {
@@ -458,7 +507,16 @@ export class FinancialService implements OnModuleInit {
       isForecast: data.isForecast || false,
       isRecurring: data.isRecurring || false,
     });
-    return this.movementRepo.save(movement);
+    const saved = await this.movementRepo.save(movement);
+    const savedMovement = Array.isArray(saved) ? saved[0] : saved;
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.manual_movement_created',
+      entity: 'financial_movement',
+      entityId: savedMovement.id,
+      newData: savedMovement,
+    });
+    return savedMovement;
   }
 
   /**
@@ -495,21 +553,46 @@ export class FinancialService implements OnModuleInit {
       created++;
     }
 
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.recurring_movements_created',
+      entity: 'financial_movement',
+      entityId: groupId,
+      newData: { groupId, created, data },
+    });
     return { created, groupId };
   }
 
-  async updateMovement(id: string, data: any) {
+  async updateMovement(id: string, data: any, userId?: string) {
     const movement = await this.movementRepo.findOne({ where: { id } });
     if (!movement) throw new NotFoundException('Lançamento não encontrado');
     // Atualiza apenas o lançamento específico (não afeta outros meses do grupo)
+    const oldData = { ...movement };
     Object.assign(movement, data);
-    return this.movementRepo.save(movement);
+    const saved = await this.movementRepo.save(movement);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.movement_updated',
+      entity: 'financial_movement',
+      entityId: id,
+      oldData,
+      newData: data,
+    });
+    return saved;
   }
 
-  async deleteMovement(id: string) {
+  async deleteMovement(id: string, userId?: string) {
     const movement = await this.movementRepo.findOne({ where: { id } });
     if (!movement) throw new NotFoundException('Lançamento não encontrado');
     await this.movementRepo.remove(movement);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.movement_deleted',
+      entity: 'financial_movement',
+      entityId: id,
+      oldData: movement,
+      newData: { deleted: true },
+    });
     return { message: 'Lançamento removido' };
   }
 

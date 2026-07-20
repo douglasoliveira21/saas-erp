@@ -169,14 +169,14 @@ export class FinancialController {
 
   @Patch('movements/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  updateMovement(@Param('id') id: string, @Body() body: any) {
-    return this.financialService.updateMovement(id, body);
+  updateMovement(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.financialService.updateMovement(id, body, req.user.id);
   }
 
   @Delete('movements/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  deleteMovement(@Param('id') id: string) {
-    return this.financialService.deleteMovement(id);
+  deleteMovement(@Param('id') id: string, @Request() req: any) {
+    return this.financialService.deleteMovement(id, req.user.id);
   }
 
   @Post('sync-sales')

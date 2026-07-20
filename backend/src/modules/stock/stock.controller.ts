@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { StockService } from './stock.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,8 +17,8 @@ export class StockController {
   constructor(private readonly stockService: StockService) {}
 
   @Post('movements')
-  create(@Body() createStockMovementDto: any) {
-    return this.stockService.create(createStockMovementDto);
+  create(@Body() createStockMovementDto: any, @Request() req: any) {
+    return this.stockService.create({ ...createStockMovementDto, userId: createStockMovementDto.userId || req.user.id });
   }
 
   @Get('movements')
@@ -31,7 +32,7 @@ export class StockController {
   }
 
   @Delete('movements/:id')
-  remove(@Param('id') id: string) {
-    return this.stockService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.stockService.remove(id, req.user.id);
   }
 }

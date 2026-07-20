@@ -12,7 +12,7 @@ export class SalesController {
 
   @Post()
   create(@Body() createSaleDto: any, @Request() req: any) {
-    return this.salesService.create({ ...createSaleDto, technicianId: createSaleDto.technicianId || req.user.id });
+    return this.salesService.create({ ...createSaleDto, technicianId: createSaleDto.technicianId || req.user.id }, req.user.id);
   }
 
   @Get()
@@ -62,13 +62,13 @@ export class SalesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSaleDto: any) {
-    return this.salesService.update(id, updateSaleDto);
+  update(@Param('id') id: string, @Body() updateSaleDto: any, @Request() req: any) {
+    return this.salesService.update(id, updateSaleDto, req.user.id);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.salesService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.remove(id, req.user.id);
   }
 }

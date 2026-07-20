@@ -15,6 +15,7 @@ import { FiscalConfig } from './entities/fiscal-config.entity';
 import { FinancialTask } from '../financial-tasks/entities/financial-task.entity';
 import { FinancialMovement } from '../financial/entities/financial-movement.entity';
 import { MailService } from '../mail/mail.service';
+import { AuditService } from '../audit/audit.service';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +29,7 @@ export class FiscalController {
     @InjectRepository(FinancialTask) private taskRepo: Repository<FinancialTask>,
     @InjectRepository(FinancialMovement) private movementRepo: Repository<FinancialMovement>,
     private mailService: MailService,
+    private auditService: AuditService,
   ) {}
 
   private async completeNfTask(saleId: string) {
@@ -109,11 +111,32 @@ export class FiscalController {
 
   @Patch('config')
   @Roles(UserRole.ADMIN)
-  async updateConfig(@Body() body: any) {
+  async updateConfig(@Body() body: any, @Request() req: any) {
     const config = await this.configRepo.findOne({ where: {} });
-    if (!config) return this.configRepo.save(this.configRepo.create(body));
+    if (!config) {
+      const saved = await this.configRepo.save(this.configRepo.create(body));
+      const savedConfig = Array.isArray(saved) ? saved[0] : saved;
+      await this.auditService.safeCreate({
+        userId: req.user?.id,
+        action: 'fiscal.config_created',
+        entity: 'fiscal_config',
+        entityId: savedConfig.id,
+        newData: savedConfig,
+      });
+      return savedConfig;
+    }
+    const oldData = { ...config };
     Object.assign(config, body);
-    return this.configRepo.save(config);
+    const saved = await this.configRepo.save(config);
+    await this.auditService.safeCreate({
+      userId: req.user?.id,
+      action: 'fiscal.config_updated',
+      entity: 'fiscal_config',
+      entityId: saved.id,
+      oldData,
+      newData: body,
+    });
+    return saved;
   }
 
   // === NOTAS FISCAIS ===
@@ -216,8 +239,8 @@ export class FiscalController {
 
   @Post('nfe/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  cancelNfe(@Body() body: { invoiceId: string; reason: string; certId: string }) {
-    return this.nfeService.cancel(body.invoiceId, body.reason, body.certId);
+  async cancelNfe(@Body() body: { invoiceId: string; reason: string; certId: string }, @Request() req: any) {
+    return this.nfeService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
   }
 
   @Get('nfe/download-xml/:id')
@@ -333,7 +356,7 @@ export class FiscalController {
 
   @Post('nfse/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  cancelNfse(@Body() body: { invoiceId: string; reason: string; certId: string }) {
-    return this.nfseService.cancel(body.invoiceId, body.reason, body.certId);
+  async cancelNfse(@Body() body: { invoiceId: string; reason: string; certId: string }, @Request() req: any) {
+    return this.nfseService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
   }
 }

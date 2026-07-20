@@ -8,6 +8,7 @@ import { SignedXml } from 'xml-crypto';
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { CertificateService } from './certificate.service';
+import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
 export class NfseService {
@@ -19,6 +20,7 @@ export class NfseService {
     @InjectRepository(FiscalConfig)
     private configRepository: Repository<FiscalConfig>,
     private certificateService: CertificateService,
+    private auditService: AuditService,
   ) {}
 
   async emit(invoiceId: string, serviceData: any, certId: string): Promise<Invoice> {
@@ -146,7 +148,7 @@ export class NfseService {
     throw new BadRequestException('XML nao disponivel: ' + JSON.stringify(response));
   }
 
-  async cancel(invoiceId: string, reason: string, certId: string): Promise<Invoice> {
+  async cancel(invoiceId: string, reason: string, certId: string, userId?: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
     if (invoice.status !== 'autorizada') throw new BadRequestException('Apenas notas autorizadas podem ser canceladas');
@@ -180,7 +182,20 @@ export class NfseService {
         throw new Error(erros);
       }
 
-      return this.invoiceRepository.save(invoice);
+      const saved = await this.invoiceRepository.save(invoice);
+      await this.auditService.safeCreate({
+        userId,
+        action: 'fiscal.nfse_cancelled',
+        entity: 'invoice',
+        entityId: saved.id,
+        newData: {
+          status: saved.status,
+          reason,
+          cancelProtocol: saved.cancelProtocol,
+          accessKey: saved.accessKey,
+        },
+      });
+      return saved;
     } catch (e) {
       throw new BadRequestException('Erro ao cancelar: ' + e.message);
     }

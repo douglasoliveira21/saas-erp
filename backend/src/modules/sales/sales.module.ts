@@ -11,6 +11,7 @@ import { FinancialTask } from '../financial-tasks/entities/financial-task.entity
 import { FinancialModule } from '../financial/financial.module';
 import { InterModule } from '../inter/inter.module';
 import { FiscalModule } from '../fiscal/fiscal.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { FiscalModule } from '../fiscal/fiscal.module';
     FinancialModule,
     InterModule,
     FiscalModule,
+    AuditModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

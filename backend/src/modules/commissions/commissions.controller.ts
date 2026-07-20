@@ -12,8 +12,8 @@ export class CommissionsController {
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
-  create(@Body() createCommissionDto: any) {
-    return this.commissionsService.create(createCommissionDto);
+  create(@Body() createCommissionDto: any, @Request() req: any) {
+    return this.commissionsService.create(createCommissionDto, req.user.id);
   }
 
   @Post('generate-monthly')
@@ -46,19 +46,19 @@ export class CommissionsController {
 
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  cancel(@Param('id') id: string) {
-    return this.commissionsService.cancel(id);
+  cancel(@Param('id') id: string, @Request() req: any) {
+    return this.commissionsService.cancel(id, req.user.id);
   }
 
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  update(@Param('id') id: string, @Body() updateCommissionDto: any) {
-    return this.commissionsService.update(id, updateCommissionDto);
+  update(@Param('id') id: string, @Body() updateCommissionDto: any, @Request() req: any) {
+    return this.commissionsService.update(id, updateCommissionDto, req.user.id);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.commissionsService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.commissionsService.remove(id, req.user.id);
   }
 }

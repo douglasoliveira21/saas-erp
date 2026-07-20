@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logge
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Commission } from './entities/commission.entity';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class CommissionsService implements OnModuleInit {
@@ -10,6 +11,7 @@ export class CommissionsService implements OnModuleInit {
   constructor(
     @InjectRepository(Commission)
     private commissionsRepository: Repository<Commission>,
+    private auditService: AuditService,
   ) {}
 
   async onModuleInit() {
@@ -44,7 +46,7 @@ export class CommissionsService implements OnModuleInit {
     }, 3600000); // Verifica a cada hora
   }
 
-  async create(createCommissionDto: any): Promise<Commission> {
+  async create(createCommissionDto: any, userId?: string): Promise<Commission> {
     const dto = { ...createCommissionDto };
 
     // Se for fixa, marcar como recorrente e definir mes de referencia
@@ -55,7 +57,15 @@ export class CommissionsService implements OnModuleInit {
 
     const commission = this.commissionsRepository.create(dto);
     const saved = await this.commissionsRepository.save(commission);
-    return Array.isArray(saved) ? saved[0] : saved;
+    const result = Array.isArray(saved) ? saved[0] : saved;
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.created',
+      entity: 'commission',
+      entityId: result.id,
+      newData: result,
+    });
+    return result;
   }
 
   // Gera comissoes fixas do mes para todos os tecnicos que tem comissao fixa
@@ -128,46 +138,94 @@ export class CommissionsService implements OnModuleInit {
 
   async approve(id: string, userId: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    const oldData = { status: commission.status, paidAt: commission.paidAt, paidBy: commission.paidBy };
     if (!['pendente', 'aprovada'].includes(commission.status as any)) {
       throw new BadRequestException('Esta comissao nao pode ser paga');
     }
     commission.status = 'paga' as any;
     commission.paidBy = userId as any;
     commission.paidAt = new Date();
-    return this.commissionsRepository.save(commission);
+    const saved = await this.commissionsRepository.save(commission);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.paid',
+      entity: 'commission',
+      entityId: id,
+      oldData,
+      newData: { status: saved.status, paidAt: saved.paidAt, paidBy: saved.paidBy, source: 'approve' },
+    });
+    return saved;
   }
 
   async pay(id: string, userId: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    const oldData = { status: commission.status, paidAt: commission.paidAt, paidBy: commission.paidBy };
     if (!['pendente', 'aprovada'].includes(commission.status as any)) {
       throw new BadRequestException('Esta comissao nao pode ser paga');
     }
     commission.status = 'paga' as any;
     commission.paidBy = userId as any;
     commission.paidAt = new Date();
-    return this.commissionsRepository.save(commission);
+    const saved = await this.commissionsRepository.save(commission);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.paid',
+      entity: 'commission',
+      entityId: id,
+      oldData,
+      newData: { status: saved.status, paidAt: saved.paidAt, paidBy: saved.paidBy },
+    });
+    return saved;
   }
 
-  async cancel(id: string): Promise<Commission> {
+  async cancel(id: string, userId?: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    const oldStatus = commission.status;
     if (['paga', 'cancelada'].includes(commission.status as any)) {
       throw new BadRequestException('Esta comissao nao pode ser cancelada');
     }
     commission.status = 'cancelada' as any;
-    return this.commissionsRepository.save(commission);
+    const saved = await this.commissionsRepository.save(commission);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.cancelled',
+      entity: 'commission',
+      entityId: id,
+      oldData: { status: oldStatus },
+      newData: { status: saved.status },
+    });
+    return saved;
   }
 
-  async update(id: string, updateCommissionDto: any): Promise<Commission> {
+  async update(id: string, updateCommissionDto: any, userId?: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    const oldData = { ...commission };
     Object.assign(commission, updateCommissionDto);
-    return this.commissionsRepository.save(commission);
+    const saved = await this.commissionsRepository.save(commission);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.updated',
+      entity: 'commission',
+      entityId: id,
+      oldData,
+      newData: updateCommissionDto,
+    });
+    return saved;
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId?: string): Promise<void> {
     const commission = await this.findOne(id);
     if (commission.status !== 'cancelada' as any) {
       throw new BadRequestException('Apenas comissoes canceladas podem ser excluidas');
     }
     await this.commissionsRepository.remove(commission);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'commission.deleted',
+      entity: 'commission',
+      entityId: id,
+      oldData: commission,
+      newData: { deleted: true },
+    });
   }
 }

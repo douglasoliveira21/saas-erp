@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { StockMovement } from './entities/stock-movement.entity';
 import { Product } from '../products/entities/product.entity';
 import { FinancialService } from '../financial/financial.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class StockService {
@@ -13,6 +14,7 @@ export class StockService {
     @InjectRepository(Product)
     private productsRepository: Repository<Product>,
     private financialService: FinancialService,
+    private auditService: AuditService,
   ) {}
 
   async create(createStockMovementDto: any): Promise<StockMovement> {
@@ -57,6 +59,22 @@ export class StockService {
     });
 
     const saved = await this.stockMovementsRepository.save(movement);
+    const savedMovement = Array.isArray(saved) ? saved[0] : saved;
+    await this.auditService.safeCreate({
+      userId,
+      action: 'stock.movement_created',
+      entity: 'stock_movement',
+      entityId: savedMovement.id,
+      oldData: { productId, quantity: previousQuantity },
+      newData: {
+        productId,
+        type,
+        quantity: normalizedQuantity,
+        previousQuantity,
+        newQuantity,
+        reason,
+      },
+    });
 
     // Registrar despesa no fluxo de caixa para entradas de mercadoria
     if (type === 'entrada') {
@@ -79,7 +97,7 @@ export class StockService {
       }
     }
 
-    return this.findOne((Array.isArray(saved) ? saved[0] : saved).id);
+    return this.findOne(savedMovement.id);
   }
 
   async findAll(): Promise<StockMovement[]> {
@@ -98,7 +116,7 @@ export class StockService {
     return movement;
   }
 
-  async remove(id: string): Promise<{ message: string }> {
+  async remove(id: string, userId?: string): Promise<{ message: string }> {
     const movement = await this.findOne(id);
 
     if (movement.saleId || movement.type === 'venda' || movement.type === 'estorno') {
@@ -118,6 +136,17 @@ export class StockService {
     }
 
     await this.stockMovementsRepository.remove(movement);
+    await this.auditService.safeCreate({
+      userId: userId || movement.userId,
+      action: 'stock.movement_deleted',
+      entity: 'stock_movement',
+      entityId: id,
+      oldData: movement,
+      newData: {
+        deleted: true,
+        stockReverted: true,
+      },
+    });
     return { message: 'Movimentação excluída e estoque revertido' };
   }
 }

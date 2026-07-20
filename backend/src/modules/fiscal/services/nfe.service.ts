@@ -8,6 +8,7 @@ import { SignedXml } from 'xml-crypto';
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { CertificateService } from './certificate.service';
+import { AuditService } from '../../audit/audit.service';
 
 const SEFAZ_MG_PROD = {
   NFeAutorizacao4: 'https://nfe.fazenda.mg.gov.br/nfe2/services/NFeAutorizacao4',
@@ -48,6 +49,7 @@ export class NfeService {
     @InjectRepository(FiscalConfig)
     private configRepository: Repository<FiscalConfig>,
     private certificateService: CertificateService,
+    private auditService: AuditService,
   ) {}
 
   private getEndpoints(config: FiscalConfig, modelo: string) {
@@ -243,7 +245,7 @@ export class NfeService {
     return this.soapRequest(endpoints.NFeRetAutorizacao4, envelope, agent);
   }
 
-  async cancel(invoiceId: string, reason: string, certId: string): Promise<Invoice> {
+  async cancel(invoiceId: string, reason: string, certId: string, userId?: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
     if (invoice.status !== 'autorizada') throw new BadRequestException('Apenas notas autorizadas podem ser canceladas');
@@ -292,7 +294,20 @@ export class NfeService {
         throw new Error(`${cStat}: ${xMotivo}`);
       }
 
-      return this.invoiceRepository.save(invoice);
+      const saved = await this.invoiceRepository.save(invoice);
+      await this.auditService.safeCreate({
+        userId,
+        action: 'fiscal.nfe_cancelled',
+        entity: 'invoice',
+        entityId: saved.id,
+        newData: {
+          status: saved.status,
+          reason,
+          cancelProtocol: saved.cancelProtocol,
+          accessKey: saved.accessKey,
+        },
+      });
+      return saved;
     } catch (e) {
       throw new BadRequestException('Erro ao cancelar NF-e: ' + e.message);
     }

@@ -7,6 +7,7 @@ import { Installment } from './entities/installment.entity';
 import { FinancialMovement } from './entities/financial-movement.entity';
 import { CardFee } from './entities/card-fee.entity';
 import { CustomerCredit } from './entities/customer-credit.entity';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { CustomerCredit } from './entities/customer-credit.entity';
       CardFee,
       CustomerCredit,
     ]),
+    AuditModule,
   ],
   controllers: [FinancialController],
   providers: [FinancialService],

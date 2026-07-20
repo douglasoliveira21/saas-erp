@@ -5,6 +5,7 @@ import * as https from 'https';
 import * as nodemailer from 'nodemailer';
 import { Repository } from 'typeorm';
 import { EmailConfig } from './entities/email-config.entity';
+import { AuditService } from '../audit/audit.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -17,6 +18,7 @@ export class MailService implements OnModuleInit {
   constructor(
     @InjectRepository(EmailConfig)
     private readonly configRepository: Repository<EmailConfig>,
+    private readonly auditService: AuditService,
   ) {
     this.transporter = this.createTransporter(this.getEnvConfig());
   }
@@ -148,10 +150,11 @@ export class MailService implements OnModuleInit {
     };
   }
 
-  async updateConfig(body: any): Promise<any> {
+  async updateConfig(body: any, userId?: string): Promise<any> {
     await this.ensureConfigTable();
     let config = await this.configRepository.findOne({ where: {} });
     if (!config) config = this.configRepository.create(this.getEnvConfig());
+    const oldData = this.sanitizeConfig(config);
 
     config.host = body.host || '';
     config.port = Number(body.port || 587);
@@ -171,6 +174,14 @@ export class MailService implements OnModuleInit {
     const saved = await this.configRepository.save(config);
     this.configCache = saved;
     this.transporter = this.createTransporter(saved);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'mail.config_updated',
+      entity: 'email_config',
+      entityId: saved.id,
+      oldData,
+      newData: this.sanitizeConfig(saved),
+    });
     return this.getPublicConfig();
   }
 
@@ -230,7 +241,7 @@ export class MailService implements OnModuleInit {
     };
   }
 
-  async connectMicrosoft(code: string, state?: string, redirectUri?: string): Promise<any> {
+  async connectMicrosoft(code: string, state?: string, redirectUri?: string, userId?: string): Promise<any> {
     const config = await this.getConfig();
     if (config.microsoftState && state && config.microsoftState !== state) {
       throw new Error('Estado de autenticacao Microsoft invalido');
@@ -259,10 +270,21 @@ export class MailService implements OnModuleInit {
 
     const saved = await this.configRepository.save(config);
     this.configCache = saved;
+    await this.auditService.safeCreate({
+      userId,
+      action: 'mail.microsoft_connected',
+      entity: 'email_config',
+      entityId: saved.id,
+      newData: {
+        provider: saved.provider,
+        microsoftUserEmail: saved.microsoftUserEmail,
+        microsoftTenantId: saved.microsoftTenantId,
+      },
+    });
     return this.getPublicConfig();
   }
 
-  async disconnectMicrosoft(): Promise<any> {
+  async disconnectMicrosoft(userId?: string): Promise<any> {
     const config = await this.getConfig();
     config.microsoftAccessToken = null;
     config.microsoftRefreshToken = null;
@@ -272,7 +294,40 @@ export class MailService implements OnModuleInit {
     if (config.provider === 'microsoft365') config.provider = 'smtp';
     const saved = await this.configRepository.save(config);
     this.configCache = saved;
+    await this.auditService.safeCreate({
+      userId,
+      action: 'mail.microsoft_disconnected',
+      entity: 'email_config',
+      entityId: saved.id,
+      newData: {
+        provider: saved.provider,
+        disconnected: true,
+      },
+    });
     return this.getPublicConfig();
+  }
+
+  private sanitizeConfig(config: EmailConfig): any {
+    if (!config) return null;
+    return {
+      id: config.id,
+      provider: config.provider,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      authUser: config.authUser,
+      fromEmail: config.fromEmail,
+      fromName: config.fromName,
+      copyEnabled: config.copyEnabled,
+      copyEmail: config.copyEmail,
+      microsoftTenantId: config.microsoftTenantId,
+      microsoftClientId: config.microsoftClientId,
+      microsoftRedirectUri: config.microsoftRedirectUri,
+      microsoftUserEmail: config.microsoftUserEmail,
+      hasPassword: Boolean(config.authPass),
+      hasMicrosoftClientSecret: Boolean(config.microsoftClientSecret),
+      microsoftConnected: Boolean(config.microsoftRefreshToken),
+    };
   }
 
   private async getMicrosoftAccessToken(config: EmailConfig): Promise<string> {
