@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useFeedback } from '../components/ui'
+import { getErrorMessage } from '../services/errors'
 import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit, Send } from 'lucide-react'
 
 interface Sale {
   id: string
-  technician: { id: string; name: string }
-  customer: { id: string; name: string }
+  technician: { id: string; name: string; email?: string }
+  customer: { id: string; name: string; email?: string }
   status: string
   paymentMethod: string
   totalAmount: number
@@ -34,6 +36,7 @@ const paymentLabels: Record<string, string> = {
 }
 
 export function Sales() {
+  const { notify, confirm: confirmAction } = useFeedback()
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,7 +46,6 @@ export function Sales() {
   const [dateTo, setDateTo] = useState(() => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth()+1, 0); return last.getFullYear() + '-' + String(last.getMonth()+1).padStart(2,'0') + '-' + String(last.getDate()).padStart(2,'0') })
   const [selected, setSelected] = useState<Sale | null>(null)
   const [error, setError] = useState('')
-  const [sendingEmailId, setSendingEmailId] = useState('')
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [emailSaleId, setEmailSaleId] = useState('')
   const [emailBody, setEmailBody] = useState('')
@@ -81,11 +83,11 @@ export function Sales() {
   }
 
   async function cancel(id: string) {
-    if (!confirm('Cancelar esta venda?')) return
+    if (!await confirmAction({ title: 'Cancelar venda', message: 'O estoque, as comissões e as pendências serão estornados. Deseja continuar?', confirmLabel: 'Cancelar venda', danger: true })) return
     try {
       await api.patch(`/sales/${id}/cancel`)
-      load(); setSelected(null)
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
+      notify('Venda cancelada e operações relacionadas estornadas', 'success'); load(); setSelected(null)
+    } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao cancelar')) }
   }
 
   async function generatePayment(id: string, type: 'boleto' | 'pix') {
@@ -116,12 +118,12 @@ export function Sales() {
     try {
       const res = await api.post(`/sales/${emailSaleId}/send-documents`, { body: emailBody })
       const count = res.data?.attachments?.length || 0
-      alert(`Email enviado para o cliente com ${count} anexo(s).`)
+      notify(`Email enviado para o cliente com ${count} anexo(s).`, 'success')
       setShowEmailModal(false)
-    } catch (e: any) {
-      const msg = e.response?.data?.message || 'Erro ao enviar email para o cliente'
-      setError(msg)
-      alert('Erro: ' + msg)
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Erro ao enviar email para o cliente')
+      setError(message)
+      notify(message, 'error')
     } finally {
       setEmailSending(false)
     }
@@ -246,8 +248,8 @@ export function Sales() {
                         <button onClick={() => generatePayment(s.id, 'pix')} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Gerar PIX"><DollarSign className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
-                        <button onClick={() => openEmailModal(s.id)} disabled={sendingEmailId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
-                          <Send className={'w-4 h-4 ' + (sendingEmailId === s.id ? 'animate-pulse' : '')} />
+                        <button onClick={() => openEmailModal(s.id)} disabled={emailSending && emailSaleId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
+                          <Send className={'w-4 h-4 ' + (emailSending && emailSaleId === s.id ? 'animate-pulse' : '')} />
                         </button>
                       )}
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'boleto_emitido'].includes(s.status) && (

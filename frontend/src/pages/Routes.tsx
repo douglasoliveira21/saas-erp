@@ -119,7 +119,7 @@ export function Routes() {
   async function payMonth() {
     const [y, m] = monthFilter.split('-')
     if (!confirm('Pagar todas aprovadas do mes?')) return
-    try { const r = await api.patch('/routes/pay-month?year=' + y + '&month=' + m); if (r.data.count === 0) { setError('Nenhuma aprovada neste mes'); return }; alert(r.data.count + ' rota(s) pagas - R$ ' + Number(r.data.total).toFixed(2)); load() }
+    try { const r = await api.patch('/routes/pay-month?year=' + y + '&month=' + m); if (r.data.count === 0) { setError('Nenhuma aprovada neste mes'); return } alert(r.data.count + ' rota(s) pagas - R$ ' + Number(r.data.total).toFixed(2)); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro') }
   }
 

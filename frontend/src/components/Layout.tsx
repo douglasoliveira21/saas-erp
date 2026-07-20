@@ -1,41 +1,8 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import {
-  LayoutDashboard,
-  Package,
-  Wrench,
-  Users,
-  ShoppingCart,
-  DollarSign,
-  UserCog,
-  FileText,
-  LogOut,
-  Menu,
-  X,
-  Navigation,
-  ScrollText,
-  Clock,
-  Car,
-  ChevronDown,
-  ChevronRight,
-  Wallet,
-  CreditCard,
-  PiggyBank,
-  Search,
-  Bell,
-  ShoppingBag,
-  Receipt,
-  Star,
-  Repeat,
-  ClipboardList,
-  Mail,
-  ArrowDownUp,
-  BarChart3,
-} from 'lucide-react'
+import { LogOut, Menu, X, ChevronDown, ChevronRight, Wallet, Search, Bell, ShoppingCart } from 'lucide-react'
 import { useState, useEffect } from 'react'
-
-interface NavItem { name: string; href: string; icon: any; roles: string[] }
-interface NavSection { title: string; items: NavItem[]; expandable?: boolean; expandId?: string }
+import { navigationSections, NavItem } from './navigation'
 
 export function Layout() {
   const { user, logout } = useAuth()
@@ -54,49 +21,7 @@ export function Layout() {
     return () => clearInterval(t)
   }, [])
 
-  const sections: NavSection[] = [
-    { title: 'Principal', items: [
-      { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'financeiro', 'tecnico'] },
-    ]},
-    { title: 'Comercial', items: [
-      { name: 'Clientes', href: '/customers', icon: Users, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Contratos', href: '/contracts', icon: ScrollText, roles: ['admin', 'financeiro'] },
-    ]},
-    { title: 'Vendas', expandable: true, expandId: 'vendas', items: [
-      { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'PDV', href: '/pdv', icon: Receipt, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Orçamentos', href: '/orcamentos', icon: FileText, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Pré-venda', href: '/pre-vendas', icon: ClipboardList, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Venda Recorrente', href: '/vendas-recorrentes', icon: Repeat, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Cashback', href: '/cashback', icon: DollarSign, roles: ['admin', 'financeiro'] },
-      { name: 'Fidelidade', href: '/fidelidade', icon: Star, roles: ['admin', 'financeiro'] },
-      { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: ['admin', 'financeiro'] },
-    ]},
-    { title: 'Operacional', items: [
-      { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Serviços', href: '/services', icon: Wrench, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Compras', href: '/compras', icon: ShoppingBag, roles: ['admin', 'financeiro'] },
-      { name: 'Rotas Externas', href: '/routes', icon: Navigation, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'] },
-    ]},
-    { title: 'Financeiro', expandable: true, items: [
-      { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
-      { name: 'Financeiro', href: '/financeiro', icon: DollarSign, roles: ['admin', 'financeiro'] },
-      { name: 'Contas a Pagar', href: '/contas-pagar', icon: Receipt, roles: ['admin', 'financeiro'] },
-      { name: 'Pagamentos', href: '/pagamentos', icon: CreditCard, roles: ['admin', 'financeiro'] },
-      { name: 'Conciliação', href: '/conciliacao', icon: ArrowDownUp, roles: ['admin', 'financeiro'] },
-      { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },
-      { name: 'Módulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
-      { name: 'Relatórios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },
-      { name: 'DRE', href: '/dre', icon: BarChart3, roles: ['admin', 'financeiro'] },
-    ]},
-    { title: 'Administração', items: [
-      { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },
-      { name: 'Email', href: '/email-settings', icon: Mail, roles: ['admin'] },
-    ]},
-  ]
-
-  const filteredSections = sections
+  const filteredSections = navigationSections
     .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '')) }))
     .filter(s => s.items.length > 0)
 
@@ -136,7 +61,7 @@ export function Layout() {
               return (
                 <div key={section.title}>
                   <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.08em]">{section.title}</p>
-                  <button onClick={() => setOpen(!isOpen)}
+                  <button type="button" onClick={() => setOpen(!isOpen)} aria-expanded={isOpen}
                     className={`w-full flex items-center justify-between px-3 py-2 text-[13px] font-medium rounded-xl transition-all duration-200 ${
                       isAnyActive && !isOpen ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                     }`}>
@@ -178,7 +103,7 @@ export function Layout() {
               </p>
             </div>
           </Link>
-          <button onClick={logout} className="mt-2 flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all">
+          <button type="button" onClick={logout} className="mt-2 flex items-center gap-2 w-full px-3 py-2 text-[13px] font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all">
             <LogOut className="w-4 h-4" /> Sair
           </button>
         </div>
@@ -187,11 +112,12 @@ export function Layout() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
+      <a href="#main-content" className="skip-link">Ir para o conteúdo principal</a>
       {/* Mobile overlay */}
       <div className={`fixed inset-0 z-50 lg:hidden ${sidebarOpen ? '' : 'pointer-events-none'}`}>
         <div className={`fixed inset-0 bg-black/20 backdrop-blur-sm transition-opacity duration-300 ${sidebarOpen ? 'opacity-100' : 'opacity-0'}`} onClick={() => setSidebarOpen(false)} />
         <div className={`fixed inset-y-0 left-0 w-[272px] bg-white shadow-elevated transform transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-          <button onClick={() => setSidebarOpen(false)} className="absolute top-5 right-4 text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" className="absolute top-5 right-4 text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
           {sidebarContent(() => setSidebarOpen(false))}
@@ -208,16 +134,16 @@ export function Layout() {
         {/* Top header bar */}
         <header className="sticky top-0 z-10 h-16 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center justify-between px-5 lg:px-8">
           <div className="flex items-center gap-4">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-gray-500">
+            <button type="button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu" aria-expanded={sidebarOpen} className="lg:hidden text-gray-500">
               <Menu className="w-5 h-5" />
             </button>
             <div className="hidden sm:flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2 w-64">
               <Search className="w-4 h-4 text-gray-400" />
-              <input className="bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 w-full" placeholder="Buscar..." />
+              <input aria-label="Busca global" className="bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 w-full" placeholder="Buscar..." />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
+            <button type="button" aria-label="Notificações" className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
               <Bell className="w-5 h-5" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
             </button>
@@ -231,7 +157,7 @@ export function Layout() {
         </header>
 
         {/* Page content */}
-        <main className="p-5 lg:p-8">
+        <main id="main-content" tabIndex={-1} className="p-4 sm:p-5 lg:p-8">
           <Outlet />
         </main>
       </div>

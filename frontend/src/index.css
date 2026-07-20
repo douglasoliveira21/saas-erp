@@ -69,3 +69,63 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #cbd5e1;
 }
+
+@layer base {
+  :focus-visible {
+    outline: 2px solid theme('colors.primary.500');
+    outline-offset: 2px;
+  }
+
+  button, [role='button'], a, input, select, textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .skip-link {
+    @apply fixed left-4 top-4 z-[100] -translate-y-20 rounded-lg bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0;
+  }
+
+  .form-label {
+    @apply mb-1 block text-sm font-medium text-gray-700;
+  }
+
+  .form-help {
+    @apply mt-1 text-xs text-gray-500;
+  }
+
+  .form-error {
+    @apply mt-1 text-xs font-medium text-red-600;
+  }
+}
+
+@media (max-width: 640px) {
+  .card {
+    border-radius: 1rem;
+    padding: 1rem;
+  }
+
+  main .overflow-hidden:has(> table),
+  main .overflow-hidden:has(> .table) {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  main table {
+    min-width: 42rem;
+  }
+
+  .table-cell {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+}

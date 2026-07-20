@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { RefreshCw, CheckCircle, XCircle, Clock, DollarSign, AlertTriangle, Search, Filter, Upload, ArrowRight, Undo2, Plus, Eye, EyeOff, TrendingUp, TrendingDown } from 'lucide-react'
+import { RefreshCw, CheckCircle, DollarSign, Search, Upload, ArrowRight, Undo2, Plus, EyeOff, TrendingUp, TrendingDown } from 'lucide-react'
 
 interface Statement {
   id: string; transactionId: string; date: string; amount: number; type: string; description: string; memo: string; documentNumber: string; bankAccount: string; status: string; matchedMovementId: string; matchScore: number; category: string; createdAt: string
@@ -19,7 +19,6 @@ const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yel
 const catLabels: Record<string, string> = { tarifa: 'Tarifa', rendimento: 'Rendimento', iof: 'IOF', estorno: 'Estorno', ted: 'TED', doc: 'DOC', pix: 'PIX', boleto: 'Boleto', transferencia: 'Transf.', deposito: 'Depósito', saque: 'Saque', outros: 'Outros' }
 
 export function Reconciliation() {
-  const [tab, setTab] = useState<'dashboard' | 'extrato' | 'sistema'>('dashboard')
   const [statements, setStatements] = useState<Statement[]>([])
   const [movements, setMovements] = useState<Movement[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)

@@ -51,8 +51,8 @@ export class SalesController {
 
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  cancel(@Param('id') id: string) {
-    return this.salesService.cancel(id);
+  cancel(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.cancel(id, req.user.id);
   }
 
   @Post(':id/send-documents')

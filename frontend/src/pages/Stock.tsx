@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { Plus, Search, Filter, X, Check, TrendingUp, TrendingDown, RefreshCw, Edit, Trash2 } from 'lucide-react'
+import { Button, PageHeader, useFeedback } from '../components/ui'
+import { getErrorMessage } from '../services/errors'
 
 interface Movement {
   id: string
   product: { id: string; name: string; code: string }
-  type: 'entrada' | 'saida' | 'ajuste' | 'venda'
+  type: 'entrada' | 'saida' | 'ajuste' | 'venda' | 'estorno'
   quantity: number
   previousQuantity: number
   newQuantity: number
@@ -15,10 +17,11 @@ interface Movement {
 
 interface Product { id: string; name: string; code: string; quantity: number; minStock: number }
 
-const typeLabels: Record<string, string> = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste', venda: 'Venda' }
-const typeColors: Record<string, string> = { entrada: 'bg-green-100 text-green-700', saida: 'bg-red-100 text-red-700', ajuste: 'bg-yellow-100 text-yellow-700', venda: 'bg-blue-100 text-blue-700' }
+const typeLabels: Record<string, string> = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste', venda: 'Venda', estorno: 'Estorno de venda' }
+const typeColors: Record<string, string> = { entrada: 'bg-green-100 text-green-700', saida: 'bg-red-100 text-red-700', ajuste: 'bg-yellow-100 text-yellow-700', venda: 'bg-blue-100 text-blue-700', estorno: 'bg-purple-100 text-purple-700' }
 
 export function Stock() {
+  const { notify, confirm: confirmAction } = useFeedback()
   const [movements, setMovements] = useState<Movement[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,8 +53,8 @@ export function Stock() {
     setSaving(true)
     try {
       await api.post('/stock/movements', form)
-      setShowModal(false); load()
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao registrar') }
+      setShowModal(false); notify('Movimentação registrada com sucesso', 'success'); load()
+    } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao registrar')) }
     finally { setSaving(false) }
   }
 
@@ -62,19 +65,19 @@ export function Stock() {
   }
 
   async function deleteMovement(id: string) {
-    if (!confirm('Excluir esta movimentação? O estoque será revertido.')) return
+    if (!await confirmAction({ title: 'Excluir movimentação', message: 'O estoque será revertido. Deseja continuar?', confirmLabel: 'Excluir', danger: true })) return
     try {
       await api.delete('/stock/movements/' + id)
-      load()
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir') }
+      notify('Movimentação excluída e estoque revertido', 'success'); load()
+    } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao excluir')) }
   }
 
   async function deleteProduct(id: string) {
-    if (!confirm('Excluir este produto do estoque?')) return
+    if (!await confirmAction({ title: 'Excluir produto', message: 'Deseja excluir este produto do estoque?', confirmLabel: 'Excluir', danger: true })) return
     try {
       await api.delete('/products/' + id)
-      load()
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir. Produto pode ter vendas vinculadas.') }
+      notify('Produto excluído com sucesso', 'success'); load()
+    } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao excluir. Produto pode ter vendas vinculadas.')) }
   }
 
   const filteredMovements = movements.filter(m => {
@@ -91,15 +94,11 @@ export function Stock() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Estoque</h1>
-          {lowStockCount > 0 && <p className="text-sm text-yellow-600 mt-1">⚠️ {lowStockCount} produto(s) com estoque baixo</p>}
-        </div>
-        <button onClick={() => { setForm({ productId: '', type: 'entrada', quantity: 1, reason: '' }); setError(''); setShowModal(true) }} className="btn btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> Movimentação
-        </button>
-      </div>
+      <PageHeader
+        title="Estoque"
+        description={lowStockCount > 0 ? `${lowStockCount} produto(s) com estoque baixo` : 'Produtos e histórico de movimentações'}
+        actions={<Button onClick={() => { setForm({ productId: '', type: 'entrada', quantity: 1, reason: '' }); setError(''); setShowModal(true) }}><Plus className="h-4 w-4" aria-hidden="true" />Nova movimentação</Button>}
+      />
 
       <div className="card mb-6">
         <div className="flex gap-4 flex-wrap">
@@ -197,6 +196,7 @@ export function Stock() {
                       {m.type === 'saida' && <TrendingDown className="w-4 h-4 text-red-500" />}
                       {m.type === 'ajuste' && <RefreshCw className="w-4 h-4 text-yellow-500" />}
                       {m.type === 'venda' && <TrendingDown className="w-4 h-4 text-blue-500" />}
+                      {m.type === 'estorno' && <TrendingUp className="w-4 h-4 text-purple-500" />}
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${typeColors[m.type]}`}>{typeLabels[m.type]}</span>
                     </div>
                   </td>
@@ -205,8 +205,12 @@ export function Stock() {
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">{m.reason || '-'}</td>
                   <td className="table-cell">
                     <div className="flex gap-1">
-                      <button onClick={() => openEdit(m)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
-                      <button onClick={() => deleteMovement(m.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                      {!['venda', 'estorno'].includes(m.type) && (
+                        <>
+                          <button onClick={() => openEdit(m)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
+                          <button onClick={() => deleteMovement(m.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Sale } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { Product } from '../products/entities/product.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
+import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { Commission } from '../commissions/entities/commission.entity';
+import { CommissionStatus } from '../../common/enums/commission-status.enum';
 import { FinancialTask } from '../financial-tasks/entities/financial-task.entity';
 import { MailService } from '../mail/mail.service';
 import { FinancialService } from '../financial/financial.service';
@@ -45,39 +47,67 @@ export class SalesService {
     try {
       const { items, ...saleData } = createSaleDto;
 
-      // Criar venda
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new BadRequestException('Adicione pelo menos um item à venda');
+      }
+
+      const requestedStock = new Map<string, number>();
+      for (const item of items) {
+        const quantity = Number(item.quantity);
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+          throw new BadRequestException(`Quantidade inválida para o item ${item.name || item.productId || item.serviceId}`);
+        }
+        if (item.productId) {
+          requestedStock.set(item.productId, (requestedStock.get(item.productId) || 0) + quantity);
+        }
+      }
+
+      // Criar venda e itens dentro da mesma transação do estoque.
       const sale = queryRunner.manager.create(Sale, saleData);
       const savedSale = await queryRunner.manager.save(Sale, sale);
 
-      // Criar itens e atualizar estoque
       for (const item of items) {
         const saleItem = queryRunner.manager.create(SaleItem, {
           ...item,
+          quantity: Number(item.quantity),
           saleId: savedSale.id,
         });
         await queryRunner.manager.save(SaleItem, saleItem);
+      }
 
-        // Atualizar estoque se for produto
-        if (item.productId) {
-          const product = await queryRunner.manager.findOne(Product, { where: { id: item.productId } });
-          if (product) {
-            const previousQty = product.quantity;
-            const newQty = previousQty - item.quantity;
-            await queryRunner.manager.update(Product, product.id, { quantity: newQty });
+      // Bloquear os produtos sempre na mesma ordem evita venda concorrente e reduz risco de deadlock.
+      for (const productId of Array.from(requestedStock.keys()).sort()) {
+        const requestedQuantity = requestedStock.get(productId)!;
+        const product = await queryRunner.manager.findOne(Product, {
+          where: { id: productId },
+          lock: { mode: 'pessimistic_write' },
+        });
 
-            const movement = queryRunner.manager.create(StockMovement, {
-              productId: product.id,
-              type: 'venda' as any,
-              quantity: item.quantity,
-              previousQuantity: previousQty,
-              newQuantity: newQty,
-              reason: `Venda #${savedSale.id}`,
-              userId: saleData.technicianId,
-              saleId: savedSale.id,
-            } as any);
-            await queryRunner.manager.save(StockMovement, movement);
-          }
+        if (!product) {
+          throw new BadRequestException(`Produto ${productId} não encontrado`);
         }
+
+        const previousQuantity = Number(product.quantity);
+        if (previousQuantity < requestedQuantity) {
+          throw new BadRequestException(
+            `Estoque insuficiente para ${product.name}. Disponível: ${previousQuantity}; solicitado: ${requestedQuantity}`,
+          );
+        }
+
+        const newQuantity = previousQuantity - requestedQuantity;
+        await queryRunner.manager.update(Product, product.id, { quantity: newQuantity });
+
+        const movement = queryRunner.manager.create(StockMovement, {
+          productId: product.id,
+          type: StockMovementType.VENDA,
+          quantity: requestedQuantity,
+          previousQuantity,
+          newQuantity,
+          reason: `Venda #${savedSale.id}`,
+          userId: saleData.technicianId,
+          saleId: savedSale.id,
+        });
+        await queryRunner.manager.save(StockMovement, movement);
       }
 
       // Criar comissão automática
@@ -216,30 +246,108 @@ export class SalesService {
     return this.salesRepository.save(sale);
   }
 
-  async cancel(id: string): Promise<Sale> {
-    const sale = await this.findOne(id);
-    if (['finalizado', 'cancelado'].includes(sale.status as string)) {
-      throw new BadRequestException('Esta venda nao pode ser cancelada');
-    }
+  async cancel(id: string, cancelledBy: string): Promise<Sale> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    await this.cancelExternalDocuments(id);
-
-    sale.status = 'cancelado' as any;
-    await this.salesRepository.save(sale);
-
-    // Cancelar contas a receber
     try {
-      await this.dataSource.query(
-        `UPDATE accounts_receivable SET status = 'cancelado', canceled_at = NOW(), cancel_reason = 'Venda cancelada' WHERE sale_id = $1 AND status != 'cancelado'`, [id]
-      );
-      await this.dataSource.query(
-        `UPDATE installments SET status = 'cancelado' WHERE sale_id = $1 AND status != 'pago'`, [id]
-      );
-    } catch {}
+      const sale = await queryRunner.manager.findOne(Sale, {
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    return this.findOne(id);
+      if (!sale) throw new NotFoundException('Venda não encontrada');
+      if (sale.status === 'finalizado' as any) {
+        throw new BadRequestException('Venda finalizada não pode ser cancelada');
+      }
+
+      const paidCommission = await queryRunner.manager.findOne(Commission, {
+        where: { saleId: id, status: CommissionStatus.PAGA },
+      });
+      if (paidCommission) {
+        throw new BadRequestException('A comissão desta venda já foi paga. Reverta o pagamento da comissão antes de cancelar a venda.');
+      }
+
+      const alreadyCancelled = sale.status === 'cancelado' as any;
+      if (!alreadyCancelled) {
+        await this.cancelExternalDocuments(id);
+      }
+
+      const previousReversal = await queryRunner.manager.findOne(StockMovement, {
+        where: { saleId: id, type: StockMovementType.ESTORNO },
+      });
+
+      if (!previousReversal) {
+        const saleMovements = await queryRunner.manager.find(StockMovement, {
+          where: { saleId: id, type: StockMovementType.VENDA },
+          order: { productId: 'ASC' },
+        });
+
+        for (const movement of saleMovements) {
+          const product = await queryRunner.manager.findOne(Product, {
+            where: { id: movement.productId },
+            lock: { mode: 'pessimistic_write' },
+          });
+          if (!product) {
+            throw new BadRequestException(`Produto ${movement.productId} não encontrado para estorno do estoque`);
+          }
+
+          const previousQuantity = Number(product.quantity);
+          const newQuantity = previousQuantity + Number(movement.quantity);
+          await queryRunner.manager.update(Product, product.id, { quantity: newQuantity });
+
+          const reversal = queryRunner.manager.create(StockMovement, {
+            productId: product.id,
+            type: StockMovementType.ESTORNO,
+            quantity: Number(movement.quantity),
+            previousQuantity,
+            newQuantity,
+            reason: `Estorno da venda #${id}`,
+            userId: cancelledBy,
+            saleId: id,
+          });
+          await queryRunner.manager.save(StockMovement, reversal);
+        }
+      }
+
+      sale.status = 'cancelado' as any;
+      await queryRunner.manager.save(Sale, sale);
+
+      await queryRunner.manager.update(
+        Commission,
+        { saleId: id, status: In([CommissionStatus.PENDENTE, CommissionStatus.APROVADA]) },
+        { status: CommissionStatus.CANCELADA },
+      );
+
+      await queryRunner.manager.query(
+        `UPDATE financial_tasks
+         SET status = 'cancelado', completed_by = NULL, completed_at = NULL,
+             observations = CONCAT_WS(E'\n', NULLIF(observations, ''), 'Cancelada automaticamente com a venda')
+         WHERE sale_id = $1 AND status != 'cancelado'`,
+        [id],
+      );
+      await queryRunner.manager.query(
+        `UPDATE accounts_receivable
+         SET status = 'cancelado', canceled_at = NOW(), cancel_reason = 'Venda cancelada'
+         WHERE sale_id = $1 AND status != 'cancelado'`,
+        [id],
+      );
+      await queryRunner.manager.query(
+        `UPDATE installments SET status = 'cancelado'
+         WHERE sale_id = $1 AND status != 'pago'`,
+        [id],
+      );
+
+      await queryRunner.commitTransaction();
+      return this.findOne(id);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
-
   async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
     const sale = await this.findOne(id);
     const customer = sale.customer as any;

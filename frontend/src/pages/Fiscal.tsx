@@ -897,7 +897,7 @@ export function Fiscal() {
           <div className="card overflow-hidden p-0">
           {loading ? <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div> : (() => {
             // Filtrar
-            let filtered = invoices.filter(inv => {
+            const filtered = invoices.filter(inv => {
               const dateStr = inv.issuedAt || inv.createdAt
               const invDateObj = new Date(dateStr)
               const invYM = invDateObj.getFullYear() + '-' + String(invDateObj.getMonth()+1).padStart(2,'0')

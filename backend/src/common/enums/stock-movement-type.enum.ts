@@ -3,4 +3,5 @@ export enum StockMovementType {
   SAIDA = 'saida',
   AJUSTE = 'ajuste',
   VENDA = 'venda',
+  ESTORNO = 'estorno',
 }

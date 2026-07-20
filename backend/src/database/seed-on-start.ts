@@ -26,6 +26,22 @@ async function ensureOperationalTables(dataSource: DataSource): Promise<void> {
   await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_codigo_solicitacao ON payments(codigo_solicitacao)');
   await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)');
   await dataSource.query('CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at)');
+
+  // Compatibilidade com instalações existentes: impede novas gravações negativas sem
+  // invalidar o deploy caso já existam dados antigos a serem saneados.
+  await dataSource.query(`
+    DO $$
+    BEGIN
+      IF to_regclass('public.products') IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_constraint WHERE conname = 'CHK_products_quantity_nonnegative'
+         ) THEN
+        ALTER TABLE products
+          ADD CONSTRAINT "CHK_products_quantity_nonnegative"
+          CHECK (quantity >= 0) NOT VALID;
+      END IF;
+    END $$
+  `);
 }
 
 /**

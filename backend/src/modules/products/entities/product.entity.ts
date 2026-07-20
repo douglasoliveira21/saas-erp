@@ -5,11 +5,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  Check,
 } from 'typeorm';
 import { StockMovement } from '../../stock/entities/stock-movement.entity';
 import { SaleItem } from '../../sales/entities/sale-item.entity';
 
 @Entity('products')
+@Check('CHK_products_quantity_nonnegative', '"quantity" >= 0')
 export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;

@@ -17,6 +17,14 @@ export class StockService {
 
   async create(createStockMovementDto: any): Promise<StockMovement> {
     const { productId, type, quantity, reason, userId } = createStockMovementDto;
+    const normalizedQuantity = Number(quantity);
+
+    if (!['entrada', 'saida', 'ajuste'].includes(type)) {
+      throw new BadRequestException('Tipo de movimentação inválido. Venda e estorno são gerados automaticamente.');
+    }
+    if (!Number.isInteger(normalizedQuantity) || normalizedQuantity < 0 || (type !== 'ajuste' && normalizedQuantity === 0)) {
+      throw new BadRequestException('A quantidade deve ser um número inteiro válido');
+    }
 
     const product = await this.productsRepository.findOne({ where: { id: productId } });
     if (!product) throw new NotFoundException('Produto não encontrado');
@@ -25,14 +33,14 @@ export class StockService {
     let newQuantity: number;
 
     if (type === 'entrada') {
-      newQuantity = previousQuantity + quantity;
+      newQuantity = previousQuantity + normalizedQuantity;
     } else if (type === 'saida') {
-      if (previousQuantity < quantity) throw new BadRequestException('Estoque insuficiente');
-      newQuantity = previousQuantity - quantity;
+      if (previousQuantity < normalizedQuantity) throw new BadRequestException('Estoque insuficiente');
+      newQuantity = previousQuantity - normalizedQuantity;
     } else if (type === 'ajuste') {
-      newQuantity = quantity; // ajuste define o valor absoluto
+      newQuantity = normalizedQuantity; // ajuste define o valor absoluto
     } else {
-      newQuantity = previousQuantity - quantity;
+      newQuantity = previousQuantity - normalizedQuantity;
     }
 
     // Atualizar estoque do produto
@@ -41,7 +49,7 @@ export class StockService {
     const movement = this.stockMovementsRepository.create({
       productId,
       type,
-      quantity,
+      quantity: normalizedQuantity,
       previousQuantity,
       newQuantity,
       reason,
@@ -52,7 +60,7 @@ export class StockService {
 
     // Registrar despesa no fluxo de caixa para entradas de mercadoria
     if (type === 'entrada') {
-      const totalCost = Number(product.purchasePrice || 0) * quantity;
+      const totalCost = Number(product.purchasePrice || 0) * normalizedQuantity;
       if (totalCost > 0) {
         try {
           const now = new Date();
@@ -60,7 +68,7 @@ export class StockService {
           await this.financialService.createMovement({
             type: 'despesa',
             category: 'compra_mercadoria',
-            description: `Compra: ${product.name} (${quantity}x R$${Number(product.purchasePrice).toFixed(2)})`,
+            description: `Compra: ${product.name} (${normalizedQuantity}x R$${Number(product.purchasePrice).toFixed(2)})`,
             value: totalCost,
             date: dateStr,
             paymentMethod: 'outros',
@@ -93,13 +101,17 @@ export class StockService {
   async remove(id: string): Promise<{ message: string }> {
     const movement = await this.findOne(id);
 
+    if (movement.saleId || movement.type === 'venda' || movement.type === 'estorno') {
+      throw new BadRequestException('Movimentações de venda e estorno não podem ser excluídas manualmente');
+    }
+
     // Reverter o estoque
     const product = await this.productsRepository.findOne({ where: { id: movement.productId } });
     if (product) {
       let revertedQty = product.quantity;
       if (movement.type === 'entrada') {
         revertedQty = product.quantity - movement.quantity;
-      } else if (movement.type === 'saida' || movement.type === 'venda') {
+      } else if (movement.type === 'saida') {
         revertedQty = product.quantity + movement.quantity;
       }
       await this.productsRepository.update(product.id, { quantity: Math.max(0, revertedQty) });
