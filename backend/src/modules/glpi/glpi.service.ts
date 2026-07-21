@@ -275,11 +275,12 @@ export class GlpiService {
     return qb.getMany();
   }
 
-  async getSlaReport(month?: string): Promise<any> {
+  async getSlaReport(month?: string, customerId?: string): Promise<any> {
     const qb = this.ticketsRepository.createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.customer', 'customer')
       .leftJoinAndSelect('ticket.contract', 'contract');
     this.applyMonthFilter(qb, month, 'ticket');
+    if (customerId) qb.andWhere('ticket.customer_id = :customerId', { customerId });
     const tickets = await qb.getMany();
     const exceeded = tickets.filter(t => t.slaExceeded);
     const totalCharge = exceeded.reduce((s, t) => s + Number(t.exceededCharge), 0);
@@ -326,14 +327,17 @@ export class GlpiService {
       item.exceededHours = Number(item.exceededHours.toFixed(2));
       item.charge = Number(item.charge.toFixed(2));
     }
+    const customerSummary = Object.values(byCustomer).sort((a, b) => b.charge - a.charge);
     return {
       totalTickets: tickets.length,
       totalExceeded: exceeded.length,
+      totalConsumedHours: Number(customerSummary.reduce((sum, item) => sum + item.consumedHours, 0).toFixed(2)),
+      totalExceededHours: Number(customerSummary.reduce((sum, item) => sum + item.exceededHours, 0).toFixed(2)),
+      contractsWithoutAllowance: customerSummary.filter(item => item.includedHours <= 0).length,
       totalCharge,
-      byCustomer: Object.values(byCustomer).sort((a, b) => b.charge - a.charge),
+      byCustomer: customerSummary,
     };
   }
-
   private applyMonthFilter(qb: any, month?: string, alias = 't'): void {
     if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
     const [year, monthNumber] = month.split('-').map(Number);

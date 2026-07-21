@@ -34,8 +34,8 @@ export class GlpiController {
 
   @Get('sla-report')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  getSlaReport(@Query('month') month?: string) {
-    return this.service.getSlaReport(month);
+  getSlaReport(@Query('month') month?: string, @Query('customerId') customerId?: string) {
+    return this.service.getSlaReport(month, customerId);
   }
 
   @Get('config')
