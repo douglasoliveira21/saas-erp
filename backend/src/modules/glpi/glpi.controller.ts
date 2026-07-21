@@ -24,17 +24,18 @@ export class GlpiController {
 
   @Get('tickets')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  getTickets(@Query('customerId') customerId?: string, @Query('exceeded') exceeded?: string) {
+  getTickets(@Query('customerId') customerId?: string, @Query('exceeded') exceeded?: string, @Query('month') month?: string) {
     return this.service.getTickets({
       customerId,
       exceeded: exceeded === 'true',
+      month,
     });
   }
 
   @Get('sla-report')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  getSlaReport() {
-    return this.service.getSlaReport();
+  getSlaReport(@Query('month') month?: string) {
+    return this.service.getSlaReport(month);
   }
 
   @Get('config')

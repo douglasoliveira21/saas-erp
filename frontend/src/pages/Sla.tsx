@@ -7,7 +7,7 @@ interface Ticket {
   id: string
   glpiTicketId: number
   customer: { id: string; name: string }
-  contract: { id: string; title: string; slaInternal: number; slaExternal: number } | null
+  contract: { id: string; title: string; slaInternal: number; slaExternal: number; slaTotalHours: number; slaOverageRate: number } | null
   title: string
   status: number
   slaType: string
@@ -25,7 +25,7 @@ interface SlaReport {
   totalTickets: number
   totalExceeded: number
   totalCharge: number
-  byCustomer: { name: string; tickets: number; exceeded: number; charge: number }[]
+  byCustomer: { name: string; tickets: number; exceeded: number; consumedHours: number; includedHours: number; exceededHours: number; overageRate: number; charge: number }[]
 }
 
 export function Sla() {
@@ -35,6 +35,7 @@ export function Sla() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'exceeded'>('all')
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [error, setError] = useState('')
 
   // GLPI Config state
@@ -52,9 +53,11 @@ export function Sla() {
 
   async function load() {
     try {
+      const params = new URLSearchParams({ month })
+      if (filter === 'exceeded') params.set('exceeded', 'true')
       const [t, r] = await Promise.all([
-        api.get('/glpi/tickets' + (filter === 'exceeded' ? '?exceeded=true' : '')),
-        api.get('/glpi/sla-report'),
+        api.get('/glpi/tickets?' + params.toString()),
+        api.get('/glpi/sla-report?month=' + encodeURIComponent(month)),
       ])
       setTickets(t.data); setReport(r.data)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar dados GLPI. Configure a conexão primeiro.') }
@@ -114,14 +117,14 @@ export function Sla() {
     finally { setSyncing(false) }
   }
 
-  useEffect(() => { if (!loading) load() }, [filter])
+  useEffect(() => { if (!loading) load() }, [filter, month])
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Controle de SLA</h1>
-          <p className="text-sm text-gray-500 mt-1">Integrado com GLPI - R$ 80,00/hora excedida</p>
+          <p className="text-sm text-gray-500 mt-1">Consumo mensal da franquia de horas definida em cada contrato</p>
         </div>
         <div className="flex gap-2">
           {isAdmin && (
@@ -241,13 +244,16 @@ export function Sla() {
         <div className="card mb-6">
           <h2 className="font-semibold text-gray-900 dark:text-white mb-3">Cobranca por Cliente (SLA Excedido)</h2>
           <table className="w-full text-sm">
-            <thead><tr className="border-b text-gray-500"><th className="text-left py-2">Cliente</th><th className="text-right py-2">Chamados</th><th className="text-right py-2">Estourados</th><th className="text-right py-2">Valor a Cobrar</th></tr></thead>
+            <thead><tr className="border-b text-gray-500"><th className="text-left py-2">Cliente</th><th className="text-right py-2">Chamados</th><th className="text-right py-2">Consumo</th><th className="text-right py-2">Franquia</th><th className="text-right py-2">Excedente</th><th className="text-right py-2">Valor/h</th><th className="text-right py-2">Valor a Cobrar</th></tr></thead>
             <tbody>
               {report.byCustomer.filter(c => c.charge > 0).map((c, i) => (
                 <tr key={i} className="border-b border-gray-100">
                   <td className="py-2 font-medium">{c.name}</td>
                   <td className="py-2 text-right">{c.tickets}</td>
-                  <td className="py-2 text-right text-red-600">{c.exceeded}</td>
+                  <td className="py-2 text-right">{Number(c.consumedHours).toFixed(2)}h</td>
+                  <td className="py-2 text-right">{Number(c.includedHours).toFixed(2)}h</td>
+                  <td className="py-2 text-right text-red-600">{Number(c.exceededHours).toFixed(2)}h</td>
+                  <td className="py-2 text-right">R$ {Number(c.overageRate).toFixed(2)}</td>
                   <td className="py-2 text-right font-bold text-yellow-600">R$ {c.charge.toFixed(2)}</td>
                 </tr>
               ))}
@@ -256,12 +262,17 @@ export function Sla() {
         </div>
       )}
 
-      {/* Filtro */}
-      <div className="flex gap-2 mb-4">
-        <button onClick={() => setFilter('all')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (filter === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Todos</button>
-        <button onClick={() => setFilter('exceeded')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (filter === 'exceeded' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700')}>SLA Estourado</button>
+      {/* Filtro mensal */}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex gap-2">
+          <button onClick={() => setFilter('all')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (filter === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Todos</button>
+          <button onClick={() => setFilter('exceeded')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (filter === 'exceeded' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700')}>SLA Estourado</button>
+        </div>
+        <div>
+          <label htmlFor="sla-month" className="form-label">Mês de referência</label>
+          <input id="sla-month" className="input min-w-48" type="month" value={month} onChange={event => setMonth(event.target.value)} />
+        </div>
       </div>
-
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
 
       {/* Lista de chamados */}
@@ -279,7 +290,7 @@ export function Sla() {
                 <th className="table-cell font-semibold text-gray-700">Situação GLPI</th>
                 <th className="table-cell font-semibold text-gray-700">Cliente</th>
                 <th className="table-cell font-semibold text-gray-700">Tipo SLA</th>
-                <th className="table-cell font-semibold text-gray-700">Limite</th>
+                <th className="table-cell font-semibold text-gray-700">Franquia</th>
                 <th className="table-cell font-semibold text-gray-700">Abertura</th>
                 <th className="table-cell font-semibold text-gray-700">Solução</th>
                 <th className="table-cell font-semibold text-gray-700">Tempo gasto</th>

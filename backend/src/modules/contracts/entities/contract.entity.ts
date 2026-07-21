@@ -34,6 +34,12 @@ export class Contract {
   @Column({ name: 'sla_external', type: 'int', default: 24 })
   slaExternal: number;
 
+  @Column({ name: 'sla_total_hours', type: 'decimal', precision: 10, scale: 2, default: 0 })
+  slaTotalHours: number;
+
+  @Column({ name: 'sla_overage_rate', type: 'decimal', precision: 10, scale: 2, default: 80 })
+  slaOverageRate: number;
+
   @Column({ name: 'file_name', length: 255, nullable: true })
   fileName: string;
 

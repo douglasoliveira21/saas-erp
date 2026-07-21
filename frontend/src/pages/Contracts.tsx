@@ -14,6 +14,8 @@ interface Contract {
   endDate: string
   slaInternal: number
   slaExternal: number
+  slaTotalHours: number
+  slaOverageRate: number
   fileName: string
   fileSize: number
   status: string
@@ -44,7 +46,7 @@ export function Contracts() {
   const [editing, setEditing] = useState<Contract | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
+  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
   const [file, setFile] = useState<File | null>(null)
   const [showRenewModal, setShowRenewModal] = useState(false)
   const [renewingContract, setRenewingContract] = useState<Contract | null>(null)
@@ -64,13 +66,13 @@ export function Contracts() {
 
   function openNew() {
     setEditing(null); setFile(null)
-    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
+    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
     setError(''); setShowModal(true)
   }
 
   function openEdit(c: Contract) {
     setEditing(c); setFile(null)
-    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', equipments: c.equipments || '' })
+    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', equipments: c.equipments || '' })
     setError(''); setShowModal(true)
   }
 
@@ -88,6 +90,8 @@ export function Contracts() {
       if (form.endDate) fd.append('endDate', form.endDate)
       fd.append('slaInternal', form.slaInternal)
       fd.append('slaExternal', form.slaExternal)
+      fd.append('slaTotalHours', form.slaTotalHours)
+      fd.append('slaOverageRate', form.slaOverageRate)
       if (form.observations) fd.append('observations', form.observations)
       fd.append('adjustmentIndex', form.adjustmentIndex)
       if (form.adjustmentPercentage) fd.append('adjustmentPercentage', form.adjustmentPercentage)
@@ -257,6 +261,8 @@ export function Contracts() {
                   {c.monthlyValue && <span>Mensal: <strong>R$ {Number(c.monthlyValue).toFixed(2)}</strong></span>}
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> SLA Interno: <strong>{c.slaInternal}h</strong></span>
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> SLA Externo: <strong>{c.slaExternal}h</strong></span>
+                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Franquia mensal: <strong>{Number(c.slaTotalHours || 0).toFixed(1)}h</strong></span>
+                  <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" /> Hora excedente: <strong>R$ {Number(c.slaOverageRate || 0).toFixed(2)}</strong></span>
                   <span>Inicio: {new Date(c.startDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                   {c.endDate && <span>Fim: {new Date(c.endDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
                   {c.autoCharge && <span className="flex items-center gap-1 text-green-600"><DollarSign className="w-3 h-3" /> Cobrança Automática (dia {c.chargeDay})</span>}
@@ -345,6 +351,16 @@ export function Contracts() {
                     <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Atendimento Externo (horas)</label>
                     <input className="input" type="number" min="1" value={form.slaExternal} onChange={e => setForm({ ...form, slaExternal: e.target.value })} />
                     <p className="text-xs text-gray-400 mt-1">Tempo maximo para atender no local do cliente</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Franquia mensal do contrato (horas)</label>
+                    <input className="input" type="number" min="0" step="0.01" value={form.slaTotalHours} onChange={e => setForm({ ...form, slaTotalHours: e.target.value })} />
+                    <p className="text-xs text-gray-400 mt-1">Horas disponíveis a cada mês; o saldo reinicia no mês seguinte</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Valor da hora excedente (R$)</label>
+                    <input className="input" type="number" min="0" step="0.01" value={form.slaOverageRate} onChange={e => setForm({ ...form, slaOverageRate: e.target.value })} />
+                    <p className="text-xs text-gray-400 mt-1">Aplicado somente às horas que ultrapassarem a franquia</p>
                   </div>
                 </div>
               </div>

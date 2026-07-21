@@ -97,6 +97,7 @@ export class GlpiService {
     let totalCharge = 0;
     const failedEntities: Array<{ entityId: number; customer: string; error: string }> = [];
     const pageSize = 200;
+    const affectedContracts = new Map<string, Contract>();
 
     for (const [entityId, customer] of customersByEntity.entries()) {
       try {
@@ -133,6 +134,7 @@ export class GlpiService {
           where: { customerId: customer.id, status: 'ativo' },
           order: { createdAt: 'DESC' },
         });
+        if (contract) affectedContracts.set(contract.id, contract);
 
         for (const ticket of ticketList) {
           const parseDate = (value: unknown): Date | null => {
@@ -150,13 +152,14 @@ export class GlpiService {
 
           const type = Number(ticket.type);
           const slaType = type === 2 ? 'externo' : 'interno';
-          const slaLimit = contract
-            ? (slaType === 'interno' ? contract.slaInternal : contract.slaExternal)
-            : (slaType === 'interno' ? 4 : 24);
-          const slaExceeded = timeSpent > slaLimit;
-          const exceededHours = slaExceeded ? Math.ceil(timeSpent - slaLimit) : 0;
-          const chargeRate = 80;
-          const exceededCharge = exceededHours * chargeRate;
+          const contractStart = contract ? new Date(contract.startDate + 'T00:00:00') : null;
+          const contractEnd = contract?.endDate ? new Date(contract.endDate + 'T23:59:59.999') : null;
+          const isWithinContract = Boolean(
+            contract && dateOpened &&
+            (!contractStart || dateOpened >= contractStart) &&
+            (!contractEnd || dateOpened <= contractEnd),
+          );
+          const ticketContract = isWithinContract ? contract : null;
 
           let savedTicket = await this.ticketsRepository.findOne({
             where: { glpiTicketId: Number(ticket.id) },
@@ -166,14 +169,14 @@ export class GlpiService {
             savedTicket = this.ticketsRepository.create({
               glpiTicketId: Number(ticket.id),
               customerId: customer.id,
-              contractId: contract?.id || null,
+              contractId: ticketContract?.id || null,
               glpiEntityId: entityId,
             });
           }
 
           Object.assign(savedTicket, {
             customerId: customer.id,
-            contractId: contract?.id || null,
+            contractId: ticketContract?.id || null,
             glpiEntityId: entityId,
             title: ticket.name || ticket.title || `Chamado #${ticket.id}`,
             status: Number(ticket.status),
@@ -183,21 +186,17 @@ export class GlpiService {
             dateSolved,
             dateClosed,
             slaType,
-            slaLimitHours: slaLimit,
+            slaLimitHours: Number(ticketContract?.slaTotalHours || 0),
             timeSpentHours: Number(timeSpent.toFixed(2)),
-            slaExceeded,
-            exceededHours,
-            exceededCharge,
-            chargeRate,
+            slaExceeded: false,
+            exceededHours: 0,
+            exceededCharge: 0,
+            chargeRate: Number(ticketContract?.slaOverageRate || 0),
             syncedAt: new Date(),
           });
           await this.ticketsRepository.save(savedTicket);
 
           synced++;
-          if (slaExceeded) {
-            exceeded++;
-            totalCharge += exceededCharge;
-          }
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
@@ -206,10 +205,64 @@ export class GlpiService {
       }
     }
 
+    for (const contract of affectedContracts.values()) {
+      const result = await this.recalculateContractSla(contract);
+      exceeded += result.exceeded;
+      totalCharge += result.totalCharge;
+    }
+
     await this.configRepository.update(config.id, { lastSync: new Date() });
     return { synced, exceeded, totalCharge, failedEntities };
   }
-  async getTickets(filters?: { customerId?: string; exceeded?: boolean }): Promise<GlpiTicket[]> {
+
+  private async recalculateContractSla(contract: Contract): Promise<{ exceeded: number; totalCharge: number }> {
+    const tickets = await this.ticketsRepository.createQueryBuilder('ticket')
+      .where('ticket.contract_id = :contractId', { contractId: contract.id })
+      .orderBy('COALESCE(ticket.date_solved, ticket.date_closed, ticket.date_opened)', 'ASC')
+      .addOrderBy('ticket.glpi_ticket_id', 'ASC')
+      .getMany();
+
+    const includedHours = Math.max(0, Number(contract.slaTotalHours || 0));
+    const chargeRate = Math.max(0, Number(contract.slaOverageRate || 0));
+    let consumedHours = 0;
+    let previousOverflow = 0;
+    let currentMonth = '';
+    let exceeded = 0;
+    let totalCharge = 0;
+
+    for (const ticket of tickets) {
+      const referenceDate = ticket.dateSolved || ticket.dateClosed || ticket.dateOpened;
+      const ticketMonth = referenceDate
+        ? referenceDate.getFullYear() + '-' + String(referenceDate.getMonth() + 1).padStart(2, '0')
+        : 'sem-data';
+      if (ticketMonth !== currentMonth) {
+        currentMonth = ticketMonth;
+        consumedHours = 0;
+        previousOverflow = 0;
+      }
+
+      consumedHours += Math.max(0, Number(ticket.timeSpentHours || 0));
+      const cumulativeOverflow = includedHours > 0 ? Math.max(0, consumedHours - includedHours) : 0;
+      const ticketOverflow = Math.max(0, cumulativeOverflow - previousOverflow);
+      const roundedOverflow = Number(ticketOverflow.toFixed(2));
+      const charge = Number((roundedOverflow * chargeRate).toFixed(2));
+
+      ticket.slaLimitHours = includedHours;
+      ticket.slaExceeded = roundedOverflow > 0;
+      ticket.exceededHours = roundedOverflow;
+      ticket.exceededCharge = charge;
+      ticket.chargeRate = chargeRate;
+
+      if (ticket.slaExceeded) exceeded++;
+      totalCharge += charge;
+      previousOverflow = cumulativeOverflow;
+    }
+
+    if (tickets.length > 0) await this.ticketsRepository.save(tickets);
+    return { exceeded, totalCharge: Number(totalCharge.toFixed(2)) };
+  }
+
+  async getTickets(filters?: { customerId?: string; exceeded?: boolean; month?: string }): Promise<GlpiTicket[]> {
     const qb = this.ticketsRepository.createQueryBuilder('t')
       .leftJoinAndSelect('t.customer', 'customer')
       .leftJoinAndSelect('t.contract', 'contract')
@@ -217,28 +270,62 @@ export class GlpiService {
 
     if (filters?.customerId) qb.andWhere('t.customer_id = :cid', { cid: filters.customerId });
     if (filters?.exceeded) qb.andWhere('t.sla_exceeded = true');
+    this.applyMonthFilter(qb, filters?.month);
 
     return qb.getMany();
   }
 
-  async getSlaReport(): Promise<any> {
-    const tickets = await this.ticketsRepository.find({ relations: ['customer', 'contract'] });
+  async getSlaReport(month?: string): Promise<any> {
+    const qb = this.ticketsRepository.createQueryBuilder('ticket')
+      .leftJoinAndSelect('ticket.customer', 'customer')
+      .leftJoinAndSelect('ticket.contract', 'contract');
+    this.applyMonthFilter(qb, month, 'ticket');
+    const tickets = await qb.getMany();
     const exceeded = tickets.filter(t => t.slaExceeded);
     const totalCharge = exceeded.reduce((s, t) => s + Number(t.exceededCharge), 0);
 
-    // Agrupar por cliente
-    const byCustomer: Record<string, { name: string; tickets: number; exceeded: number; charge: number }> = {};
+    // Agrupar consumo da franquia e excedente por cliente
+    const byCustomer: Record<string, {
+      name: string;
+      tickets: number;
+      exceeded: number;
+      consumedHours: number;
+      includedHours: number;
+      exceededHours: number;
+      overageRate: number;
+      charge: number;
+    }> = {};
     for (const t of tickets) {
       const cid = t.customerId || 'sem-cliente';
       const name = t.customer?.name || 'Sem cliente';
-      if (!byCustomer[cid]) byCustomer[cid] = { name, tickets: 0, exceeded: 0, charge: 0 };
+      if (!byCustomer[cid]) {
+        byCustomer[cid] = {
+          name,
+          tickets: 0,
+          exceeded: 0,
+          consumedHours: 0,
+          includedHours: Number(t.contract?.slaTotalHours || 0),
+          exceededHours: 0,
+          overageRate: Number(t.contract?.slaOverageRate || 0),
+          charge: 0,
+        };
+      }
       byCustomer[cid].tickets++;
+      byCustomer[cid].consumedHours += Number(t.timeSpentHours || 0);
+      byCustomer[cid].includedHours = Math.max(byCustomer[cid].includedHours, Number(t.contract?.slaTotalHours || 0));
+      byCustomer[cid].overageRate = Math.max(byCustomer[cid].overageRate, Number(t.contract?.slaOverageRate || 0));
       if (t.slaExceeded) {
         byCustomer[cid].exceeded++;
+        byCustomer[cid].exceededHours += Number(t.exceededHours || 0);
         byCustomer[cid].charge += Number(t.exceededCharge);
       }
     }
 
+    for (const item of Object.values(byCustomer)) {
+      item.consumedHours = Number(item.consumedHours.toFixed(2));
+      item.exceededHours = Number(item.exceededHours.toFixed(2));
+      item.charge = Number(item.charge.toFixed(2));
+    }
     return {
       totalTickets: tickets.length,
       totalExceeded: exceeded.length,
@@ -247,6 +334,18 @@ export class GlpiService {
     };
   }
 
+  private applyMonthFilter(qb: any, month?: string, alias = 't'): void {
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
+    const [year, monthNumber] = month.split('-').map(Number);
+    if (monthNumber < 1 || monthNumber > 12) return;
+    const start = new Date(year, monthNumber - 1, 1);
+    const end = new Date(year, monthNumber, 1);
+    const referenceColumn = 'COALESCE(' + alias + '.date_solved, ' + alias + '.date_closed, ' + alias + '.date_opened)';
+    qb.andWhere(
+      referenceColumn + ' >= :monthStart AND ' + referenceColumn + ' < :monthEnd',
+      { monthStart: start, monthEnd: end },
+    );
+  }
   async getConfig2(): Promise<GlpiConfig | null> {
     const config = await this.configRepository.findOne({ where: {} });
     return config;

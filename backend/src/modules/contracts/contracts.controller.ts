@@ -40,6 +40,8 @@ export class ContractsController {
       endDate: body.endDate || null,
       slaInternal: parseInt(body.slaInternal) || 4,
       slaExternal: parseInt(body.slaExternal) || 24,
+      slaTotalHours: body.slaTotalHours ? parseFloat(body.slaTotalHours) : 0,
+      slaOverageRate: body.slaOverageRate ? parseFloat(body.slaOverageRate) : 80,
       observations: body.observations,
       adjustmentIndex: body.adjustmentIndex || null,
       adjustmentPercentage: body.adjustmentPercentage ? parseFloat(body.adjustmentPercentage) : null,
@@ -102,6 +104,8 @@ export class ContractsController {
     if (dto.monthlyValue) dto.monthlyValue = parseFloat(dto.monthlyValue);
     if (dto.slaInternal) dto.slaInternal = parseInt(dto.slaInternal);
     if (dto.slaExternal) dto.slaExternal = parseInt(dto.slaExternal);
+    if (dto.slaTotalHours !== undefined) dto.slaTotalHours = parseFloat(dto.slaTotalHours) || 0;
+    if (dto.slaOverageRate !== undefined) dto.slaOverageRate = parseFloat(dto.slaOverageRate) || 0;
     if (dto.adjustmentPercentage) dto.adjustmentPercentage = parseFloat(dto.adjustmentPercentage);
     if (dto.chargeDay) dto.chargeDay = parseInt(dto.chargeDay);
     if (dto.autoCharge !== undefined) dto.autoCharge = dto.autoCharge === 'true' || dto.autoCharge === true;
