@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Menu, X, ChevronDown, ChevronRight, Wallet, Search, Bell, ShoppingCart, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
+import { LogOut, Menu, X, ChevronDown, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { navigationSections, NavItem } from './navigation'
 import { api } from '../services/api'
@@ -22,12 +22,10 @@ export function Layout() {
   const navigate = useNavigate()
   const notificationsRef = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [financeiroOpen, setFinanceiroOpen] = useState(
-    ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports', '/contas-pagar', '/dre'].includes(location.pathname)
-  )
-  const [vendasOpen, setVendasOpen] = useState(
-    ['/sales', '/sales/new', '/pdv', '/orcamentos', '/pre-vendas', '/vendas-recorrentes', '/cashback', '/fidelidade', '/assinaturas'].includes(location.pathname)
-  )
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const current = navigationSections.find(section => section.items.some(item => location.pathname === item.href || location.pathname.startsWith(`${item.href}/`)))
+    return current?.expandable ? { [current.id]: true } : {}
+  })
   const [clock, setClock] = useState(new Date())
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
@@ -82,13 +80,18 @@ export function Layout() {
 
   const unreadNotifications = notifications.filter(item => item.status === 'nova').length
 
+  useEffect(() => {
+    const current = navigationSections.find(section => section.items.some(item => location.pathname === item.href || location.pathname.startsWith(`${item.href}/`)))
+    if (current?.expandable) setOpenSections({ [current.id]: true })
+  }, [location.pathname])
+
   const filteredSections = navigationSections
     .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '')) }))
     .filter(s => s.items.length > 0)
 
   function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
     const Icon = item.icon
-    const isActive = location.pathname === item.href
+    const isActive = location.pathname === item.href || location.pathname.startsWith(`${item.href}/`)
     return (
       <Link to={item.href} onClick={onClick}
         className={`flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-xl transition-all duration-200 ${
@@ -110,25 +113,21 @@ export function Layout() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-5 space-y-6 overflow-y-auto min-h-0">
+      <nav className="flex-1 px-3 py-5 space-y-2 overflow-y-auto min-h-0">
         {filteredSections.map(section => {
             if (section.expandable) {
-              const isAnyActive = section.items.some(i => location.pathname === i.href)
-              const isVendas = section.expandId === 'vendas'
-              const isOpen = isVendas ? vendasOpen : financeiroOpen
-              const setOpen = isVendas ? setVendasOpen : setFinanceiroOpen
-              const SectionIcon = isVendas ? ShoppingCart : Wallet
-              const sectionLabel = section.title
+              const isAnyActive = section.items.some(i => location.pathname === i.href || location.pathname.startsWith(`${i.href}/`))
+              const isOpen = Boolean(openSections[section.id])
+              const SectionIcon = section.icon
               return (
-                <div key={section.title}>
-                  <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.08em]">{section.title}</p>
-                  <button type="button" onClick={() => setOpen(!isOpen)} aria-expanded={isOpen}
+                <div key={section.id}>
+                  <button type="button" onClick={() => setOpenSections(current => ({ [section.id]: !current[section.id] }))} aria-expanded={isOpen}
                     className={`w-full flex items-center justify-between px-3 py-2 text-[13px] font-medium rounded-xl transition-all duration-200 ${
                       isAnyActive && !isOpen ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                     }`}>
                     <span className="flex items-center gap-3">
-                      <SectionIcon className={`w-[18px] h-[18px] ${isAnyActive ? 'text-primary-500' : 'text-gray-400'}`} />
-                      {sectionLabel}
+                      {SectionIcon && <SectionIcon className={`w-[18px] h-[18px] ${isAnyActive ? 'text-primary-500' : 'text-gray-400'}`} />}
+                      {section.title}
                     </span>
                     {isOpen ? <ChevronDown className="w-4 h-4 text-gray-300" /> : <ChevronRight className="w-4 h-4 text-gray-300" />}
                   </button>
@@ -141,7 +140,7 @@ export function Layout() {
               )
             }
             return (
-              <div key={section.title}>
+              <div key={section.id}>
                 <p className="px-3 mb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-[0.08em]">{section.title}</p>
                 <div className="space-y-0.5">
                   {section.items.map(item => <NavLink key={item.name} item={item} onClick={onClick} />)}

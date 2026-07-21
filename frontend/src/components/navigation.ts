@@ -1,52 +1,67 @@
-import { LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign, UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank, ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3, Landmark, Archive, Building2, ShieldCheck } from 'lucide-react'
+import {
+  LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign,
+  UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank,
+  ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3,
+  Landmark, Archive, Building2, ShieldCheck, Boxes, Settings,
+} from 'lucide-react'
 
 export interface NavItem { name: string; href: string; icon: LucideIcon; roles: string[] }
-export interface NavSection { title: string; items: NavItem[]; expandable?: boolean; expandId?: string }
+export interface NavSection { id: string; title: string; icon?: LucideIcon; items: NavItem[]; expandable?: boolean }
+
+const all = ['admin', 'financeiro', 'tecnico']
+const office = ['admin', 'financeiro']
 
 export const navigationSections: NavSection[] = [
-  { title: 'Principal', items: [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'financeiro', 'tecnico'] },
+  { id: 'principal', title: 'Principal', items: [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: all },
   ]},
-  { title: 'Comercial', items: [
-    { name: 'Clientes', href: '/customers', icon: Users, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Contratos', href: '/contracts', icon: ScrollText, roles: ['admin', 'financeiro'] },
+  { id: 'comercial', title: 'Comercial e vendas', icon: ShoppingCart, expandable: true, items: [
+    { name: 'Clientes', href: '/customers', icon: Users, roles: all },
+    { name: 'Orçamentos', href: '/orcamentos', icon: FileText, roles: all },
+    { name: 'Pré-vendas', href: '/pre-vendas', icon: ClipboardList, roles: all },
+    { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: all },
+    { name: 'PDV', href: '/pdv', icon: Receipt, roles: all },
+    { name: 'Vendas recorrentes', href: '/vendas-recorrentes', icon: Repeat, roles: all },
+    { name: 'Contratos', href: '/contracts', icon: ScrollText, roles: office },
   ]},
-  { title: 'Vendas', expandable: true, expandId: 'vendas', items: [
-    { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'PDV', href: '/pdv', icon: Receipt, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Orçamentos', href: '/orcamentos', icon: FileText, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Pré-venda', href: '/pre-vendas', icon: ClipboardList, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Venda Recorrente', href: '/vendas-recorrentes', icon: Repeat, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Cashback', href: '/cashback', icon: DollarSign, roles: ['admin', 'financeiro'] },
-    { name: 'Fidelidade', href: '/fidelidade', icon: Star, roles: ['admin', 'financeiro'] },
-    { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: ['admin', 'financeiro'] },
+  { id: 'catalogo', title: 'Catálogo e estoque', icon: Boxes, expandable: true, items: [
+    { name: 'Produtos', href: '/products', icon: Package, roles: all },
+    { name: 'Serviços', href: '/services', icon: Wrench, roles: all },
+    { name: 'Posição de estoque', href: '/stock', icon: Archive, roles: all },
+    { name: 'Inventário e Kardex', href: '/estoque-avancado', icon: ClipboardList, roles: office },
   ]},
-  { title: 'Operacional', items: [
-    { name: 'Produtos', href: '/products', icon: Package, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Serviços', href: '/services', icon: Wrench, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Compras', href: '/compras', icon: ShoppingBag, roles: ['admin', 'financeiro'] },
-    { name: 'Compras Avançado', href: '/compras-avancado', icon: ClipboardList, roles: ['admin', 'financeiro'] },
-    { name: 'Estoque Avançado', href: '/estoque-avancado', icon: Archive, roles: ['admin', 'financeiro'] },
-    { name: 'Rotas Externas', href: '/routes', icon: Navigation, roles: ['admin', 'financeiro', 'tecnico'] },
+  { id: 'compras', title: 'Compras', icon: ShoppingBag, expandable: true, items: [
+    { name: 'Solicitações e compras', href: '/compras', icon: ShoppingBag, roles: office },
+    { name: 'Cotações e recebimento', href: '/compras-avancado', icon: ClipboardList, roles: office },
+  ]},
+  { id: 'financeiro', title: 'Financeiro', icon: Landmark, expandable: true, items: [
+    { name: 'Visão financeira', href: '/financeiro', icon: DollarSign, roles: office },
+    { name: 'Contas a pagar', href: '/contas-pagar', icon: Receipt, roles: office },
+    { name: 'Pagamentos e recebimentos', href: '/pagamentos', icon: CreditCard, roles: office },
+    { name: 'Conciliação bancária', href: '/conciliacao', icon: ArrowDownUp, roles: office },
+    { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: all },
+    { name: 'DRE', href: '/dre', icon: BarChart3, roles: office },
+    { name: 'Relatórios', href: '/reports', icon: FileText, roles: office },
+    { name: 'Configurações financeiras', href: '/financeiro-avancado', icon: Settings, roles: office },
+  ]},
+  { id: 'fiscal', title: 'Fiscal e bancos', icon: FileText, expandable: true, items: [
+    { name: 'Notas fiscais', href: '/fiscal', icon: FileText, roles: office },
+    { name: 'Operações fiscais', href: '/fiscal-avancado', icon: ShieldCheck, roles: office },
+    { name: 'Banco Inter', href: '/inter-avancado', icon: Building2, roles: office },
+  ]},
+  { id: 'relacionamento', title: 'Relacionamento', icon: Star, expandable: true, items: [
+    { name: 'Cashback', href: '/cashback', icon: DollarSign, roles: office },
+    { name: 'Fidelidade', href: '/fidelidade', icon: Star, roles: office },
+    { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: office },
+  ]},
+  { id: 'operacoes', title: 'Operações', icon: Navigation, expandable: true, items: [
+    { name: 'Rotas externas', href: '/routes', icon: Navigation, roles: all },
     { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'] },
+    { name: 'Controle de SLA', href: '/sla', icon: Clock, roles: office },
   ]},
-  { title: 'Financeiro', expandable: true, items: [
-    { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: ['admin', 'financeiro', 'tecnico'] },
-    { name: 'Financeiro', href: '/financeiro', icon: DollarSign, roles: ['admin', 'financeiro'] },
-    { name: 'Financeiro Avançado', href: '/financeiro-avancado', icon: Landmark, roles: ['admin', 'financeiro'] },
-    { name: 'Contas a Pagar', href: '/contas-pagar', icon: Receipt, roles: ['admin', 'financeiro'] },
-    { name: 'Pagamentos', href: '/pagamentos', icon: CreditCard, roles: ['admin', 'financeiro'] },
-    { name: 'Conciliação', href: '/conciliacao', icon: ArrowDownUp, roles: ['admin', 'financeiro'] },
-    { name: 'Controle SLA', href: '/sla', icon: Clock, roles: ['admin', 'financeiro'] },
-    { name: 'Módulo Fiscal', href: '/fiscal', icon: FileText, roles: ['admin', 'financeiro'] },
-    { name: 'Fiscal Avançado', href: '/fiscal-avancado', icon: FileText, roles: ['admin', 'financeiro'] },
-    { name: 'Banco Inter', href: '/inter-avancado', icon: Building2, roles: ['admin', 'financeiro'] },
-    { name: 'Relatórios', href: '/reports', icon: FileText, roles: ['admin', 'financeiro'] },
-    { name: 'DRE', href: '/dre', icon: BarChart3, roles: ['admin', 'financeiro'] },
-  ]},
-  { title: 'Administração', items: [
-    { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },
-    { name: 'Controles ERP', href: '/controles-erp', icon: ShieldCheck, roles: ['admin', 'financeiro'] },
-    { name: 'Email', href: '/email-settings', icon: Mail, roles: ['admin'] },
+  { id: 'administracao', title: 'Administração', icon: UserCog, expandable: true, items: [
+    { name: 'Controles do ERP', href: '/controles-erp', icon: ShieldCheck, roles: office },
+    { name: 'Usuários e acessos', href: '/users', icon: UserCog, roles: ['admin'] },
+    { name: 'Configuração de e-mail', href: '/email-settings', icon: Mail, roles: ['admin'] },
   ]},
 ]
