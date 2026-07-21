@@ -274,6 +274,7 @@ export class FiscalController {
   @Post('nfse/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async emitNfse(@Body() body: { saleId: string; certId: string; serviceData?: any }) {
+    const taxDetails = this.calculateNfseTaxes(body.serviceData || {});
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
       certificateId: body.certId,
@@ -282,6 +283,7 @@ export class FiscalController {
       recipientCnpj: body.serviceData?.recipientCnpj,
       recipientName: body.serviceData?.recipientName,
       totalValue: body.serviceData?.totalValue,
+      taxDetails,
     });
     const saved = await this.invoiceRepo.save(invoice);
     const result = await this.nfseService.emit(saved.id, body.serviceData, body.certId);
@@ -316,6 +318,102 @@ export class FiscalController {
       } catch {}
     }
     return result;
+  }
+
+  private calculateNfseTaxes(serviceData: any): Record<string, any> {
+    const money = (value: any) => {
+      const scaled = Number(value || 0) * 100;
+      const floor = Math.floor(scaled);
+      const fraction = scaled - floor;
+      const rounded = Math.abs(fraction - 0.5) < 1e-9 ? (floor % 2 === 0 ? floor : floor + 1) : Math.round(scaled);
+      return rounded / 100;
+    };
+    const rate = (value: any) => {
+      const parsed = Number(value || 0);
+      if (!Number.isFinite(parsed)) throw new BadRequestException('Aliquota fiscal invalida');
+      return Math.max(0, parsed);
+    };
+    const totalValue = money(serviceData.totalValue);
+    if (totalValue <= 0) throw new BadRequestException('Valor do servico deve ser maior que zero');
+
+    const issBase = money(serviceData.issBase ?? totalValue);
+    const issRate = rate(serviceData.aliquota);
+    const issValue = money(issBase * issRate / 100);
+    const pisCofinsEnabled = Boolean(serviceData.pisCofinsEnabled);
+    const pisCofinsBase = money(serviceData.pisCofinsBase ?? totalValue);
+    const pisRate = rate(serviceData.pisRate);
+    const cofinsRate = rate(serviceData.cofinsRate);
+    const pisValue = pisCofinsEnabled ? money(pisCofinsBase * pisRate / 100) : 0;
+    const cofinsValue = pisCofinsEnabled ? money(pisCofinsBase * cofinsRate / 100) : 0;
+    const issRetained = String(serviceData.issRetentionType || '1') !== '1';
+    const retentionType = String(serviceData.pisCofinsRetentionType || '0');
+    const retainedPisValue = pisCofinsEnabled && ['1', '3', '4', '5', '9'].includes(retentionType) ? pisValue : 0;
+    const retainedCofinsValue = pisCofinsEnabled && ['1', '3', '4', '6', '7'].includes(retentionType) ? cofinsValue : 0;
+    const retainedCsllValue = pisCofinsEnabled && ['3', '7', '8', '9'].includes(retentionType) ? money(serviceData.csllRetainedValue) : 0;
+    const retainedTotal = (issRetained ? issValue : 0) + retainedPisValue + retainedCofinsValue + retainedCsllValue;
+
+    if (issBase < 0 || issBase > totalValue) throw new BadRequestException('Base de calculo do ISS invalida');
+    if (pisCofinsBase < 0 || pisCofinsBase > totalValue) throw new BadRequestException('Base de calculo do PIS/COFINS invalida');
+    if (retainedTotal > totalValue) throw new BadRequestException('Total de retencoes nao pode superar o valor do servico');
+    if (issRate > 100 || pisRate > 100 || cofinsRate > 100) throw new BadRequestException('Aliquota fiscal invalida');
+
+    const issRetentionType = String(serviceData.issRetentionType || '1');
+    const pisCofinsCst = String(serviceData.pisCofinsCst || '00').padStart(2, '0');
+    const pisCofinsRetentionType = String(serviceData.pisCofinsRetentionType || '0');
+    const ibsCbsEnabled = Boolean(serviceData.ibsCbsEnabled);
+    const ibsStateRate = rate(serviceData.ibsStateRate);
+    const ibsMunicipalRate = rate(serviceData.ibsMunicipalRate);
+    const cbsRate = rate(serviceData.cbsRate);
+    const ibsCbsBase = ibsCbsEnabled ? money(Math.max(0, totalValue - issValue - pisValue - cofinsValue)) : 0;
+    if (!['1', '2', '3'].includes(issRetentionType)) throw new BadRequestException('Tipo de retencao do ISS invalido');
+    if (pisCofinsEnabled && !/^\d{2}$/.test(pisCofinsCst)) throw new BadRequestException('CST PIS/COFINS invalido');
+    if (pisCofinsEnabled && !/^[0-9]$/.test(pisCofinsRetentionType)) throw new BadRequestException('Tipo de retencao PIS/COFINS invalido');
+    if ([ibsStateRate, ibsMunicipalRate, cbsRate].some(value => value > 100)) throw new BadRequestException('Aliquota IBS/CBS invalida');
+    if (ibsCbsEnabled) {
+      if (!/^\d{6}$/.test(String(serviceData.ibsCbsOperationIndicator || ''))) throw new BadRequestException('Indicador da operacao IBS/CBS deve ter 6 digitos');
+      if (!/^\d{3}$/.test(String(serviceData.ibsCbsCst || ''))) throw new BadRequestException('CST IBS/CBS deve ter 3 digitos');
+      if (!/^\d{6}$/.test(String(serviceData.ibsCbsTaxClassification || ''))) throw new BadRequestException('Classificacao tributaria IBS/CBS deve ter 6 digitos');
+    }
+
+    return {
+      iss: {
+        base: issBase,
+        rate: issRate,
+        value: issValue,
+        retentionType: issRetentionType,
+      },
+      pisCofins: {
+        enabled: pisCofinsEnabled,
+        cst: pisCofinsCst,
+        base: pisCofinsBase,
+        pisRate,
+        cofinsRate,
+        pisValue,
+        cofinsValue,
+        retainedPisValue,
+        retainedCofinsValue,
+        retainedCsllValue,
+        retainedSocialContributions: money(retainedPisValue + retainedCofinsValue + retainedCsllValue),
+        retentionType: pisCofinsRetentionType,
+      },
+      ibsCbs: {
+        enabled: ibsCbsEnabled,
+        purpose: String(serviceData.ibsCbsPurpose || '0'),
+        finalConsumer: String(serviceData.ibsCbsFinalConsumer || '0'),
+        destinationIndicator: String(serviceData.ibsCbsDestinationIndicator || '0'),
+        operationIndicator: String(serviceData.ibsCbsOperationIndicator || ''),
+        cst: String(serviceData.ibsCbsCst || ''),
+        taxClassification: String(serviceData.ibsCbsTaxClassification || ''),
+        base: ibsCbsBase,
+        ibsStateRate,
+        ibsMunicipalRate,
+        cbsRate,
+        ibsStateValue: money(ibsCbsBase * ibsStateRate / 100),
+        ibsMunicipalValue: money(ibsCbsBase * ibsMunicipalRate / 100),
+        cbsValue: money(ibsCbsBase * cbsRate / 100),
+      },
+      netValue: money(totalValue - retainedTotal),
+    };
   }
 
   @Post('nfse/consult')

@@ -280,9 +280,11 @@ export class NfseService {
     const dhEmi = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
     const dCompet = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}`;
     const valor = Number(invoice.totalValue).toFixed(2);
-    const aliquota = serviceData?.aliquota || 5;
-    // TSDec1V2 = ate 1 digito inteiro + 2 decimais. Ex: 5.00, 2.50
-    const aliqFormatted = Number(aliquota).toFixed(2);
+    const taxDetails = invoice.taxDetails || {};
+    const iss = taxDetails.iss || {};
+    const pisCofins = taxDetails.pisCofins || {};
+    const ibsCbs = taxDetails.ibsCbs || {};
+    const aliqFormatted = Number(iss.rate ?? serviceData?.aliquota ?? 5).toFixed(2);
     let codTribNac = serviceData?.codTribNacional || '010701';
     codTribNac = codTribNac.replace(/\D/g, '').slice(0, 6);
 
@@ -309,13 +311,23 @@ export class NfseService {
     // Montar bloco endereco do tomador (obrigatorio para CNPJ)
     let tomaEndBlock = '';
     if (recipientDoc.length === 14) {
-      tomaEndBlock = `<end><endNac><cMun>${config.cityCode}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${xLgr}</xLgr><nro>${nro}</nro><xBairro>${tomaNeighborhood}</xBairro></end>`;
+      tomaEndBlock = `<end><endNac><cMun>${config.cityCode}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${this.escapeXml(xLgr)}</xLgr><nro>${this.escapeXml(nro)}</nro><xBairro>${this.escapeXml(tomaNeighborhood)}</xBairro></end>`;
     }
 
     // Montar bloco email do tomador (opcional)
-    const tomaEmailBlock = tomaEmail ? `<email>${tomaEmail}</email>` : '';
+    const tomaEmailBlock = tomaEmail ? `<email>${this.escapeXml(tomaEmail)}</email>` : '';
+    const pisCofinsBlock = pisCofins.enabled
+      ? `<tribFed><piscofins><CST>${pisCofins.cst}</CST><vBCPisCofins>${Number(pisCofins.base).toFixed(2)}</vBCPisCofins><pAliqPis>${Number(pisCofins.pisRate).toFixed(2)}</pAliqPis><pAliqCofins>${Number(pisCofins.cofinsRate).toFixed(2)}</pAliqCofins><vPis>${Number(pisCofins.pisValue).toFixed(2)}</vPis><vCofins>${Number(pisCofins.cofinsValue).toFixed(2)}</vCofins><tpRetPisCofins>${pisCofins.retentionType}</tpRetPisCofins></piscofins>${Number(pisCofins.retainedSocialContributions || 0) > 0 ? `<vRetCSLL>${Number(pisCofins.retainedSocialContributions).toFixed(2)}</vRetCSLL>` : ''}</tribFed>`
+      : '';
+    const ibsCbsBlock = ibsCbs.enabled
+      ? `<IBSCBS><finNFSe>${ibsCbs.purpose}</finNFSe><indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
+      : '';
 
-    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${invoice.recipientName || ''}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${serviceData?.discriminacao || 'Servicos de informatica'}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>1</tpRetISSQN></tribMun><totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores></infDPS></DPS>`;
+    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${iss.retentionType || '1'}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
+  }
+
+  private escapeXml(value: string): string {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
   }
 
   private buildCancelEventXml(invoice: Invoice, cnpj: string, reason: string, tpAmb: number): string {

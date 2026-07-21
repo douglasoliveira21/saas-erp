@@ -5,7 +5,7 @@ import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, 
 import JsBarcode from 'jsbarcode'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
-interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
+interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
 interface Sale { id: string; customer: { name: string; cpfCnpj: string; email: string; address: string; city: string; uf: string; neighborhood: string; cep: string; stateRegistration: string }; totalAmount: number; status: string; paymentMethod: string; items: any[] }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', processando: 'Processando', autorizada: 'Autorizada', rejeitada: 'Rejeitada', cancelada: 'Cancelada' }
@@ -36,6 +36,25 @@ export function Fiscal() {
   const [discriminacao, setDiscriminacao] = useState('')
   const [itemLista, setItemLista] = useState('010701')
   const [aliquota, setAliquota] = useState('5')
+  const [issBase, setIssBase] = useState('')
+  const [issRetentionType, setIssRetentionType] = useState('1')
+  const [pisCofinsEnabled, setPisCofinsEnabled] = useState(false)
+  const [pisCofinsCst, setPisCofinsCst] = useState('01')
+  const [pisCofinsBase, setPisCofinsBase] = useState('')
+  const [pisRate, setPisRate] = useState('0.65')
+  const [cofinsRate, setCofinsRate] = useState('3.00')
+  const [pisCofinsRetentionType, setPisCofinsRetentionType] = useState('0')
+  const [csllRetainedValue, setCsllRetainedValue] = useState('0')
+  const [ibsCbsEnabled, setIbsCbsEnabled] = useState(false)
+  const [ibsCbsPurpose, setIbsCbsPurpose] = useState('0')
+  const [ibsCbsFinalConsumer, setIbsCbsFinalConsumer] = useState('0')
+  const [ibsCbsDestinationIndicator, setIbsCbsDestinationIndicator] = useState('0')
+  const [ibsCbsOperationIndicator, setIbsCbsOperationIndicator] = useState('')
+  const [ibsCbsCst, setIbsCbsCst] = useState('')
+  const [ibsCbsTaxClassification, setIbsCbsTaxClassification] = useState('')
+  const [ibsStateRate, setIbsStateRate] = useState('')
+  const [ibsMunicipalRate, setIbsMunicipalRate] = useState('')
+  const [cbsRate, setCbsRate] = useState('')
   const [emitting, setEmitting] = useState(false)
   const [recipientEmail, setRecipientEmail] = useState('')
   const [recipientAddress, setRecipientAddress] = useState('')
@@ -101,6 +120,8 @@ export function Fiscal() {
       setRecipientName(sale.customer?.name || '')
       setRecipientCnpj(sale.customer?.cpfCnpj || '')
       setTotalValue(String(Number(sale.totalAmount).toFixed(2)))
+      setIssBase(String(Number(sale.totalAmount).toFixed(2)))
+      setPisCofinsBase(String(Number(sale.totalAmount).toFixed(2)))
       setDiscriminacao(sale.items?.map((i: any) => i.name).join(', ') || 'Servicos de informatica')
       setRecipientEmail(sale.customer?.email || '')
       setRecipientAddress(sale.customer?.address || '')
@@ -145,6 +166,15 @@ export function Fiscal() {
         serviceData: emitType === 'nfse' ? {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
           discriminacao, codTribNacional: itemLista, aliquota: parseFloat(aliquota),
+          issBase: parseFloat(issBase || totalValue), issRetentionType,
+          pisCofinsEnabled, pisCofinsCst, pisCofinsBase: parseFloat(pisCofinsBase || totalValue),
+          pisRate: parseFloat(pisRate || '0'), cofinsRate: parseFloat(cofinsRate || '0'),
+          pisCofinsRetentionType,
+          csllRetainedValue: parseFloat(csllRetainedValue || '0'),
+          ibsCbsEnabled, ibsCbsPurpose, ibsCbsFinalConsumer, ibsCbsDestinationIndicator, ibsCbsOperationIndicator,
+          ibsCbsCst, ibsCbsTaxClassification,
+          ibsStateRate: parseFloat(ibsStateRate || '0'),
+          ibsMunicipalRate: parseFloat(ibsMunicipalRate || '0'), cbsRate: parseFloat(cbsRate || '0'),
           recipientEmail, recipientAddress, recipientCity, recipientUf,
           recipientNeighborhood, recipientCep, recipientPhone,
         } : undefined,
@@ -549,6 +579,24 @@ export function Fiscal() {
     }).catch(() => setError('Erro ao gerar DANFE'))
   }
 
+  const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
+  const serviceTotal = Number(totalValue || 0)
+  const calculatedIssBase = Number(issBase || totalValue || 0)
+  const calculatedIss = roundMoney(calculatedIssBase * Number(aliquota || 0) / 100)
+  const calculatedPisBase = Number(pisCofinsBase || totalValue || 0)
+  const calculatedPis = pisCofinsEnabled ? roundMoney(calculatedPisBase * Number(pisRate || 0) / 100) : 0
+  const calculatedCofins = pisCofinsEnabled ? roundMoney(calculatedPisBase * Number(cofinsRate || 0) / 100) : 0
+  const calculatedIbsCbsBase = ibsCbsEnabled ? roundMoney(Math.max(0, serviceTotal - calculatedIss - calculatedPis - calculatedCofins)) : 0
+  const calculatedIbsState = roundMoney(calculatedIbsCbsBase * Number(ibsStateRate || 0) / 100)
+  const calculatedIbsMunicipal = roundMoney(calculatedIbsCbsBase * Number(ibsMunicipalRate || 0) / 100)
+  const calculatedCbs = roundMoney(calculatedIbsCbsBase * Number(cbsRate || 0) / 100)
+  const retainedIss = issRetentionType === '1' ? 0 : calculatedIss
+  const retainedPis = pisCofinsEnabled && ['1', '3', '4', '5', '9'].includes(pisCofinsRetentionType) ? calculatedPis : 0
+  const retainedCofins = pisCofinsEnabled && ['1', '3', '4', '6', '7'].includes(pisCofinsRetentionType) ? calculatedCofins : 0
+  const retainedCsll = pisCofinsEnabled && ['3', '7', '8', '9'].includes(pisCofinsRetentionType) ? Number(csllRetainedValue || 0) : 0
+  const retainedFederal = retainedPis + retainedCofins + retainedCsll
+  const calculatedNet = roundMoney(serviceTotal - retainedIss - retainedFederal)
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -705,6 +753,47 @@ export function Fiscal() {
                       <label className="block text-xs text-gray-500 mb-1">Aliquota ISS (%)</label>
                       <input className="input" type="number" step="0.01" value={aliquota} onChange={e => setAliquota(e.target.value)} />
                     </div>
+                  </div>
+
+                  <div className="border-t border-purple-200 pt-4 space-y-3">
+                    <h4 className="text-sm font-semibold text-gray-700">Apuracao do ISSQN</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div><label className="block text-xs text-gray-500 mb-1">Base de calculo</label><input className="input" type="number" step="0.01" value={issBase || totalValue} onChange={e => setIssBase(e.target.value)} /></div>
+                      <div><label className="block text-xs text-gray-500 mb-1">Retencao</label><select className="input" value={issRetentionType} onChange={e => setIssRetentionType(e.target.value)}><option value="1">Nao retido</option><option value="2">Retido pelo tomador</option><option value="3">Retido pelo intermediario</option></select></div>
+                      <div><label className="block text-xs text-gray-500 mb-1">Valor ISS</label><input className="input bg-gray-100" readOnly value={calculatedIss.toFixed(2)} /></div>
+                      <div><label className="block text-xs text-gray-500 mb-1">Valor liquido</label><input className="input bg-gray-100 font-semibold" readOnly value={calculatedNet.toFixed(2)} /></div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-purple-200 pt-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={pisCofinsEnabled} onChange={e => setPisCofinsEnabled(e.target.checked)} /> PIS / COFINS - apuracao propria</label>
+                    {pisCofinsEnabled && <>
+                      <div><label className="block text-xs text-gray-500 mb-1">Situacao tributaria do PIS/COFINS</label><select className="input" value={pisCofinsCst} onChange={e => setPisCofinsCst(e.target.value)}><option value="00">00 - Nenhum</option><option value="01">01 - Operacao tributavel com aliquota basica</option><option value="02">02 - Operacao tributavel com aliquota diferenciada</option><option value="03">03 - Operacao tributavel por unidade de medida</option><option value="04">04 - Monofasica, revenda a aliquota zero</option><option value="05">05 - Substituicao tributaria</option><option value="06">06 - Aliquota zero</option><option value="07">07 - Isenta</option><option value="08">08 - Sem incidencia</option><option value="09">09 - Suspensao</option><option value="49">49 - Outras operacoes de saida</option><option value="99">99 - Outras operacoes</option></select></div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><label className="block text-xs text-gray-500 mb-1">Base PIS/COFINS</label><input className="input" type="number" step="0.01" value={pisCofinsBase || totalValue} onChange={e => setPisCofinsBase(e.target.value)} /></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Aliquota PIS (%)</label><input className="input" type="number" step="0.01" value={pisRate} onChange={e => setPisRate(e.target.value)} /></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Aliquota COFINS (%)</label><input className="input" type="number" step="0.01" value={cofinsRate} onChange={e => setCofinsRate(e.target.value)} /></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Retencao</label><select className="input" value={pisCofinsRetentionType} onChange={e => setPisCofinsRetentionType(e.target.value)}><option value="0">Nao retidos</option><option value="1">PIS/COFINS retidos</option><option value="2">PIS/COFINS nao retidos</option><option value="3">PIS/COFINS/CSLL retidos</option><option value="4">PIS/COFINS retidos, CSLL nao</option><option value="5">Somente PIS retido</option><option value="6">Somente COFINS retido</option><option value="7">COFINS/CSLL retidos</option><option value="8">Somente CSLL retida</option><option value="9">PIS/CSLL retidos</option></select></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs text-gray-500 mb-1">Debito PIS</label><input className="input bg-gray-100" readOnly value={calculatedPis.toFixed(2)} /></div><div><label className="block text-xs text-gray-500 mb-1">Debito COFINS</label><input className="input bg-gray-100" readOnly value={calculatedCofins.toFixed(2)} /></div></div>
+                      {['3', '7', '8', '9'].includes(pisCofinsRetentionType) && <div><label className="block text-xs text-gray-500 mb-1">Valor CSLL retido (R$)</label><input className="input" type="number" min="0" step="0.01" value={csllRetainedValue} onChange={e => setCsllRetainedValue(e.target.value)} /></div>}
+                    </>}
+                  </div>
+
+                  <div className="border-t border-purple-200 pt-4 space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-gray-700"><input type="checkbox" checked={ibsCbsEnabled} onChange={e => setIbsCbsEnabled(e.target.checked)} /> Informar IBS / CBS</label>
+                    {ibsCbsEnabled && <>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div><label className="block text-xs text-gray-500 mb-1">Finalidade</label><select className="input" value={ibsCbsPurpose} onChange={e => setIbsCbsPurpose(e.target.value)}><option value="0">NFS-e regular</option><option value="1">NFS-e de credito</option><option value="2">NFS-e de debito</option></select></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Consumo pessoal</label><select className="input" value={ibsCbsFinalConsumer} onChange={e => setIbsCbsFinalConsumer(e.target.value)}><option value="0">Nao</option><option value="1">Sim</option></select></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Relacao do destinatario</label><select className="input" value={ibsCbsDestinationIndicator} onChange={e => setIbsCbsDestinationIndicator(e.target.value)}><option value="0">Tomador e o destinatario</option><option value="1">Destinatario diferente do adquirente</option><option value="2">Adquirente e destinatario iguais</option><option value="3">Tomador e destinatario iguais</option></select></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Indicador da operacao</label><input className="input" maxLength={6} value={ibsCbsOperationIndicator} onChange={e => setIbsCbsOperationIndicator(e.target.value.replace(/\D/g, ''))} placeholder="6 digitos" /></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">CST IBS/CBS</label><input className="input" maxLength={3} value={ibsCbsCst} onChange={e => setIbsCbsCst(e.target.value.replace(/\D/g, ''))} placeholder="3 digitos" /></div>
+                        <div><label className="block text-xs text-gray-500 mb-1">Classificacao tributaria</label><input className="input" maxLength={6} value={ibsCbsTaxClassification} onChange={e => setIbsCbsTaxClassification(e.target.value.replace(/\D/g, ''))} placeholder="6 digitos" /></div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3"><div><label className="block text-xs text-gray-500 mb-1">Aliquota IBS estadual (%)</label><input className="input" type="number" step="0.01" value={ibsStateRate} onChange={e => setIbsStateRate(e.target.value)} /></div><div><label className="block text-xs text-gray-500 mb-1">Aliquota IBS municipal (%)</label><input className="input" type="number" step="0.01" value={ibsMunicipalRate} onChange={e => setIbsMunicipalRate(e.target.value)} /></div><div><label className="block text-xs text-gray-500 mb-1">Aliquota CBS (%)</label><input className="input" type="number" step="0.01" value={cbsRate} onChange={e => setCbsRate(e.target.value)} /></div></div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3"><div><label className="block text-xs text-gray-500 mb-1">Base IBS/CBS estimada</label><input className="input bg-gray-100" readOnly value={calculatedIbsCbsBase.toFixed(2)} /></div><div><label className="block text-xs text-gray-500 mb-1">IBS estadual estimado</label><input className="input bg-gray-100" readOnly value={calculatedIbsState.toFixed(2)} /></div><div><label className="block text-xs text-gray-500 mb-1">IBS municipal estimado</label><input className="input bg-gray-100" readOnly value={calculatedIbsMunicipal.toFixed(2)} /></div><div><label className="block text-xs text-gray-500 mb-1">CBS estimada</label><input className="input bg-gray-100" readOnly value={calculatedCbs.toFixed(2)} /></div></div>
+                    </>}
                   </div>
                 </div>
               )}
@@ -1122,6 +1211,20 @@ export function Fiscal() {
                   <p className="text-sm text-gray-500">Valor Total</p>
                   <p className="text-2xl font-bold text-primary-700 dark:text-primary-400">R$ {Number(viewInvoice.totalValue || 0).toFixed(2)}</p>
                 </div>
+
+                {viewInvoice.type === 'nfse' && viewInvoice.taxDetails && (
+                  <div className="p-4 border rounded-lg space-y-3">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Apuracao tributaria</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <div><span className="text-gray-500">Base ISS:</span><p className="font-medium">R$ {Number(viewInvoice.taxDetails.iss?.base || 0).toFixed(2)}</p></div>
+                      <div><span className="text-gray-500">Aliquota ISS:</span><p className="font-medium">{Number(viewInvoice.taxDetails.iss?.rate || 0).toFixed(2)}%</p></div>
+                      <div><span className="text-gray-500">Valor ISS:</span><p className="font-medium">R$ {Number(viewInvoice.taxDetails.iss?.value || 0).toFixed(2)}</p></div>
+                      <div><span className="text-gray-500">Valor liquido:</span><p className="font-semibold">R$ {Number(viewInvoice.taxDetails.netValue || 0).toFixed(2)}</p></div>
+                    </div>
+                    {viewInvoice.taxDetails.pisCofins?.enabled && <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm border-t pt-3"><div><span className="text-gray-500">CST PIS/COFINS:</span><p className="font-medium">{viewInvoice.taxDetails.pisCofins.cst}</p></div><div><span className="text-gray-500">Base:</span><p className="font-medium">R$ {Number(viewInvoice.taxDetails.pisCofins.base || 0).toFixed(2)}</p></div><div><span className="text-gray-500">Debito PIS:</span><p className="font-medium">R$ {Number(viewInvoice.taxDetails.pisCofins.pisValue || 0).toFixed(2)}</p></div><div><span className="text-gray-500">Debito COFINS:</span><p className="font-medium">R$ {Number(viewInvoice.taxDetails.pisCofins.cofinsValue || 0).toFixed(2)}</p></div></div>}
+                    {viewInvoice.taxDetails.ibsCbs?.enabled && <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm border-t pt-3"><div><span className="text-gray-500">CST IBS/CBS:</span><p className="font-medium">{viewInvoice.taxDetails.ibsCbs.cst}</p></div><div><span className="text-gray-500">Classificacao:</span><p className="font-medium">{viewInvoice.taxDetails.ibsCbs.taxClassification}</p></div><div><span className="text-gray-500">Indicador:</span><p className="font-medium">{viewInvoice.taxDetails.ibsCbs.operationIndicator}</p></div><div><span className="text-gray-500">Aliquotas:</span><p className="font-medium">{viewInvoice.taxDetails.ibsCbs.ibsStateRate}% / {viewInvoice.taxDetails.ibsCbs.ibsMunicipalRate}% / {viewInvoice.taxDetails.ibsCbs.cbsRate}%</p></div></div>}
+                  </div>
+                )}
 
                 {/* Rejeicao */}
                 {viewInvoice.rejectionReason && (

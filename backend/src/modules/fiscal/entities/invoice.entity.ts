@@ -85,6 +85,9 @@ export class Invoice {
   @Column({ name: 'total_value', type: 'decimal', precision: 10, scale: 2, nullable: true })
   totalValue: number;
 
+  @Column({ name: 'tax_details', type: 'jsonb', nullable: true })
+  taxDetails: Record<string, any>;
+
   @Column({ type: 'int', default: 2 })
   environment: number;
 
