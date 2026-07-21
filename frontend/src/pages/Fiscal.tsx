@@ -1279,7 +1279,7 @@ function FiscalConfigForm() {
       <div className="grid grid-cols-1 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">URL API NFS-e (Produção) *</label>
-          <input className="input" value={cfg.nfseApiUrl || ''} onChange={e => setCfg({...cfg, nfseApiUrl: e.target.value})} placeholder="https://nfse-contagem.cidade360.com.br/api" />
+          <input className="input" value={cfg.nfseApiUrl || ''} onChange={e => setCfg({...cfg, nfseApiUrl: e.target.value})} placeholder="https://nfse-contagem.cidade360.cloud/NFSe.Api" />
           <p className="text-xs text-gray-400 mt-1">URL da API de produção do seu município para emissão de NFS-e</p>
         </div>
         <div>

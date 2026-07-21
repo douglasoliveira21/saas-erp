@@ -105,7 +105,11 @@ export class CertificateService {
   async getHttpsAgent(certId: string): Promise<any> {
     const { pfx, password } = await this.getPfxBuffer(certId);
     const https = require('https');
-    return new https.Agent({ pfx, passphrase: password, rejectUnauthorized: false });
+    return new https.Agent({
+      pfx,
+      passphrase: password,
+      rejectUnauthorized: process.env.FISCAL_TLS_REJECT_UNAUTHORIZED !== 'false',
+    });
   }
 
   async remove(id: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -423,6 +423,8 @@ export class FiscalController {
       invoice.queueStatus = 'processado';
       invoice.status = response.status || response.situacao || invoice.status;
       invoice.protocolNumber = response.protocolNumber || response.protocolo || invoice.protocolNumber;
+      invoice.accessKey = response.accessKey || invoice.accessKey;
+      invoice.verificationCode = response.verificationCode || invoice.verificationCode;
       invoice.rejectionReason = response.rejectionReason || response.motivoRejeicao || invoice.rejectionReason;
     }
     await this.invoiceRepo.save(invoice);
@@ -444,6 +446,9 @@ export class FiscalController {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
     const response = await this.fiscalIntegration.sendCorrectionLetter(invoice, body.text);
+    if (response.configured === false || response.sent === false) {
+      throw new BadRequestException(response.message);
+    }
     invoice.correctionLetter = body.text;
     invoice.correctionProtocol = response.protocol || response.protocolo || body.protocol || (response.configured === false ? null : `CC-${Date.now()}`);
     const saved = await this.invoiceRepo.save(invoice);

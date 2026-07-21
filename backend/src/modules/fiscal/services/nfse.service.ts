@@ -32,7 +32,7 @@ export class NfseService {
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
 
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
+    const baseUrl = this.getBaseUrl(config);
     if (!baseUrl) throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Acesse Modulo Fiscal > Configuracao e preencha o campo "URL API NFS-e${config.environment !== 1 ? ' Teste' : ''}".`);
 
     const agent = await this.certificateService.getHttpsAgent(certId);
@@ -66,7 +66,7 @@ export class NfseService {
       };
 
       // Enviar para API Cidade360 - EnviarSincrono
-      const response = await this.apiRequest(baseUrl + '/NotaNacional/EnviarSincrono', 'POST', payload, agent);
+      const response = await this.apiRequest(baseUrl + '/EnviarSincrono', 'POST', payload, agent);
 
       this.logger.log('Resposta Cidade360: ' + JSON.stringify(response).substring(0, 500));
 
@@ -114,22 +114,34 @@ export class NfseService {
   async consultProtocol(protocolo: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
-    return this.apiRequest(baseUrl + '/NotaNacional/ConsultarProtocolo/' + protocolo, 'GET', null, agent);
+    const baseUrl = this.getBaseUrl(config);
+    return this.apiRequest(baseUrl + '/ConsultarProtocolo/' + encodeURIComponent(protocolo), 'GET', null, agent);
   }
 
   async consult(chave: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
-    return this.apiRequest(baseUrl + '/NotaNacional/ConsultarNFSe/' + chave, 'GET', null, agent);
+    const baseUrl = this.getBaseUrl(config);
+    return this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
+  }
+
+  async queryInvoiceStatus(invoice: Invoice): Promise<any> {
+    if (!invoice.certificateId) throw new BadRequestException('Nota sem certificado A1 vinculado');
+    if (!invoice.accessKey && !invoice.protocolNumber) {
+      throw new BadRequestException('Nota sem chave de acesso ou protocolo para consulta');
+    }
+
+    const response = invoice.accessKey
+      ? await this.consult(invoice.accessKey, invoice.certificateId)
+      : await this.consultProtocol(invoice.protocolNumber, invoice.certificateId);
+    return this.normalizeStatusResponse(response, invoice);
   }
 
   async downloadPdf(chave: string, certId: string): Promise<Buffer> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
-    const response = await this.apiRequest(baseUrl + '/NotaNacional/DownloadPDFChave/' + chave, 'GET', null, agent);
+    const baseUrl = this.getBaseUrl(config);
+    const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.pdfGZipB64) {
       return zlib.gunzipSync(Buffer.from(response.pdfGZipB64, 'base64'));
     }
@@ -139,8 +151,8 @@ export class NfseService {
   async downloadXmlFromApi(chave: string, certId: string): Promise<string> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
-    const response = await this.apiRequest(baseUrl + '/NotaNacional/ConsultarNFSe/' + chave, 'GET', null, agent);
+    const baseUrl = this.getBaseUrl(config);
+    const response = await this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.notas?.length > 0 && response.notas[0].xmlGZipB64) {
       const xmlBuf = zlib.gunzipSync(Buffer.from(response.notas[0].xmlGZipB64, 'base64'));
       return xmlBuf.toString('utf-8');
@@ -155,7 +167,7 @@ export class NfseService {
 
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = config.environment === 1 ? config.nfseApiUrl : config.nfseTestUrl;
+    const baseUrl = this.getBaseUrl(config);
 
     try {
       // Montar XML de evento de cancelamento
@@ -166,7 +178,7 @@ export class NfseService {
       const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedCancelXml, 'utf-8')).toString('base64');
 
       const payload = { loteXmlGZipB64: [xmlGzipB64], dadosExtras: [] };
-      const response = await this.apiRequest(baseUrl + '/NotaNacional/EnviarSincrono', 'POST', payload, agent);
+      const response = await this.apiRequest(baseUrl + '/EnviarSincrono', 'POST', payload, agent);
 
       if (response.processado && response.lote?.[0]?.statusProcessamento === 'SUCESSO') {
         invoice.status = 'cancelada';
@@ -387,8 +399,16 @@ export class NfseService {
         let data = '';
         res.on('data', (chunk: string) => data += chunk);
         res.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch { resolve({ raw: data, statusCode: res.statusCode }); }
+          let parsed: any;
+          try { parsed = data ? JSON.parse(data) : {}; }
+          catch { parsed = { raw: data }; }
+
+          if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
+            const detail = parsed?.detail || parsed?.message || parsed?.title || parsed?.raw || `HTTP ${res.statusCode}`;
+            reject(new Error(`Cidade360 respondeu ${res.statusCode}: ${detail}`));
+            return;
+          }
+          resolve(parsed);
         });
       });
 
@@ -400,5 +420,47 @@ export class NfseService {
       }
       req.end();
     });
+  }
+
+  private getBaseUrl(config: FiscalConfig): string {
+    if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada');
+    const configuredUrl = config.environment === 1
+      ? (config.nfseApiUrl || process.env.CIDADE360_API_URL)
+      : (config.nfseTestUrl || process.env.CIDADE360_TEST_API_URL);
+    if (!configuredUrl) {
+      throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada`);
+    }
+
+    const normalized = configuredUrl.trim().replace(/\/+$/, '');
+    return /\/NotaNacional$/i.test(normalized) ? normalized : normalized + '/NotaNacional';
+  }
+
+  private normalizeStatusResponse(response: any, invoice: Invoice): any {
+    const item = response?.lote?.[0] || response?.notas?.[0] || response?.nota || response;
+    const rawStatus = String(
+      item?.situacao || item?.status || item?.statusProcessamento || response?.situacao || response?.status || '',
+    ).toUpperCase();
+    const errors = item?.erros || response?.erros || [];
+    const rejectionReason = Array.isArray(errors) && errors.length
+      ? errors.map((error: any) => `${error.codigo || ''}${error.codigo ? ': ' : ''}${error.descricao || error.mensagem || ''}`).join('; ')
+      : undefined;
+
+    let status = invoice.status;
+    if (/CANCEL/.test(rawStatus)) status = 'cancelada';
+    else if (/SUCESSO|AUTORIZ|ATIVA|EMITIDA/.test(rawStatus)) status = 'autorizada';
+    else if (/REJEIT|ERRO|NEGAD/.test(rawStatus)) status = 'rejeitada';
+    else if (/PROCESS|PENDENTE|RECEBID/.test(rawStatus)) status = 'processando';
+
+    return {
+      configured: true,
+      provider: 'cidade360',
+      status,
+      situacao: rawStatus || status,
+      protocolo: response?.protocolo || item?.protocolo || invoice.protocolNumber,
+      accessKey: item?.chaveAcesso || item?.chNFSe || invoice.accessKey,
+      verificationCode: item?.codAutenticidade || item?.codigoVerificacao || invoice.verificationCode,
+      rejectionReason,
+      raw: response,
+    };
   }
 }

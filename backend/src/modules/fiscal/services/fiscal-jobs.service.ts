@@ -48,6 +48,8 @@ export class FiscalJobsService implements OnModuleInit {
           invoice.queueStatus = 'processado';
           invoice.status = response.status || response.situacao || invoice.status;
           invoice.protocolNumber = response.protocolNumber || response.protocolo || invoice.protocolNumber;
+          invoice.accessKey = response.accessKey || invoice.accessKey;
+          invoice.verificationCode = response.verificationCode || invoice.verificationCode;
           invoice.rejectionReason = response.rejectionReason || response.motivoRejeicao || invoice.rejectionReason;
         }
         await this.invoiceRepo.save(invoice);
