@@ -284,7 +284,7 @@ export class GlpiService {
         const ticketDate = ticket.dateOpened || ticket.dateSolved || ticket.dateClosed;
         if (!ticketDate) continue;
 
-        const matchingContract = customerContracts
+        const contractWithinValidity = customerContracts
           .filter(contract => {
             const start = new Date(contract.startDate + 'T00:00:00');
             const end = contract.endDate ? new Date(contract.endDate + 'T23:59:59.999') : null;
@@ -292,6 +292,11 @@ export class GlpiService {
           })
           .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
 
+        const activeContract = customerContracts
+          .filter(contract => contract.status === 'ativo')
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+        const matchingContract = contractWithinValidity || activeContract;
         if (matchingContract) ticket.contractId = matchingContract.id;
       }
 
