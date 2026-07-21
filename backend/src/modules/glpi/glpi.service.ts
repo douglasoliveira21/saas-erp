@@ -267,6 +267,38 @@ export class GlpiService {
       ? await this.contractsRepository.find({ where: { customerId } })
       : await this.contractsRepository.find({ where: {} });
 
+    const contractsByCustomer = new Map<string, Contract[]>();
+    for (const contract of contracts) {
+      const customerContracts = contractsByCustomer.get(contract.customerId) || [];
+      customerContracts.push(contract);
+      contractsByCustomer.set(contract.customerId, customerContracts);
+    }
+
+    for (const [contractCustomerId, customerContracts] of contractsByCustomer) {
+      const unlinkedTickets = await this.ticketsRepository.createQueryBuilder('ticket')
+        .where('ticket.customer_id = :customerId', { customerId: contractCustomerId })
+        .andWhere('ticket.contract_id IS NULL')
+        .getMany();
+
+      for (const ticket of unlinkedTickets) {
+        const ticketDate = ticket.dateOpened || ticket.dateSolved || ticket.dateClosed;
+        if (!ticketDate) continue;
+
+        const matchingContract = customerContracts
+          .filter(contract => {
+            const start = new Date(contract.startDate + 'T00:00:00');
+            const end = contract.endDate ? new Date(contract.endDate + 'T23:59:59.999') : null;
+            return ticketDate >= start && (!end || ticketDate <= end);
+          })
+          .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+
+        if (matchingContract) ticket.contractId = matchingContract.id;
+      }
+
+      const linkedTickets = unlinkedTickets.filter(ticket => ticket.contractId);
+      if (linkedTickets.length > 0) await this.ticketsRepository.save(linkedTickets);
+    }
+
     for (const contract of contracts) {
       await this.recalculateContractSla(contract);
     }
