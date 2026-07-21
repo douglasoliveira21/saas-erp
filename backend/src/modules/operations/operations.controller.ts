@@ -24,9 +24,16 @@ export class OperationsController {
   @Post('allocations') allocation(@Body() b:any,@Request() r:any) { return this.service.create('cost_allocations',{...b,created_by:r.user.id},r.user.id,'cost.allocation_created'); }
   @Get('cnab') cnab() { return this.service.list('cnab_batches'); }
   @Post('cnab') cnabCreate(@Body() b:any,@Request() r:any) { return this.service.create('cnab_batches',{...b,created_by:r.user.id},r.user.id,'cnab.received'); }
-  @Get('notifications') notifications() { return this.service.list('notifications'); }
+  @Get('notifications')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  notifications(@Request() r:any) { return this.service.notifications(r.user.id,r.user.role); }
   @Post('notifications') notification(@Body() b:any,@Request() r:any) { return this.service.create('notifications',b,r.user.id,'notification.created'); }
-  @Patch('notifications/:id/:action') notificationAction(@Param('id') id:string,@Param('action') action:string,@Body() b:any,@Request() r:any) { return this.service.updateNotification(id,action,r.user.id,b.assignedTo); }
+  @Patch('notifications/read-all')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  readAllNotifications(@Request() r:any) { return this.service.markAllNotificationsRead(r.user.id,r.user.role); }
+  @Patch('notifications/:id/:action')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  notificationAction(@Param('id') id:string,@Param('action') action:string,@Body() b:any,@Request() r:any) { return this.service.updateNotification(id,action,r.user.id,b.assignedTo); }
   @Get('dashboard-preference') getPreference(@Request() r:any) { return this.service.preference(r.user.id); }
   @Patch('dashboard-preference') preference(@Body() b:any,@Request() r:any) { return this.service.preference(r.user.id,b.widgets); }
   @Get('accounting-export') export(@Query('start') s:string,@Query('end') e:string) { return this.service.accountingExport(s,e); }

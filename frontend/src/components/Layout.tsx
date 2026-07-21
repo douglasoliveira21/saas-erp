@@ -1,12 +1,26 @@
-import { Outlet, Link, useLocation } from 'react-router-dom'
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Menu, X, ChevronDown, ChevronRight, Wallet, Search, Bell, ShoppingCart } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { LogOut, Menu, X, ChevronDown, ChevronRight, Wallet, Search, Bell, ShoppingCart, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
 import { navigationSections, NavItem } from './navigation'
+import { api } from '../services/api'
+
+interface NotificationItem {
+  id: string
+  title: string
+  message: string
+  type: string
+  status: 'nova' | 'lida' | 'resolvida'
+  entity_type?: string
+  entity_id?: string
+  created_at: string
+}
 
 export function Layout() {
   const { user, logout } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
+  const notificationsRef = useRef<HTMLDivElement>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [financeiroOpen, setFinanceiroOpen] = useState(
     ['/commissions', '/financeiro', '/pagamentos', '/sla', '/fiscal', '/reports', '/contas-pagar', '/dre'].includes(location.pathname)
@@ -15,11 +29,58 @@ export function Layout() {
     ['/sales', '/sales/new', '/pdv', '/orcamentos', '/pre-vendas', '/vendas-recorrentes', '/cashback', '/fidelidade', '/assinaturas'].includes(location.pathname)
   )
   const [clock, setClock] = useState(new Date())
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
 
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
+
+  async function loadNotifications(silent = false) {
+    if (!user) return
+    if (!silent) setNotificationsLoading(true)
+    try { setNotifications((await api.get('/operations/notifications')).data || []) } catch { /* Preserve header usability during transient failures. */ }
+    finally { if (!silent) setNotificationsLoading(false) }
+  }
+
+  useEffect(() => {
+    loadNotifications(true)
+    const timer = window.setInterval(() => loadNotifications(true), 60000)
+    const refresh = () => loadNotifications(true)
+    window.addEventListener('focus', refresh)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [user?.id])
+
+  useEffect(() => {
+    function close(event: MouseEvent) { if (!notificationsRef.current?.contains(event.target as Node)) setNotificationsOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
+
+  async function readAllNotifications() {
+    await api.patch('/operations/notifications/read-all')
+    setNotifications(items => items.map(item => item.status === 'nova' ? { ...item, status: 'lida' } : item))
+  }
+
+  async function openNotification(item: NotificationItem) {
+    if (item.status === 'nova') {
+      await api.patch(`/operations/notifications/${item.id}/read`)
+      setNotifications(items => items.map(current => current.id === item.id ? { ...current, status: 'lida' } : current))
+    }
+    const routes: Record<string,string> = { account_receivable: '/financeiro', invoice: '/fiscal-avancado', approval_request: '/controles-erp', product: '/stock' }
+    setNotificationsOpen(false)
+    navigate(routes[item.entity_type || ''] || '/controles-erp')
+  }
+
+  async function resolveNotification(event: React.MouseEvent, id: string) {
+    event.stopPropagation()
+    await api.patch(`/operations/notifications/${id}/resolve`)
+    setNotifications(items => items.map(item => item.id === id ? { ...item, status: 'resolvida' } : item))
+  }
+
+  const unreadNotifications = notifications.filter(item => item.status === 'nova').length
 
   const filteredSections = navigationSections
     .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '')) }))
@@ -143,10 +204,20 @@ export function Layout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button type="button" aria-label="Notificações" className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
-            </button>
+            <div className="relative" ref={notificationsRef}>
+              <button type="button" aria-label={`Notificacoes${unreadNotifications ? `, ${unreadNotifications} nao lidas` : ''}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen(open => !open); if (!notificationsOpen) loadNotifications() }} className="relative rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600">
+                <Bell className="h-5 w-5" />
+                {unreadNotifications > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
+              </button>
+              {notificationsOpen && <div className="fixed left-3 right-3 top-16 z-50 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-elevated sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[390px]">
+                <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3"><div><p className="font-semibold text-gray-900">Notificacoes</p><p className="text-xs text-gray-500">{unreadNotifications ? `${unreadNotifications} nao lida(s)` : 'Tudo em dia'}</p></div>{unreadNotifications > 0 && <button type="button" onClick={readAllNotifications} className="flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"><CheckCheck className="h-4 w-4"/>Marcar todas como lidas</button>}</div>
+                <div className="max-h-[min(65vh,480px)] overflow-y-auto">{notificationsLoading ? <div className="p-8 text-center text-sm text-gray-500">Atualizando...</div> : notifications.filter(item=>item.status!=='resolvida').length === 0 ? <div className="p-8 text-center"><Bell className="mx-auto mb-2 h-7 w-7 text-gray-300"/><p className="text-sm font-medium text-gray-700">Nenhuma notificacao pendente</p></div> : notifications.filter(item=>item.status!=='resolvida').map(item => {
+                  const Icon = item.type === 'fiscal' ? AlertCircle : item.type === 'estoque' ? Package : item.type === 'aprovacao' ? ShieldCheck : Receipt
+                  return <button type="button" key={item.id} onClick={()=>openNotification(item)} className={`flex w-full items-start gap-3 border-b border-gray-50 px-4 py-3 text-left hover:bg-gray-50 ${item.status==='nova'?'bg-primary-50/50':''}`}><span className={`mt-0.5 rounded-md p-1.5 ${item.type==='fiscal'?'bg-red-50 text-red-600':item.type==='estoque'?'bg-amber-50 text-amber-600':'bg-blue-50 text-blue-600'}`}><Icon className="h-4 w-4"/></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium text-gray-900">{item.title}</span>{item.status==='nova'&&<span className="h-2 w-2 shrink-0 rounded-full bg-primary-600"/>}</span><span className="mt-0.5 line-clamp-2 block text-xs text-gray-500">{item.message}</span><span className="mt-1 block text-[11px] text-gray-400">{new Date(item.created_at).toLocaleString('pt-BR')}</span></span><span role="button" tabIndex={0} onClick={(event)=>resolveNotification(event,item.id)} className="rounded p-1 text-gray-300 hover:bg-green-50 hover:text-green-600" title="Resolver"><CheckCheck className="h-4 w-4"/></span></button>
+                })}</div>
+                <Link to="/controles-erp" onClick={()=>setNotificationsOpen(false)} className="block border-t border-gray-100 px-4 py-3 text-center text-xs font-medium text-primary-600 hover:bg-gray-50">Abrir central de notificacoes</Link>
+              </div>}
+            </div>
             <div className="hidden md:block text-right">
               <p className="text-xs text-gray-400">{clock.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
             </div>

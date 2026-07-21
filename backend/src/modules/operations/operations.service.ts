@@ -65,6 +65,41 @@ export class OperationsService {
     return (await this.db.query(`UPDATE notifications SET ${setters[action]} WHERE id=$1 AND (user_id IS NULL OR user_id=$2) RETURNING *`,[id,userId,assignedTo]))[0];
   }
 
+  async notifications(userId: string, role: string) {
+    if (role === 'admin' || role === 'financeiro') await this.refreshSystemNotifications();
+    const globalFilter = role === 'admin' || role === 'financeiro' ? 'OR user_id IS NULL' : '';
+    return this.db.query(`SELECT * FROM notifications
+      WHERE user_id=$1 OR assigned_to=$1 ${globalFilter}
+      ORDER BY CASE status WHEN 'nova' THEN 0 WHEN 'lida' THEN 1 ELSE 2 END, created_at DESC LIMIT 50`, [userId]);
+  }
+
+  async markAllNotificationsRead(userId: string, role: string) {
+    const globalFilter = role === 'admin' || role === 'financeiro' ? 'OR user_id IS NULL' : '';
+    await this.db.query(`UPDATE notifications SET status='lida',read_at=now()
+      WHERE status='nova' AND (user_id=$1 OR assigned_to=$1 ${globalFilter})`, [userId]);
+    return { success: true };
+  }
+
+  private async refreshSystemNotifications() {
+    await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
+      SELECT 'Conta vencida', COALESCE(c.name,'Cliente') || ': R$ ' || ar.pending_value::text, 'financeiro', 'account_receivable', ar.id
+      FROM accounts_receivable ar LEFT JOIN customers c ON c.id=ar.customer_id
+      WHERE ar.due_date < CURRENT_DATE AND ar.status IN ('pendente','parcial','vencido')
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.entity_type='account_receivable' AND n.entity_id=ar.id AND n.status<>'resolvida')`);
+    await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
+      SELECT 'Rejeicao fiscal', UPPER(i.type) || COALESCE(' ' || i.number::text,'') || ': ' || COALESCE(i.rejection_reason,'Verifique a tentativa de emissao'), 'fiscal', 'invoice', i.id
+      FROM invoices i WHERE i.status IN ('rejeitada','erro')
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.entity_type='invoice' AND n.entity_id=i.id AND n.status<>'resolvida')`);
+    await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
+      SELECT 'Aprovacao pendente', type || ': ' || reason, 'aprovacao', 'approval_request', a.id
+      FROM approval_requests a WHERE a.status IN ('pendente','aguardando_segunda')
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.entity_type='approval_request' AND n.entity_id=a.id AND n.status<>'resolvida')`);
+    await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
+      SELECT 'Estoque baixo', p.name || ': ' || p.quantity::text || ' disponivel(is)', 'estoque', 'product', p.id
+      FROM products p WHERE p.active=true AND (p.quantity-p.reserved_quantity)<=p.min_stock
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.entity_type='product' AND n.entity_id=p.id AND n.status<>'resolvida')`);
+  }
+
   async preference(userId: string, widgets?: any[]) {
     if (!widgets) return (await this.db.query('SELECT * FROM dashboard_preferences WHERE user_id=$1',[userId]))[0] || { user_id:userId, widgets:[] };
     return (await this.db.query(`INSERT INTO dashboard_preferences(user_id,widgets) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET widgets=$2,updated_at=now() RETURNING *`,[userId,JSON.stringify(widgets)]))[0];
