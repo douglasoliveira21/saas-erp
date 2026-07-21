@@ -7,13 +7,14 @@ import { NfseService } from './services/nfse.service';
 import { Certificate } from './entities/certificate.entity';
 import { Invoice } from './entities/invoice.entity';
 import { FiscalConfig } from './entities/fiscal-config.entity';
+import { FiscalEvent } from './entities/fiscal-event.entity';
 import { FinancialTask } from '../financial-tasks/entities/financial-task.entity';
 import { FinancialMovement } from '../financial/entities/financial-movement.entity';
 import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FinancialTask, FinancialMovement]), MailModule, AuditModule],
+  imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FiscalEvent, FinancialTask, FinancialMovement]), MailModule, AuditModule],
   controllers: [FiscalController],
   providers: [CertificateService, NfeService, NfseService],
   exports: [CertificateService, NfeService, NfseService],

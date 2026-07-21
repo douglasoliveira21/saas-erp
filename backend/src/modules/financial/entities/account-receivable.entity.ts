@@ -48,6 +48,15 @@ export class AccountReceivable {
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate: string;
 
+  @Column({ name: 'competence_date', type: 'date', nullable: true })
+  competenceDate: string;
+
+  @Column({ name: 'cost_center_id', type: 'uuid', nullable: true })
+  costCenterId: string;
+
+  @Column({ name: 'chart_account_id', type: 'uuid', nullable: true })
+  chartAccountId: string;
+
   @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
   paidAt: Date;
 
@@ -56,6 +65,12 @@ export class AccountReceivable {
 
   @Column({ name: 'cancel_reason', type: 'text', nullable: true })
   cancelReason: string;
+
+  @Column({ name: 'reversed_at', type: 'timestamp', nullable: true })
+  reversedAt: Date;
+
+  @Column({ name: 'reversal_reason', type: 'text', nullable: true })
+  reversalReason: string;
 
   @Column({ type: 'text', nullable: true })
   observations: string;

@@ -5,6 +5,7 @@ import { StockMovement } from './entities/stock-movement.entity';
 import { Product } from '../products/entities/product.entity';
 import { FinancialService } from '../financial/financial.service';
 import { AuditService } from '../audit/audit.service';
+import { StockInventory } from './entities/stock-inventory.entity';
 
 @Injectable()
 export class StockService {
@@ -13,12 +14,14 @@ export class StockService {
     private stockMovementsRepository: Repository<StockMovement>,
     @InjectRepository(Product)
     private productsRepository: Repository<Product>,
+    @InjectRepository(StockInventory)
+    private inventoryRepository: Repository<StockInventory>,
     private financialService: FinancialService,
     private auditService: AuditService,
   ) {}
 
   async create(createStockMovementDto: any): Promise<StockMovement> {
-    const { productId, type, quantity, reason, userId } = createStockMovementDto;
+    const { productId, type, quantity, reason, userId, unitCost, lotNumber, serialNumber } = createStockMovementDto;
     const normalizedQuantity = Number(quantity);
 
     if (!['entrada', 'saida', 'ajuste'].includes(type)) {
@@ -36,6 +39,13 @@ export class StockService {
 
     if (type === 'entrada') {
       newQuantity = previousQuantity + normalizedQuantity;
+      if (unitCost && normalizedQuantity > 0) {
+        const previousValue = Number(product.averageCost || product.purchasePrice || 0) * previousQuantity;
+        const incomingValue = Number(unitCost) * normalizedQuantity;
+        const averageCost = newQuantity > 0 ? (previousValue + incomingValue) / newQuantity : Number(unitCost);
+        product.averageCost = Number(averageCost.toFixed(4));
+        product.purchasePrice = Number(unitCost);
+      }
     } else if (type === 'saida') {
       if (previousQuantity < normalizedQuantity) throw new BadRequestException('Estoque insuficiente');
       newQuantity = previousQuantity - normalizedQuantity;
@@ -46,7 +56,11 @@ export class StockService {
     }
 
     // Atualizar estoque do produto
-    await this.productsRepository.update(productId, { quantity: newQuantity });
+    await this.productsRepository.update(productId, {
+      quantity: newQuantity,
+      averageCost: product.averageCost,
+      purchasePrice: product.purchasePrice,
+    });
 
     const movement = this.stockMovementsRepository.create({
       productId,
@@ -55,6 +69,9 @@ export class StockService {
       previousQuantity,
       newQuantity,
       reason,
+      unitCost: unitCost ? Number(unitCost) : null,
+      lotNumber: lotNumber || null,
+      serialNumber: serialNumber || null,
       userId,
     });
 
@@ -73,6 +90,9 @@ export class StockService {
         previousQuantity,
         newQuantity,
         reason,
+        unitCost,
+        lotNumber,
+        serialNumber,
       },
     });
 
@@ -148,5 +168,95 @@ export class StockService {
       },
     });
     return { message: 'Movimentação excluída e estoque revertido' };
+  }
+
+  async getLowStock() {
+    return this.productsRepository
+      .createQueryBuilder('product')
+      .where('product.active = :active', { active: true })
+      .andWhere('product.quantity <= product.minStock')
+      .orderBy('product.name', 'ASC')
+      .getMany();
+  }
+
+  async getKardex(productId: string) {
+    const product = await this.productsRepository.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Produto não encontrado');
+    const movements = await this.stockMovementsRepository.find({
+      where: { productId },
+      relations: ['user'],
+      order: { createdAt: 'ASC' },
+    });
+    return {
+      product,
+      currentQuantity: product.quantity,
+      reservedQuantity: product.reservedQuantity || 0,
+      availableQuantity: Number(product.quantity) - Number(product.reservedQuantity || 0),
+      movements,
+    };
+  }
+
+  async inventoryAdjust(productId: string, countedQuantity: number, justification: string, userId: string) {
+    if (!justification) throw new BadRequestException('Justificativa é obrigatória para inventário');
+    const product = await this.productsRepository.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Produto não encontrado');
+    const systemQuantity = Number(product.quantity);
+    const difference = Number(countedQuantity) - systemQuantity;
+    const inventory = await this.inventoryRepository.save(this.inventoryRepository.create({
+      productId,
+      countedQuantity: Number(countedQuantity),
+      systemQuantity,
+      difference,
+      justification,
+      createdBy: userId,
+    }));
+    await this.create({
+      productId,
+      type: 'ajuste',
+      quantity: Number(countedQuantity),
+      reason: `Inventário #${inventory.id}: ${justification}`,
+      userId,
+    });
+    await this.auditService.safeCreate({
+      userId,
+      action: 'stock.inventory_adjusted',
+      entity: 'stock_inventory',
+      entityId: inventory.id,
+      oldData: { quantity: systemQuantity },
+      newData: inventory,
+    });
+    return inventory;
+  }
+
+  async reserve(productId: string, quantity: number, userId: string, reason?: string) {
+    const product = await this.productsRepository.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Produto não encontrado');
+    const available = Number(product.quantity) - Number(product.reservedQuantity || 0);
+    if (Number(quantity) > available) throw new BadRequestException('Quantidade indisponível para reserva');
+    product.reservedQuantity = Number(product.reservedQuantity || 0) + Number(quantity);
+    const saved = await this.productsRepository.save(product);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'stock.reserved',
+      entity: 'product',
+      entityId: productId,
+      newData: { quantity, reservedQuantity: saved.reservedQuantity, reason },
+    });
+    return saved;
+  }
+
+  async releaseReservation(productId: string, quantity: number, userId: string, reason?: string) {
+    const product = await this.productsRepository.findOne({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Produto não encontrado');
+    product.reservedQuantity = Math.max(0, Number(product.reservedQuantity || 0) - Number(quantity));
+    const saved = await this.productsRepository.save(product);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'stock.reservation_released',
+      entity: 'product',
+      entityId: productId,
+      newData: { quantity, reservedQuantity: saved.reservedQuantity, reason },
+    });
+    return saved;
   }
 }

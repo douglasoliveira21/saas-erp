@@ -37,6 +37,15 @@ export class StockMovement {
   @Column({ type: 'text', nullable: true })
   reason: string;
 
+  @Column({ name: 'unit_cost', type: 'decimal', precision: 12, scale: 4, nullable: true })
+  unitCost: number;
+
+  @Column({ name: 'lot_number', length: 100, nullable: true })
+  lotNumber: string;
+
+  @Column({ name: 'serial_number', length: 100, nullable: true })
+  serialNumber: string;
+
   @Column({ name: 'user_id', nullable: true })
   userId: string;
 

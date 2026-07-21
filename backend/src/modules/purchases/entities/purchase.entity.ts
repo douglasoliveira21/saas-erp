@@ -5,9 +5,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { PurchaseItem } from './purchase-item.entity';
+import { PurchaseQuote } from './purchase-quote.entity';
+import { PurchaseAttachment } from './purchase-attachment.entity';
 
 @Entity('purchases')
 export class Purchase {
@@ -26,6 +30,9 @@ export class Purchase {
   @Column({ name: 'supplier_name', length: 255 })
   supplierName: string;
 
+  @Column({ name: 'supplier_id', type: 'uuid', nullable: true })
+  supplierId: string;
+
   @Column({ name: 'supplier_cnpj', length: 20, nullable: true })
   supplierCnpj: string;
 
@@ -38,6 +45,15 @@ export class Purchase {
   @Column({ name: 'payment_method', type: 'varchar', length: 50, nullable: true })
   paymentMethod: string;
 
+  @Column({ name: 'cost_center_id', type: 'uuid', nullable: true })
+  costCenterId: string;
+
+  @Column({ name: 'chart_account_id', type: 'uuid', nullable: true })
+  chartAccountId: string;
+
+  @Column({ name: 'competence_date', type: 'date', nullable: true })
+  competenceDate: string;
+
   @Column({ name: 'due_date', type: 'date', nullable: true })
   dueDate: string;
 
@@ -46,6 +62,15 @@ export class Purchase {
 
   @Column({ name: 'invoice_number', length: 100, nullable: true })
   invoiceNumber: string;
+
+  @Column({ name: 'selected_quote_id', type: 'uuid', nullable: true })
+  selectedQuoteId: string;
+
+  @Column({ name: 'approval_limit', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  approvalLimit: number;
+
+  @Column({ name: 'partially_received', type: 'boolean', default: false })
+  partiallyReceived: boolean;
 
   @Column({ type: 'text', nullable: true })
   observations: string;
@@ -75,4 +100,13 @@ export class Purchase {
   @ManyToOne(() => User)
   @JoinColumn({ name: 'approved_by' })
   approver: User;
+
+  @OneToMany(() => PurchaseItem, (item) => item.purchase, { cascade: true })
+  itemsList: PurchaseItem[];
+
+  @OneToMany(() => PurchaseQuote, (quote) => quote.purchase, { cascade: true })
+  quotes: PurchaseQuote[];
+
+  @OneToMany(() => PurchaseAttachment, (attachment) => attachment.purchase, { cascade: true })
+  attachments: PurchaseAttachment[];
 }

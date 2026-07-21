@@ -34,6 +34,15 @@ export class Invoice {
   @Column({ type: 'varchar', length: 20, default: 'pendente' })
   status: string;
 
+  @Column({ name: 'queue_status', type: 'varchar', length: 20, default: 'pendente' })
+  queueStatus: string;
+
+  @Column({ name: 'retry_count', type: 'int', default: 0 })
+  retryCount: number;
+
+  @Column({ name: 'next_retry_at', type: 'timestamp', nullable: true })
+  nextRetryAt: Date;
+
   @Column({ name: 'xml_sent', type: 'text', nullable: true })
   xmlSent: string;
 
@@ -43,6 +52,9 @@ export class Invoice {
   @Column({ name: 'xml_cancel', type: 'text', nullable: true })
   xmlCancel: string;
 
+  @Column({ name: 'xml_storage_path', type: 'text', nullable: true })
+  xmlStoragePath: string;
+
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason: string;
 
@@ -51,6 +63,12 @@ export class Invoice {
 
   @Column({ name: 'cancel_protocol', length: 50, nullable: true })
   cancelProtocol: string;
+
+  @Column({ name: 'correction_letter', type: 'text', nullable: true })
+  correctionLetter: string;
+
+  @Column({ name: 'correction_protocol', length: 80, nullable: true })
+  correctionProtocol: string;
 
   @Column({ name: 'canceled_at', type: 'timestamp', nullable: true })
   canceledAt: Date;

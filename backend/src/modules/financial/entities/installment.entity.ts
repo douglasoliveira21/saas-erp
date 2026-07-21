@@ -6,8 +6,10 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
 import { AccountReceivable } from './account-receivable.entity';
+import { InstallmentPayment } from './installment-payment.entity';
 
 @Entity('installments')
 export class Installment {
@@ -35,6 +37,9 @@ export class Installment {
   @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
   paidAt: Date;
 
+  @Column({ name: 'competence_date', type: 'date', nullable: true })
+  competenceDate: string;
+
   @Column({ type: 'varchar', length: 20, default: 'pendente' })
   status: string; // pendente | pago | parcial | vencido | cancelado
 
@@ -54,4 +59,7 @@ export class Installment {
   @ManyToOne(() => AccountReceivable, (account) => account.installmentsList)
   @JoinColumn({ name: 'account_id' })
   account: AccountReceivable;
+
+  @OneToMany(() => InstallmentPayment, (payment) => payment.installment)
+  payments: InstallmentPayment[];
 }

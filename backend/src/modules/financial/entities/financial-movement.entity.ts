@@ -8,6 +8,9 @@ import {
 } from 'typeorm';
 import { Sale } from '../../sales/entities/sale.entity';
 import { AccountReceivable } from './account-receivable.entity';
+import { CostCenter } from './cost-center.entity';
+import { ChartAccount } from './chart-account.entity';
+import { BankAccount } from './bank-account.entity';
 
 @Entity('financial_movements')
 export class FinancialMovement {
@@ -44,6 +47,24 @@ export class FinancialMovement {
   @Column({ name: 'bank_account', type: 'varchar', length: 100, nullable: true })
   bankAccount: string;
 
+  @Column({ name: 'bank_account_id', type: 'uuid', nullable: true })
+  bankAccountId: string;
+
+  @Column({ name: 'cost_center_id', type: 'uuid', nullable: true })
+  costCenterId: string;
+
+  @Column({ name: 'chart_account_id', type: 'uuid', nullable: true })
+  chartAccountId: string;
+
+  @Column({ name: 'competence_date', type: 'date', nullable: true })
+  competenceDate: string;
+
+  @Column({ name: 'due_date', type: 'date', nullable: true })
+  dueDate: string;
+
+  @Column({ name: 'paid_at', type: 'timestamp', nullable: true })
+  paidAt: Date;
+
   @Column({ name: 'reference_id', type: 'uuid', nullable: true })
   referenceId: string;
 
@@ -76,4 +97,16 @@ export class FinancialMovement {
   @ManyToOne(() => AccountReceivable, (account) => account.movements)
   @JoinColumn({ name: 'account_id' })
   account: AccountReceivable;
+
+  @ManyToOne(() => CostCenter)
+  @JoinColumn({ name: 'cost_center_id' })
+  costCenter: CostCenter;
+
+  @ManyToOne(() => ChartAccount)
+  @JoinColumn({ name: 'chart_account_id' })
+  chartAccount: ChartAccount;
+
+  @ManyToOne(() => BankAccount)
+  @JoinColumn({ name: 'bank_account_id' })
+  bankAccountRef: BankAccount;
 }

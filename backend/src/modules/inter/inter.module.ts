@@ -6,10 +6,11 @@ import { Sale } from '../sales/entities/sale.entity';
 import { FinancialModule } from '../financial/financial.module';
 import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale]),
+    TypeOrmModule.forFeature([Sale, AuditLog]),
     FinancialModule,
     MailModule,
     AuditModule,

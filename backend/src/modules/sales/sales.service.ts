@@ -16,6 +16,8 @@ import { InterService } from '../inter/inter.service';
 import { NfeService } from '../fiscal/services/nfe.service';
 import { NfseService } from '../fiscal/services/nfse.service';
 import { AuditService } from '../audit/audit.service';
+import { SaleEvent } from './entities/sale-event.entity';
+import { SaleAttachment } from './entities/sale-attachment.entity';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -26,6 +28,10 @@ export class SalesService {
     private salesRepository: Repository<Sale>,
     @InjectRepository(SaleItem)
     private saleItemsRepository: Repository<SaleItem>,
+    @InjectRepository(SaleEvent)
+    private saleEventRepository: Repository<SaleEvent>,
+    @InjectRepository(SaleAttachment)
+    private saleAttachmentRepository: Repository<SaleAttachment>,
     @InjectRepository(Product)
     private productsRepository: Repository<Product>,
     @InjectRepository(StockMovement)
@@ -182,6 +188,10 @@ export class SalesService {
           items,
         },
       });
+      await this.addEvent(savedSale.id, 'sale.created', savedSale.status as any, 'Venda criada', userId, {
+        totalAmount: saleData.totalAmount,
+        paymentMethod: saleData.paymentMethod,
+      });
       return created;
     } catch (err) {
       await queryRunner.rollbackTransaction();
@@ -193,7 +203,7 @@ export class SalesService {
 
   async findAll(): Promise<Sale[]> {
     return this.salesRepository.find({
-      relations: ['technician', 'customer', 'items'],
+      relations: ['technician', 'customer', 'items', 'events', 'attachments'],
       order: { createdAt: 'DESC' },
     });
   }
@@ -252,6 +262,7 @@ export class SalesService {
     }
     sale.status = 'pago' as any;
     const saved = await this.salesRepository.save(sale);
+    await this.addEvent(id, 'sale.paid', saved.status as any, 'Venda marcada como paga', userId);
     await this.auditService.safeCreate({
       userId,
       action: 'sale.paid',
@@ -379,6 +390,10 @@ export class SalesService {
           externalDocumentsCancelled: !alreadyCancelled,
           stockReverted: !previousReversal,
         },
+      });
+      await this.addEvent(id, 'sale.cancelled', 'cancelado', 'Venda cancelada', cancelledBy, {
+        externalDocumentsCancelled: !alreadyCancelled,
+        stockReverted: !previousReversal,
       });
       return this.findOne(id);
     } catch (error) {
@@ -617,5 +632,72 @@ export class SalesService {
       oldData: sale,
       newData: { deleted: true },
     });
+  }
+
+  async approveCommercial(id: string, userId: string) {
+    const sale = await this.findOne(id);
+    sale.commercialApprovedBy = userId;
+    if (sale.status === 'rascunho' as any || sale.status === 'pendente' as any) {
+      sale.status = 'aprovada' as any;
+    }
+    const saved = await this.salesRepository.save(sale);
+    await this.addEvent(id, 'sale.commercial_approved', saved.status as any, 'Aprovação comercial registrada', userId);
+    return saved;
+  }
+
+  async approveFinancial(id: string, userId: string) {
+    const sale = await this.findOne(id);
+    sale.financialApprovedBy = userId;
+    if (sale.status === 'rascunho' as any || sale.status === 'pendente' as any) {
+      sale.status = 'aprovada' as any;
+    }
+    const saved = await this.salesRepository.save(sale);
+    await this.addEvent(id, 'sale.financial_approved', saved.status as any, 'Aprovação financeira registrada', userId);
+    return saved;
+  }
+
+  async approveDiscount(id: string, discountAmount: number, userId: string, reason?: string) {
+    const sale = await this.findOne(id);
+    sale.discountAmount = Number(discountAmount || 0);
+    sale.discountApprovedBy = userId;
+    const saved = await this.salesRepository.save(sale);
+    await this.addEvent(id, 'sale.discount_approved', saved.status as any, 'Desconto aprovado', userId, {
+      discountAmount,
+      reason,
+    });
+    return saved;
+  }
+
+  async addAttachment(id: string, data: any, userId: string) {
+    await this.findOne(id);
+    const attachment = await this.saleAttachmentRepository.save(this.saleAttachmentRepository.create({
+      ...data,
+      saleId: id,
+      uploadedBy: userId,
+    }));
+    await this.addEvent(id, 'sale.attachment_added', null, 'Anexo adicionado', userId, attachment);
+    return attachment;
+  }
+
+  async getEvents(id: string) {
+    await this.findOne(id);
+    return this.saleEventRepository.find({ where: { saleId: id }, order: { createdAt: 'ASC' } });
+  }
+
+  async resendDocuments(id: string, body: string | undefined, userId: string) {
+    const result = await this.sendCustomerDocuments(id, body);
+    await this.addEvent(id, 'sale.documents_resent', null, 'Documentos reenviados ao cliente', userId, result);
+    return result;
+  }
+
+  private async addEvent(saleId: string, type: string, status?: string, description?: string, userId?: string, metadata?: any) {
+    await this.saleEventRepository.save(this.saleEventRepository.create({
+      saleId,
+      type,
+      status: status || null,
+      description: description || null,
+      createdBy: userId || null,
+      metadata: metadata || null,
+    }));
   }
 }

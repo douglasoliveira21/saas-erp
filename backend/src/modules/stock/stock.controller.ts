@@ -26,6 +26,31 @@ export class StockController {
     return this.stockService.findAll();
   }
 
+  @Get('low-stock')
+  getLowStock() {
+    return this.stockService.getLowStock();
+  }
+
+  @Get('kardex/:productId')
+  getKardex(@Param('productId') productId: string) {
+    return this.stockService.getKardex(productId);
+  }
+
+  @Post('inventory/:productId')
+  inventoryAdjust(@Param('productId') productId: string, @Body() body: any, @Request() req: any) {
+    return this.stockService.inventoryAdjust(productId, body.countedQuantity, body.justification, req.user.id);
+  }
+
+  @Post('reserve/:productId')
+  reserve(@Param('productId') productId: string, @Body() body: any, @Request() req: any) {
+    return this.stockService.reserve(productId, Number(body.quantity), req.user.id, body.reason);
+  }
+
+  @Post('release-reservation/:productId')
+  releaseReservation(@Param('productId') productId: string, @Body() body: any, @Request() req: any) {
+    return this.stockService.releaseReservation(productId, Number(body.quantity), req.user.id, body.reason);
+  }
+
   @Get('movements/:id')
   findOne(@Param('id') id: string) {
     return this.stockService.findOne(id);

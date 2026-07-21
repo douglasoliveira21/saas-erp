@@ -20,6 +20,12 @@ export class PurchasesController {
     });
   }
 
+  @Post('requests')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  createRequest(@Body() body: any, @Request() req: any) {
+    return this.service.createRequest(body, req.user.id);
+  }
+
   @Get()
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findAll(@Query('type') type?: string) {
@@ -51,10 +57,40 @@ export class PurchasesController {
     return this.service.approve(id, req.user.id);
   }
 
+  @Post(':id/quotes')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  addQuote(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.service.addQuote(id, body, req.user.id);
+  }
+
+  @Patch(':id/quotes/:quoteId/choose')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  chooseQuote(@Param('id') id: string, @Param('quoteId') quoteId: string, @Request() req: any) {
+    return this.service.chooseQuote(id, quoteId, req.user.id);
+  }
+
+  @Post(':id/order')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  createOrder(@Param('id') id: string, @Request() req: any) {
+    return this.service.createOrder(id, req.user.id);
+  }
+
   @Patch(':id/receive')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   receive(@Param('id') id: string, @Request() req: any) {
     return this.service.receive(id, req.user.id);
+  }
+
+  @Patch(':id/receive-partial')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  receivePartial(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.service.receivePartial(id, body.items || [], req.user.id);
+  }
+
+  @Post(':id/attachments')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  addAttachment(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.service.addAttachment(id, body, req.user.id);
   }
 
   @Patch(':id/return')

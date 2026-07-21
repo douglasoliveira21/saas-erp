@@ -16,6 +16,7 @@ import { FinancialTask } from '../financial-tasks/entities/financial-task.entity
 import { FinancialMovement } from '../financial/entities/financial-movement.entity';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
+import { FiscalEvent } from './entities/fiscal-event.entity';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,6 +27,7 @@ export class FiscalController {
     private nfseService: NfseService,
     @InjectRepository(Invoice) private invoiceRepo: Repository<Invoice>,
     @InjectRepository(FiscalConfig) private configRepo: Repository<FiscalConfig>,
+    @InjectRepository(FiscalEvent) private eventRepo: Repository<FiscalEvent>,
     @InjectRepository(FinancialTask) private taskRepo: Repository<FinancialTask>,
     @InjectRepository(FinancialMovement) private movementRepo: Repository<FinancialMovement>,
     private mailService: MailService,
@@ -358,5 +360,116 @@ export class FiscalController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async cancelNfse(@Body() body: { invoiceId: string; reason: string; certId: string }, @Request() req: any) {
     return this.nfseService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
+  }
+
+  @Get('queue')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getQueue() {
+    return this.invoiceRepo.find({
+      where: [
+        { queueStatus: 'pendente' },
+        { queueStatus: 'erro' },
+        { queueStatus: 'retry' },
+      ],
+      select: ['id', 'type', 'number', 'series', 'status', 'queueStatus', 'retryCount', 'nextRetryAt', 'rejectionReason', 'createdAt', 'saleId'],
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  @Get('rejections')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getRejections() {
+    return this.invoiceRepo.find({
+      where: [{ status: 'rejeitada' }, { queueStatus: 'erro' }],
+      select: ['id', 'type', 'number', 'series', 'status', 'queueStatus', 'rejectionReason', 'retryCount', 'createdAt', 'saleId'],
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
+  @Post('invoices/:id/retry')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async retryInvoice(@Param('id') id: string, @Request() req: any) {
+    const invoice = await this.invoiceRepo.findOne({ where: { id } });
+    if (!invoice) throw new Error('Nota não encontrada');
+    invoice.queueStatus = 'pendente';
+    invoice.retryCount = Number(invoice.retryCount || 0) + 1;
+    invoice.nextRetryAt = null;
+    const saved = await this.invoiceRepo.save(invoice);
+    await this.eventRepo.save(this.eventRepo.create({
+      invoiceId: id,
+      type: 'retry_requested',
+      status: saved.queueStatus,
+      message: 'Retry manual solicitado',
+      createdBy: req.user.id,
+    }));
+    return saved;
+  }
+
+  @Post('invoices/:id/check-status')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async checkInvoiceStatus(@Param('id') id: string, @Request() req: any) {
+    const invoice = await this.invoiceRepo.findOne({ where: { id } });
+    if (!invoice) throw new Error('Nota não encontrada');
+    await this.eventRepo.save(this.eventRepo.create({
+      invoiceId: id,
+      type: 'status_checked',
+      status: invoice.status,
+      message: 'Consulta de status registrada para processamento externo',
+      createdBy: req.user.id,
+    }));
+    return { id, status: invoice.status, queueStatus: invoice.queueStatus, message: 'Consulta registrada' };
+  }
+
+  @Post('invoices/:id/correction-letter')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async correctionLetter(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    const invoice = await this.invoiceRepo.findOne({ where: { id } });
+    if (!invoice) throw new Error('Nota não encontrada');
+    invoice.correctionLetter = body.text;
+    invoice.correctionProtocol = body.protocol || `CC-${Date.now()}`;
+    const saved = await this.invoiceRepo.save(invoice);
+    await this.eventRepo.save(this.eventRepo.create({
+      invoiceId: id,
+      type: 'correction_letter',
+      status: invoice.status,
+      message: body.text,
+      createdBy: req.user.id,
+    }));
+    return saved;
+  }
+
+  @Post('numbering/invalidate')
+  @Roles(UserRole.ADMIN)
+  async invalidateNumbering(@Body() body: any, @Request() req: any) {
+    const event = await this.eventRepo.save(this.eventRepo.create({
+      type: 'numbering_invalidated',
+      status: 'registrado',
+      message: body.reason || 'Inutilização de numeração registrada',
+      payload: body,
+      createdBy: req.user.id,
+    }));
+    return event;
+  }
+
+  @Post('validate-before-issue')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async validateBeforeIssue(@Body() body: any) {
+    const errors: string[] = [];
+    const customer = body.customer || {};
+    const items = body.items || [];
+    if (!customer.cpfCnpj) errors.push('CNPJ/CPF do cliente obrigatório');
+    if (!customer.address && !customer.endereco) errors.push('Endereço do cliente obrigatório');
+    for (const item of items) {
+      if (!item.cfop) errors.push(`CFOP obrigatório no item ${item.name || item.description || item.productId || ''}`);
+      if (!item.ncm) errors.push(`NCM obrigatório no item ${item.name || item.description || item.productId || ''}`);
+      if (!item.cst && !item.csosn) errors.push(`CST/CSOSN obrigatório no item ${item.name || item.description || item.productId || ''}`);
+    }
+    return { valid: errors.length === 0, errors };
+  }
+
+  @Get('events')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getEvents() {
+    return this.eventRepo.find({ order: { createdAt: 'DESC' } });
   }
 }

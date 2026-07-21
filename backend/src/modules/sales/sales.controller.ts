@@ -57,8 +57,37 @@ export class SalesController {
 
   @Post(':id/send-documents')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  sendDocuments(@Param('id') id: string, @Body() body: any) {
-    return this.salesService.sendCustomerDocuments(id, body?.body);
+  sendDocuments(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.salesService.resendDocuments(id, body?.body, req.user.id);
+  }
+
+  @Patch(':id/approve-commercial')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  approveCommercial(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.approveCommercial(id, req.user.id);
+  }
+
+  @Patch(':id/approve-financial')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  approveFinancial(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.approveFinancial(id, req.user.id);
+  }
+
+  @Patch(':id/approve-discount')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  approveDiscount(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.salesService.approveDiscount(id, Number(body.discountAmount || 0), req.user.id, body.reason);
+  }
+
+  @Post(':id/attachments')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  addAttachment(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.salesService.addAttachment(id, body, req.user.id);
+  }
+
+  @Get(':id/events')
+  getEvents(@Param('id') id: string) {
+    return this.salesService.getEvents(id);
   }
 
   @Patch(':id')

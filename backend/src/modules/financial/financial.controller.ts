@@ -74,7 +74,7 @@ export class FinancialController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   payInstallment(
     @Param('installmentId') installmentId: string,
-    @Body() body: { value: number; paymentMethod: string },
+    @Body() body: { value: number; paymentMethod: string; bankAccountId?: string; paidAt?: string; observations?: string },
     @Request() req: any,
   ) {
     return this.financialService.payInstallment(
@@ -82,6 +82,11 @@ export class FinancialController {
       body.value,
       body.paymentMethod,
       req.user.id,
+      {
+        bankAccountId: body.bankAccountId,
+        paidAt: body.paidAt,
+        observations: body.observations,
+      },
     );
   }
 
@@ -127,6 +132,15 @@ export class FinancialController {
     return this.financialService.getFlowByPeriod(startDate, endDate);
   }
 
+  @Get('cash-flow')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getCashFlowSeparated(
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.financialService.getCashFlowSeparated(startDate, endDate);
+  }
+
   @Get('overdue')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getOverdue() {
@@ -167,6 +181,12 @@ export class FinancialController {
     return this.financialService.createRecurringMovement(body, req.user.id);
   }
 
+  @Post('movements/:id/reverse')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  reverseMovement(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.financialService.reverseMovement(id, body.reason || 'Estorno manual', req.user.id);
+  }
+
   @Patch('movements/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   updateMovement(@Param('id') id: string, @Body() body: any, @Request() req: any) {
@@ -183,5 +203,81 @@ export class FinancialController {
   @Roles(UserRole.ADMIN)
   syncSales(@Request() req: any) {
     return this.financialService.syncExistingSales(req.user.id);
+  }
+
+  @Get('cost-centers')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listCostCenters() {
+    return this.financialService.listCostCenters();
+  }
+
+  @Post('cost-centers')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  saveCostCenter(@Body() body: any, @Request() req: any) {
+    return this.financialService.saveCostCenter(body, req.user.id);
+  }
+
+  @Get('chart-accounts')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listChartAccounts() {
+    return this.financialService.listChartAccounts();
+  }
+
+  @Post('chart-accounts')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  saveChartAccount(@Body() body: any, @Request() req: any) {
+    return this.financialService.saveChartAccount(body, req.user.id);
+  }
+
+  @Get('bank-accounts')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listBankAccounts() {
+    return this.financialService.listBankAccounts();
+  }
+
+  @Post('bank-accounts')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  saveBankAccount(@Body() body: any, @Request() req: any) {
+    return this.financialService.saveBankAccount(body, req.user.id);
+  }
+
+  @Get('installments/:id/payments')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listInstallmentPayments(@Param('id') id: string) {
+    return this.financialService.listInstallmentPayments(id);
+  }
+
+  @Get('payables')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listPayables(
+    @Query('status') status?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.financialService.listPayables({ status, startDate, endDate });
+  }
+
+  @Post('payables')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  createPayable(@Body() body: any, @Request() req: any) {
+    return this.financialService.createPayable(body, req.user.id);
+  }
+
+  @Post('payables/:id/pay')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  payPayable(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.financialService.payPayable(id, body, req.user.id);
+  }
+
+  @Get('monthly-closings')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  listClosings() {
+    return this.financialService.listClosings();
+  }
+
+  @Post('monthly-closings')
+  @Roles(UserRole.ADMIN)
+  closeMonth(@Body() body: any, @Request() req: any) {
+    return this.financialService.closeMonth(body.period, req.user.id, body.notes);
   }
 }

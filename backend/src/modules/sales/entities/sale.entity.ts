@@ -14,6 +14,8 @@ import { User } from '../../users/entities/user.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { SaleItem } from './sale-item.entity';
 import { Commission } from '../../commissions/entities/commission.entity';
+import { SaleEvent } from './sale-event.entity';
+import { SaleAttachment } from './sale-attachment.entity';
 
 @Entity('sales')
 export class Sale {
@@ -46,6 +48,18 @@ export class Sale {
 
   @Column({ name: 'total_amount', type: 'decimal', precision: 10, scale: 2 })
   totalAmount: number;
+
+  @Column({ name: 'discount_amount', type: 'decimal', precision: 10, scale: 2, default: 0 })
+  discountAmount: number;
+
+  @Column({ name: 'discount_approved_by', type: 'uuid', nullable: true })
+  discountApprovedBy: string;
+
+  @Column({ name: 'commercial_approved_by', type: 'uuid', nullable: true })
+  commercialApprovedBy: string;
+
+  @Column({ name: 'financial_approved_by', type: 'uuid', nullable: true })
+  financialApprovedBy: string;
 
   @Column({ name: 'net_profit', type: 'decimal', precision: 10, scale: 2, default: 0 })
   netProfit: number;
@@ -103,6 +117,12 @@ export class Sale {
 
   @OneToMany(() => Commission, (commission) => commission.sale)
   commissions: Commission[];
+
+  @OneToMany(() => SaleEvent, (event) => event.sale)
+  events: SaleEvent[];
+
+  @OneToMany(() => SaleAttachment, (attachment) => attachment.sale)
+  attachments: SaleAttachment[];
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'approved_by' })

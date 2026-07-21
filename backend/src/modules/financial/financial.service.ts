@@ -8,6 +8,12 @@ import { CardFee } from './entities/card-fee.entity';
 import { CustomerCredit } from './entities/customer-credit.entity';
 import { Sale } from '../sales/entities/sale.entity';
 import { AuditService } from '../audit/audit.service';
+import { CostCenter } from './entities/cost-center.entity';
+import { ChartAccount } from './entities/chart-account.entity';
+import { BankAccount } from './entities/bank-account.entity';
+import { MonthlyClosing } from './entities/monthly-closing.entity';
+import { InstallmentPayment } from './entities/installment-payment.entity';
+import { AccountPayable } from './entities/account-payable.entity';
 
 @Injectable()
 export class FinancialService implements OnModuleInit {
@@ -42,6 +48,18 @@ export class FinancialService implements OnModuleInit {
     private readonly cardFeeRepo: Repository<CardFee>,
     @InjectRepository(CustomerCredit)
     private readonly creditRepo: Repository<CustomerCredit>,
+    @InjectRepository(CostCenter)
+    private readonly costCenterRepo: Repository<CostCenter>,
+    @InjectRepository(ChartAccount)
+    private readonly chartAccountRepo: Repository<ChartAccount>,
+    @InjectRepository(BankAccount)
+    private readonly bankAccountRepo: Repository<BankAccount>,
+    @InjectRepository(MonthlyClosing)
+    private readonly monthlyClosingRepo: Repository<MonthlyClosing>,
+    @InjectRepository(InstallmentPayment)
+    private readonly installmentPaymentRepo: Repository<InstallmentPayment>,
+    @InjectRepository(AccountPayable)
+    private readonly payableRepo: Repository<AccountPayable>,
     private readonly auditService: AuditService,
   ) {}
 
@@ -96,6 +114,7 @@ export class FinancialService implements OnModuleInit {
     value: number,
     paymentMethod: string,
     userId: string,
+    options?: { bankAccountId?: string; paidAt?: string; observations?: string },
   ): Promise<Installment> {
     const installment = await this.installmentRepo.findOne({
       where: { id: installmentId },
@@ -117,12 +136,15 @@ export class FinancialService implements OnModuleInit {
       throw new BadRequestException(`Valor excede o saldo da parcela (R$ ${remaining.toFixed(2)})`);
     }
 
+    const paidAt = options?.paidAt ? new Date(options.paidAt) : new Date();
+    await this.ensurePeriodOpen(paidAt.toISOString().split('T')[0]);
+
     const newPaidValue = Number(installment.paidValue) + value;
     const isPaid = newPaidValue >= Number(installment.value);
 
     installment.paidValue = newPaidValue;
     installment.status = isPaid ? 'pago' : 'parcial';
-    installment.paidAt = isPaid ? new Date() : null;
+    installment.paidAt = isPaid ? paidAt : null;
     installment.paymentMethod = paymentMethod;
 
     await this.installmentRepo.save(installment);
@@ -131,18 +153,35 @@ export class FinancialService implements OnModuleInit {
     await this.updateAccountTotals(installment.accountId);
 
     // Create realized movement
-    await this.movementRepo.save(
+    const movement = await this.movementRepo.save(
       this.movementRepo.create({
         type: 'receita',
         category: 'venda',
         description: `Pagamento parcela ${installment.number}`,
         value,
-        date: new Date().toISOString().split('T')[0],
+        date: paidAt.toISOString().split('T')[0],
+        competenceDate: installment.competenceDate || installment.dueDate,
+        dueDate: installment.dueDate,
+        paidAt,
         saleId: installment.saleId,
         accountId: installment.accountId,
         installmentId: installment.id,
         paymentMethod,
+        bankAccountId: options?.bankAccountId || null,
         isForecast: false,
+        createdBy: userId,
+      }),
+    );
+
+    await this.installmentPaymentRepo.save(
+      this.installmentPaymentRepo.create({
+        installmentId: installment.id,
+        movementId: movement.id,
+        value,
+        paymentMethod,
+        bankAccountId: options?.bankAccountId || null,
+        paidAt,
+        observations: options?.observations || null,
         createdBy: userId,
       }),
     );
@@ -158,6 +197,7 @@ export class FinancialService implements OnModuleInit {
         status: installment.status,
         paymentMethod,
         value,
+        bankAccountId: options?.bankAccountId,
       },
     });
 
@@ -501,6 +541,7 @@ export class FinancialService implements OnModuleInit {
   }
 
   async createManualMovement(data: any, userId: string) {
+    await this.ensurePeriodOpen(data.competenceDate || data.date);
     const movement = this.movementRepo.create({
       ...data,
       createdBy: userId,
@@ -566,6 +607,10 @@ export class FinancialService implements OnModuleInit {
   async updateMovement(id: string, data: any, userId?: string) {
     const movement = await this.movementRepo.findOne({ where: { id } });
     if (!movement) throw new NotFoundException('Lançamento não encontrado');
+    await this.ensurePeriodOpen(movement.competenceDate || movement.date);
+    if (data.date || data.competenceDate) {
+      await this.ensurePeriodOpen(data.competenceDate || data.date);
+    }
     // Atualiza apenas o lançamento específico (não afeta outros meses do grupo)
     const oldData = { ...movement };
     Object.assign(movement, data);
@@ -584,6 +629,7 @@ export class FinancialService implements OnModuleInit {
   async deleteMovement(id: string, userId?: string) {
     const movement = await this.movementRepo.findOne({ where: { id } });
     if (!movement) throw new NotFoundException('Lançamento não encontrado');
+    await this.ensurePeriodOpen(movement.competenceDate || movement.date);
     await this.movementRepo.remove(movement);
     await this.auditService.safeCreate({
       userId,
@@ -603,6 +649,233 @@ export class FinancialService implements OnModuleInit {
     }
     await this.cardFeeRepo.remove(fee);
     return { message: 'Taxa removida com sucesso' };
+  }
+
+  async listCostCenters() {
+    return this.costCenterRepo.find({ order: { code: 'ASC' } });
+  }
+
+  async saveCostCenter(data: Partial<CostCenter>, userId?: string) {
+    const entity = data.id
+      ? Object.assign(await this.costCenterRepo.findOne({ where: { id: data.id } }), data)
+      : this.costCenterRepo.create(data);
+    if (!entity) throw new NotFoundException('Centro de custo não encontrado');
+    const saved = await this.costCenterRepo.save(entity);
+    await this.auditService.safeCreate({
+      userId,
+      action: data.id ? 'financial.cost_center_updated' : 'financial.cost_center_created',
+      entity: 'cost_center',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
+  }
+
+  async listChartAccounts() {
+    return this.chartAccountRepo.find({ order: { code: 'ASC' } });
+  }
+
+  async saveChartAccount(data: Partial<ChartAccount>, userId?: string) {
+    const entity = data.id
+      ? Object.assign(await this.chartAccountRepo.findOne({ where: { id: data.id } }), data)
+      : this.chartAccountRepo.create(data);
+    if (!entity) throw new NotFoundException('Conta contábil não encontrada');
+    const saved = await this.chartAccountRepo.save(entity);
+    await this.auditService.safeCreate({
+      userId,
+      action: data.id ? 'financial.chart_account_updated' : 'financial.chart_account_created',
+      entity: 'chart_account',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
+  }
+
+  async listBankAccounts() {
+    return this.bankAccountRepo.find({ order: { name: 'ASC' } });
+  }
+
+  async saveBankAccount(data: Partial<BankAccount>, userId?: string) {
+    const entity = data.id
+      ? Object.assign(await this.bankAccountRepo.findOne({ where: { id: data.id } }), data)
+      : this.bankAccountRepo.create(data);
+    if (!entity) throw new NotFoundException('Conta bancária/caixa não encontrada');
+    const saved = await this.bankAccountRepo.save(entity);
+    await this.auditService.safeCreate({
+      userId,
+      action: data.id ? 'financial.bank_account_updated' : 'financial.bank_account_created',
+      entity: 'bank_account',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
+  }
+
+  async listInstallmentPayments(installmentId: string) {
+    return this.installmentPaymentRepo.find({
+      where: { installmentId },
+      order: { paidAt: 'ASC' },
+    });
+  }
+
+  async listPayables(filters?: { status?: string; startDate?: string; endDate?: string }) {
+    const query = this.payableRepo.createQueryBuilder('payable').orderBy('payable.dueDate', 'ASC');
+    if (filters?.status) query.andWhere('payable.status = :status', { status: filters.status });
+    if (filters?.startDate) query.andWhere('payable.dueDate >= :startDate', { startDate: filters.startDate });
+    if (filters?.endDate) query.andWhere('payable.dueDate <= :endDate', { endDate: filters.endDate });
+    return query.getMany();
+  }
+
+  async createPayable(data: Partial<AccountPayable>, userId?: string) {
+    await this.ensurePeriodOpen(data.competenceDate || data.dueDate || new Date().toISOString().split('T')[0]);
+    const value = Number(data.totalValue || 0);
+    const payable = this.payableRepo.create({
+      ...data,
+      totalValue: value,
+      paidValue: Number(data.paidValue || 0),
+      pendingValue: value - Number(data.paidValue || 0),
+      createdBy: userId || data.createdBy,
+    });
+    const saved = await this.payableRepo.save(payable);
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.payable_created',
+      entity: 'account_payable',
+      entityId: saved.id,
+      newData: saved,
+    });
+    return saved;
+  }
+
+  async payPayable(id: string, body: any, userId: string) {
+    const payable = await this.payableRepo.findOne({ where: { id } });
+    if (!payable) throw new NotFoundException('Conta a pagar não encontrada');
+    if (['pago', 'cancelado', 'estornado'].includes(payable.status)) {
+      throw new BadRequestException('Conta a pagar não aceita nova baixa');
+    }
+
+    const paidAt = body.paidAt ? new Date(body.paidAt) : new Date();
+    await this.ensurePeriodOpen(paidAt.toISOString().split('T')[0]);
+    const value = Number(body.value || payable.pendingValue);
+    if (value <= 0 || value > Number(payable.pendingValue)) {
+      throw new BadRequestException('Valor de baixa inválido');
+    }
+
+    payable.paidValue = Number(payable.paidValue) + value;
+    payable.pendingValue = Number(payable.totalValue) - Number(payable.paidValue);
+    payable.status = payable.pendingValue <= 0 ? 'pago' : 'parcial';
+    payable.paidAt = payable.status === 'pago' ? paidAt : null;
+    const saved = await this.payableRepo.save(payable);
+
+    await this.movementRepo.save(this.movementRepo.create({
+      type: 'despesa',
+      category: 'conta_pagar',
+      description: `Baixa conta a pagar: ${payable.description}`,
+      value,
+      date: paidAt.toISOString().split('T')[0],
+      competenceDate: payable.competenceDate,
+      dueDate: payable.dueDate,
+      paidAt,
+      referenceId: payable.id,
+      referenceType: 'account_payable',
+      paymentMethod: body.paymentMethod,
+      bankAccountId: body.bankAccountId || null,
+      costCenterId: payable.costCenterId,
+      chartAccountId: payable.chartAccountId,
+      isForecast: false,
+      createdBy: userId,
+    }));
+
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.payable_paid',
+      entity: 'account_payable',
+      entityId: payable.id,
+      newData: { value, status: saved.status, paidValue: saved.paidValue, pendingValue: saved.pendingValue },
+    });
+    return saved;
+  }
+
+  async reverseMovement(id: string, reason: string, userId: string) {
+    const movement = await this.movementRepo.findOne({ where: { id } });
+    if (!movement) throw new NotFoundException('Lançamento não encontrado');
+    await this.ensurePeriodOpen(new Date().toISOString().split('T')[0]);
+
+    const reversal = await this.movementRepo.save(this.movementRepo.create({
+      type: 'estorno',
+      category: movement.category || 'estorno',
+      description: `Estorno de ${movement.description || movement.id}: ${reason}`,
+      value: Number(movement.value),
+      date: new Date().toISOString().split('T')[0],
+      competenceDate: movement.competenceDate,
+      dueDate: movement.dueDate,
+      referenceId: movement.id,
+      referenceType: 'financial_movement_reversal',
+      paymentMethod: movement.paymentMethod,
+      bankAccountId: movement.bankAccountId,
+      costCenterId: movement.costCenterId,
+      chartAccountId: movement.chartAccountId,
+      isForecast: false,
+      createdBy: userId,
+    }));
+
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.movement_reversed',
+      entity: 'financial_movement',
+      entityId: movement.id,
+      oldData: movement,
+      newData: { reversalId: reversal.id, reason },
+    });
+    return reversal;
+  }
+
+  async closeMonth(period: string, userId: string, notes?: string) {
+    const existing = await this.monthlyClosingRepo.findOne({ where: { period } });
+    if (existing) return existing;
+    const closing = await this.monthlyClosingRepo.save(this.monthlyClosingRepo.create({
+      period,
+      closedBy: userId,
+      closedAt: new Date(),
+      notes: notes || null,
+    }));
+    await this.auditService.safeCreate({
+      userId,
+      action: 'financial.month_closed',
+      entity: 'monthly_closing',
+      entityId: closing.id,
+      newData: closing,
+    });
+    return closing;
+  }
+
+  async listClosings() {
+    return this.monthlyClosingRepo.find({ order: { period: 'DESC' } });
+  }
+
+  async getCashFlowSeparated(startDate: string, endDate: string) {
+    const movements = await this.findMovements({ startDate, endDate });
+    const totals = (items: FinancialMovement[]) => ({
+      receitas: items.filter((m) => m.type === 'receita').reduce((sum, m) => sum + Number(m.value), 0),
+      despesas: items.filter((m) => m.type === 'despesa').reduce((sum, m) => sum + Number(m.value), 0),
+      estornos: items.filter((m) => m.type === 'estorno').reduce((sum, m) => sum + Number(m.value), 0),
+    });
+    const projected = movements.filter((m) => m.isForecast);
+    const realized = movements.filter((m) => !m.isForecast);
+    return {
+      period: { startDate, endDate },
+      projected: { totals: totals(projected), movements: projected },
+      realized: { totals: totals(realized), movements: realized },
+    };
+  }
+
+  private async ensurePeriodOpen(date?: string): Promise<void> {
+    if (!date) return;
+    const period = date.substring(0, 7);
+    const closing = await this.monthlyClosingRepo.findOne({ where: { period } });
+    if (closing) {
+      throw new BadRequestException(`Período ${period} já está fechado para edição`);
+    }
   }
 
   // ==================== Private Helpers ====================

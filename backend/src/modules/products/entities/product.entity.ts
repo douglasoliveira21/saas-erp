@@ -28,8 +28,14 @@ export class Product {
   @Column({ type: 'int', default: 0 })
   quantity: number;
 
+  @Column({ name: 'reserved_quantity', type: 'int', default: 0 })
+  reservedQuantity: number;
+
   @Column({ name: 'purchase_price', type: 'decimal', precision: 10, scale: 2 })
   purchasePrice: number;
+
+  @Column({ name: 'average_cost', type: 'decimal', precision: 12, scale: 4, default: 0 })
+  averageCost: number;
 
   @Column({ name: 'sale_price', type: 'decimal', precision: 10, scale: 2 })
   salePrice: number;
@@ -57,6 +63,12 @@ export class Product {
 
   @Column({ length: 5, nullable: true })
   unit: string;
+
+  @Column({ name: 'controls_lot', type: 'boolean', default: false })
+  controlsLot: boolean;
+
+  @Column({ name: 'controls_serial', type: 'boolean', default: false })
+  controlsSerial: boolean;
 
   @Column({ default: true })
   active: boolean;
