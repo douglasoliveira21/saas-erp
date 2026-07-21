@@ -68,14 +68,14 @@ export function Sla() {
       const params = new URLSearchParams({ month })
       if (filter === 'exceeded') params.set('exceeded', 'true')
       if (customerId) params.set('customerId', customerId)
-      const [t, r, c] = await Promise.all([
-        api.get('/glpi/tickets?' + params.toString()),
+      const [r, c] = await Promise.all([
         api.get('/glpi/sla-report?' + params.toString()),
         api.get('/customers'),
       ])
-      setTickets(t.data)
+      const t = await api.get('/glpi/tickets?' + params.toString())
       setReport(r.data)
       setCustomers(Array.isArray(c.data) ? c.data : [])
+      setTickets(t.data)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar dados GLPI. Configure a conexão primeiro.') }
     finally { setLoading(false) }
   }

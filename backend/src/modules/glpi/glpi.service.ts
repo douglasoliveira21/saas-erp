@@ -262,6 +262,15 @@ export class GlpiService {
     return { exceeded, totalCharge: Number(totalCharge.toFixed(2)) };
   }
 
+  private async recalculateStoredContractSlas(customerId?: string): Promise<void> {
+    const contracts = customerId
+      ? await this.contractsRepository.find({ where: { customerId } })
+      : await this.contractsRepository.find({ where: {} });
+
+    for (const contract of contracts) {
+      await this.recalculateContractSla(contract);
+    }
+  }
   async getTickets(filters?: { customerId?: string; exceeded?: boolean; month?: string }): Promise<GlpiTicket[]> {
     const qb = this.ticketsRepository.createQueryBuilder('t')
       .leftJoinAndSelect('t.customer', 'customer')
@@ -276,6 +285,7 @@ export class GlpiService {
   }
 
   async getSlaReport(month?: string, customerId?: string): Promise<any> {
+    await this.recalculateStoredContractSlas(customerId);
     const qb = this.ticketsRepository.createQueryBuilder('ticket')
       .leftJoinAndSelect('ticket.customer', 'customer')
       .leftJoinAndSelect('ticket.contract', 'contract');
