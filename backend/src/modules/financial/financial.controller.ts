@@ -13,7 +13,7 @@ import {
 import { FinancialService } from './financial.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { Permissions, Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 
 @Controller('financial')
@@ -183,6 +183,7 @@ export class FinancialController {
 
   @Post('movements/:id/reverse')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Permissions('financial.reverse')
   reverseMovement(@Param('id') id: string, @Body() body: any, @Request() req: any) {
     return this.financialService.reverseMovement(id, body.reason || 'Estorno manual', req.user.id);
   }
@@ -277,6 +278,7 @@ export class FinancialController {
 
   @Post('monthly-closings')
   @Roles(UserRole.ADMIN)
+  @Permissions('financial.close_month')
   closeMonth(@Body() body: any, @Request() req: any) {
     return this.financialService.closeMonth(body.period, req.user.id, body.notes);
   }

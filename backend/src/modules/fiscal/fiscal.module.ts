@@ -4,6 +4,8 @@ import { FiscalController } from './fiscal.controller';
 import { CertificateService } from './services/certificate.service';
 import { NfeService } from './services/nfe.service';
 import { NfseService } from './services/nfse.service';
+import { FiscalIntegrationService } from './services/fiscal-integration.service';
+import { FiscalJobsService } from './services/fiscal-jobs.service';
 import { Certificate } from './entities/certificate.entity';
 import { Invoice } from './entities/invoice.entity';
 import { FiscalConfig } from './entities/fiscal-config.entity';
@@ -16,7 +18,7 @@ import { AuditModule } from '../audit/audit.module';
 @Module({
   imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FiscalEvent, FinancialTask, FinancialMovement]), MailModule, AuditModule],
   controllers: [FiscalController],
-  providers: [CertificateService, NfeService, NfseService],
+  providers: [CertificateService, NfeService, NfseService, FiscalIntegrationService, FiscalJobsService],
   exports: [CertificateService, NfeService, NfseService],
 })
 export class FiscalModule {}

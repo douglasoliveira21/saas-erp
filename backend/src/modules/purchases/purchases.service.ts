@@ -281,6 +281,13 @@ export class PurchasesService {
     return attachment;
   }
 
+  async getAttachment(purchaseId: string, attachmentId: string) {
+    await this.findOne(purchaseId);
+    const attachment = await this.attachmentRepo.findOne({ where: { id: attachmentId, purchaseId } });
+    if (!attachment) throw new NotFoundException('Anexo não encontrado');
+    return attachment;
+  }
+
   async returnPurchase(id: string, userId: string, reason: string): Promise<Purchase> {
     const purchase = await this.findOne(id);
     if (purchase.status !== 'recebido') {

@@ -5,7 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { Permissions, Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { CertificateService } from './services/certificate.service';
 import { NfeService } from './services/nfe.service';
@@ -17,6 +17,8 @@ import { FinancialMovement } from '../financial/entities/financial-movement.enti
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
 import { FiscalEvent } from './entities/fiscal-event.entity';
+import { FiscalIntegrationService } from './services/fiscal-integration.service';
+import { FiscalJobsService } from './services/fiscal-jobs.service';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -32,6 +34,8 @@ export class FiscalController {
     @InjectRepository(FinancialMovement) private movementRepo: Repository<FinancialMovement>,
     private mailService: MailService,
     private auditService: AuditService,
+    private fiscalIntegration: FiscalIntegrationService,
+    private fiscalJobs: FiscalJobsService,
   ) {}
 
   private async completeNfTask(saleId: string) {
@@ -388,6 +392,7 @@ export class FiscalController {
 
   @Post('invoices/:id/retry')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Permissions('fiscal.retry')
   async retryInvoice(@Param('id') id: string, @Request() req: any) {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
@@ -410,29 +415,44 @@ export class FiscalController {
   async checkInvoiceStatus(@Param('id') id: string, @Request() req: any) {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
+    const response = await this.fiscalIntegration.queryStatus(invoice);
+    if (response.configured === false) {
+      invoice.queueStatus = 'pendente_integracao';
+      invoice.rejectionReason = response.message;
+    } else {
+      invoice.queueStatus = 'processado';
+      invoice.status = response.status || response.situacao || invoice.status;
+      invoice.protocolNumber = response.protocolNumber || response.protocolo || invoice.protocolNumber;
+      invoice.rejectionReason = response.rejectionReason || response.motivoRejeicao || invoice.rejectionReason;
+    }
+    await this.invoiceRepo.save(invoice);
     await this.eventRepo.save(this.eventRepo.create({
       invoiceId: id,
       type: 'status_checked',
       status: invoice.status,
-      message: 'Consulta de status registrada para processamento externo',
+      message: response.configured === false ? response.message : 'Consulta de status executada no provedor fiscal',
+      payload: response,
       createdBy: req.user.id,
     }));
-    return { id, status: invoice.status, queueStatus: invoice.queueStatus, message: 'Consulta registrada' };
+    return { id, status: invoice.status, queueStatus: invoice.queueStatus, response };
   }
 
   @Post('invoices/:id/correction-letter')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Permissions('fiscal.correction_letter')
   async correctionLetter(@Param('id') id: string, @Body() body: any, @Request() req: any) {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
+    const response = await this.fiscalIntegration.sendCorrectionLetter(invoice, body.text);
     invoice.correctionLetter = body.text;
-    invoice.correctionProtocol = body.protocol || `CC-${Date.now()}`;
+    invoice.correctionProtocol = response.protocol || response.protocolo || body.protocol || (response.configured === false ? null : `CC-${Date.now()}`);
     const saved = await this.invoiceRepo.save(invoice);
     await this.eventRepo.save(this.eventRepo.create({
       invoiceId: id,
       type: 'correction_letter',
       status: invoice.status,
-      message: body.text,
+      message: response.configured === false ? response.message : body.text,
+      payload: response,
       createdBy: req.user.id,
     }));
     return saved;
@@ -440,15 +460,24 @@ export class FiscalController {
 
   @Post('numbering/invalidate')
   @Roles(UserRole.ADMIN)
+  @Permissions('fiscal.invalidate_numbering')
   async invalidateNumbering(@Body() body: any, @Request() req: any) {
+    const response = await this.fiscalIntegration.invalidateNumbering(body);
     const event = await this.eventRepo.save(this.eventRepo.create({
       type: 'numbering_invalidated',
-      status: 'registrado',
-      message: body.reason || 'Inutilização de numeração registrada',
-      payload: body,
+      status: response.configured === false ? 'pendente_integracao' : 'enviado',
+      message: response.configured === false ? response.message : (body.reason || 'Inutilização de numeração enviada'),
+      payload: { request: body, response },
       createdBy: req.user.id,
     }));
     return event;
+  }
+
+  @Post('jobs/run')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Permissions('fiscal.run_jobs')
+  runFiscalJobs() {
+    return this.fiscalJobs.run('manual');
   }
 
   @Post('validate-before-issue')

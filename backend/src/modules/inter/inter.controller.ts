@@ -14,6 +14,8 @@ import {
 import { Response } from 'express';
 import { InterService } from './inter.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Permissions } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sale } from '../sales/entities/sale.entity';
@@ -129,7 +131,8 @@ export class InterController {
   }
 
   @Post('webhook/reprocess/:auditId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Permissions('inter.reprocess_webhook')
   async reprocessWebhook(@Param('auditId') auditId: string) {
     const log = await this.auditRepo.findOne({ where: { id: auditId } });
     const payload = (log as any)?.newData?.payload || (log as any)?.newData;
@@ -149,7 +152,8 @@ export class InterController {
   }
 
   @Post('cancel-batch')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Permissions('inter.cancel_batch')
   async cancelBatch(@Body() body: any) {
     const codes: string[] = body.codigoSolicitacoes || body.codes || [];
     const results = [];
@@ -164,7 +168,8 @@ export class InterController {
   }
 
   @Post('expired/:codigoSolicitacao')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Permissions('inter.handle_expired')
   async handleExpired(@Param('codigoSolicitacao') codigoSolicitacao: string, @Body() body: any) {
     const action = body.action || 'manter';
     if (action === 'cancelar') {

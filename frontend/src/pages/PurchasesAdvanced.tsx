@@ -9,6 +9,7 @@ export function PurchasesAdvanced() {
   const [quoteForm, setQuoteForm] = useState({ supplierName: '', supplierCnpj: '', totalValue: '', deliveryDays: '', paymentTerms: '' })
   const [receiptItems, setReceiptItems] = useState('')
   const [attachmentForm, setAttachmentForm] = useState({ filename: '', type: 'xml', mimeType: '', storagePath: '' })
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -55,8 +56,15 @@ export function PurchasesAdvanced() {
 
   async function addAttachment(e: React.FormEvent) {
     e.preventDefault()
-    await act(() => api.post(`/purchases/${selectedId}/attachments`, attachmentForm), 'Anexo registrado')
+    const data = new FormData()
+    if (attachmentFile) data.append('file', attachmentFile)
+    data.append('type', attachmentForm.type)
+    data.append('filename', attachmentForm.filename)
+    data.append('mimeType', attachmentForm.mimeType)
+    data.append('storagePath', attachmentForm.storagePath)
+    await act(() => api.post(`/purchases/${selectedId}/attachments`, data, { headers: { 'Content-Type': 'multipart/form-data' } }), 'Anexo registrado')
     setAttachmentForm({ filename: '', type: 'xml', mimeType: '', storagePath: '' })
+    setAttachmentFile(null)
   }
 
   async function act(request: () => Promise<any>, message: string) {
@@ -148,9 +156,13 @@ export function PurchasesAdvanced() {
 
             <form onSubmit={addAttachment} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-900"><FilePlus2 className="h-4 w-4" /> Anexo XML/PDF</div>
-              <Input label="Arquivo" value={attachmentForm.filename} onChange={(v) => setAttachmentForm({ ...attachmentForm, filename: v })} required />
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700">Arquivo</span>
+                <input type="file" accept=".xml,.pdf,application/pdf,application/xml,text/xml" onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)} className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </label>
+              <Input label="Nome manual" value={attachmentForm.filename} onChange={(v) => setAttachmentForm({ ...attachmentForm, filename: v })} />
               <Input label="Tipo" value={attachmentForm.type} onChange={(v) => setAttachmentForm({ ...attachmentForm, type: v })} />
-              <Input label="Caminho" value={attachmentForm.storagePath} onChange={(v) => setAttachmentForm({ ...attachmentForm, storagePath: v })} required />
+              <Input label="Caminho externo" value={attachmentForm.storagePath} onChange={(v) => setAttachmentForm({ ...attachmentForm, storagePath: v })} />
               <button disabled={!selectedId} className="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Registrar anexo</button>
             </form>
           </div>

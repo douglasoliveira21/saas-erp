@@ -36,6 +36,12 @@ export class FinancialService implements OnModuleInit {
         }
       }
     }, 5000);
+
+    if (process.env.FINANCIAL_JOBS_ENABLED !== 'false') {
+      const minutes = Math.max(Number(process.env.FINANCIAL_JOBS_INTERVAL_MINUTES || 60), 15);
+      setTimeout(() => this.runFinancialJobs('startup'), 25000);
+      setInterval(() => this.runFinancialJobs('interval'), minutes * 60 * 1000);
+    }
   }
   constructor(
     @InjectRepository(AccountReceivable)
@@ -417,6 +423,24 @@ export class FinancialService implements OnModuleInit {
     }
 
     return overdue;
+  }
+
+  async runFinancialJobs(source = 'manual') {
+    const overdue = await this.getOverdue();
+    if (overdue.length > 0) {
+      await this.auditService.safeCreate({
+        userId: null,
+        action: 'financial.overdue_detected',
+        entity: 'installment',
+        entityId: null,
+        newData: {
+          source,
+          count: overdue.length,
+          total: overdue.reduce((sum, item) => sum + (Number(item.value) - Number(item.paidValue)), 0),
+        },
+      });
+    }
+    return { overdue: overdue.length };
   }
 
   /**

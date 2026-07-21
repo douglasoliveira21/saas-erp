@@ -39,6 +39,9 @@ export class User {
   @Column({ type: 'text', nullable: true })
   observations: string;
 
+  @Column({ type: 'jsonb', nullable: true })
+  permissions: string[];
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

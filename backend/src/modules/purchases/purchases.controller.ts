@@ -1,9 +1,17 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { Response } from 'express';
+import { createReadStream, existsSync, mkdirSync } from 'fs';
+import { extname, join } from 'path';
 import { PurchasesService } from './purchases.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+
+const purchasesUploadDir = join(process.cwd(), 'uploads', 'purchases');
+if (!existsSync(purchasesUploadDir)) mkdirSync(purchasesUploadDir, { recursive: true });
 
 @Controller('purchases')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -36,6 +44,18 @@ export class PurchasesController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getSummary() {
     return this.service.getSummary();
+  }
+
+  @Get(':id/attachments/:attachmentId/download')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async downloadAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @Res() res: Response) {
+    const attachment = await this.service.getAttachment(id, attachmentId);
+    if (!existsSync(attachment.storagePath)) {
+      return res.status(404).json({ message: 'Arquivo não encontrado' });
+    }
+    res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${attachment.filename}"`);
+    createReadStream(attachment.storagePath).pipe(res);
   }
 
   @Get(':id')
@@ -89,8 +109,25 @@ export class PurchasesController {
 
   @Post(':id/attachments')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  addAttachment(@Param('id') id: string, @Body() body: any, @Request() req: any) {
-    return this.service.addAttachment(id, body, req.user.id);
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: purchasesUploadDir,
+      filename: (req, file, cb) => {
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        cb(null, unique + extname(file.originalname));
+      },
+    }),
+    limits: { fileSize: 20 * 1024 * 1024 },
+  }))
+  addAttachment(@Param('id') id: string, @Body() body: any, @UploadedFile() file: any, @Request() req: any) {
+    if (!file && !body.storagePath) throw new BadRequestException('Envie um arquivo ou informe o caminho do anexo');
+    const payload = file ? {
+      filename: file.originalname,
+      type: body.type || (file.originalname.toLowerCase().endsWith('.xml') ? 'xml' : 'pdf'),
+      mimeType: file.mimetype,
+      storagePath: file.path,
+    } : body;
+    return this.service.addAttachment(id, payload, req.user.id);
   }
 
   @Patch(':id/return')

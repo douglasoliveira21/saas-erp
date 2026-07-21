@@ -36,11 +36,11 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inativo');
     }
 
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = { sub: user.id, email: user.email, role: user.role, permissions: user.permissions || [] };
 
     return {
       access_token: this.jwtService.sign(payload),
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, permissions: user.permissions || [] },
     };
   }
 
@@ -124,7 +124,7 @@ export class AuthService {
 
     return {
       message: 'Perfil atualizado com sucesso!',
-      user: { id: updated.id, name: updated.name, email: updated.email, role: updated.role },
+      user: { id: updated.id, name: updated.name, email: updated.email, role: updated.role, permissions: updated.permissions || [] },
     };
   }
 }

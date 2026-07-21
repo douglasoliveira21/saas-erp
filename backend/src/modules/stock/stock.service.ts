@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StockMovement } from './entities/stock-movement.entity';
@@ -8,7 +8,7 @@ import { AuditService } from '../audit/audit.service';
 import { StockInventory } from './entities/stock-inventory.entity';
 
 @Injectable()
-export class StockService {
+export class StockService implements OnModuleInit {
   constructor(
     @InjectRepository(StockMovement)
     private stockMovementsRepository: Repository<StockMovement>,
@@ -19,6 +19,37 @@ export class StockService {
     private financialService: FinancialService,
     private auditService: AuditService,
   ) {}
+
+  onModuleInit() {
+    if (process.env.STOCK_JOBS_ENABLED === 'false') return;
+    const minutes = Math.max(Number(process.env.STOCK_JOBS_INTERVAL_MINUTES || 60), 15);
+    setTimeout(() => this.runStockJobs('startup'), 30000);
+    setInterval(() => this.runStockJobs('interval'), minutes * 60 * 1000);
+  }
+
+  async runStockJobs(source = 'manual') {
+    const lowStock = await this.getLowStock();
+    if (lowStock.length > 0) {
+      await this.auditService.safeCreate({
+        userId: null,
+        action: 'stock.low_stock_detected',
+        entity: 'product',
+        entityId: null,
+        newData: {
+          source,
+          count: lowStock.length,
+          products: lowStock.map((product) => ({
+            id: product.id,
+            code: product.code,
+            name: product.name,
+            quantity: product.quantity,
+            minStock: product.minStock,
+          })),
+        },
+      });
+    }
+    return { lowStock: lowStock.length };
+  }
 
   async create(createStockMovementDto: any): Promise<StockMovement> {
     const { productId, type, quantity, reason, userId, unitCost, lotNumber, serialNumber } = createStockMovementDto;

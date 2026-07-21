@@ -679,6 +679,13 @@ export class SalesService {
     return attachment;
   }
 
+  async getAttachment(saleId: string, attachmentId: string) {
+    await this.findOne(saleId);
+    const attachment = await this.saleAttachmentRepository.findOne({ where: { id: attachmentId, saleId } });
+    if (!attachment) throw new NotFoundException('Anexo não encontrado');
+    return attachment;
+  }
+
   async getEvents(id: string) {
     await this.findOne(id);
     return this.saleEventRepository.find({ where: { saleId: id }, order: { createdAt: 'ASC' } });
