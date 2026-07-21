@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Menu, X, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
+import { LogOut, Menu, X, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck, BookOpen } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { navigationSections, NavItem } from './navigation'
 import { api } from '../services/api'
@@ -205,6 +205,10 @@ export function Layout() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button type="button" onClick={() => navigate('/tutorial')} aria-label="Abrir tutorial do sistema" title="Tutorial do sistema" className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors ${location.pathname === '/tutorial' ? 'bg-primary-50 text-primary-700' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}>
+              <BookOpen className="h-5 w-5" />
+              <span className="hidden xl:inline">Tutorial</span>
+            </button>
             <div className="relative" ref={notificationsRef}>
               <button type="button" aria-label={`Notificacoes${unreadNotifications ? `, ${unreadNotifications} nao lidas` : ''}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen(open => !open); if (!notificationsOpen) loadNotifications() }} className="relative rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600">
                 <Bell className="h-5 w-5" />
