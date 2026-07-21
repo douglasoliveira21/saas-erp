@@ -37,6 +37,9 @@ export class GlpiTicket {
   @Column({ name: 'date_closed', type: 'timestamp', nullable: true })
   dateClosed: Date;
 
+  @Column({ name: 'date_solved', type: 'timestamp', nullable: true })
+  dateSolved: Date;
+
   @Column({ name: 'sla_type', type: 'varchar', length: 20, nullable: true })
   slaType: string;
 

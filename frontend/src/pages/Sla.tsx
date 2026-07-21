@@ -17,6 +17,7 @@ interface Ticket {
   exceededHours: number
   exceededCharge: number
   dateOpened: string
+  dateSolved: string
   dateClosed: string
 }
 
@@ -101,8 +102,14 @@ export function Sla() {
     setSyncing(true); setError('')
     try {
       const res = await api.post('/glpi/sync')
-      alert('Sincronizado: ' + res.data.synced + ' chamados, ' + res.data.exceeded + ' com SLA estourado, R$ ' + Number(res.data.totalCharge).toFixed(2) + ' a cobrar')
-      load()
+      const failures = Array.isArray(res.data.failedEntities) ? res.data.failedEntities : []
+      const summary = 'Sincronizado: ' + res.data.synced + ' chamados, ' + res.data.exceeded + ' com SLA estourado, R$ ' + Number(res.data.totalCharge).toFixed(2) + ' a cobrar'
+      if (failures.length > 0) {
+        setError(summary + '. Falha em ' + failures.length + ' entidade(s): ' + failures.map((item: any) => item.customer).join(', '))
+      } else {
+        alert(summary)
+      }
+      await load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao sincronizar com GLPI') }
     finally { setSyncing(false) }
   }
@@ -269,10 +276,13 @@ export function Sla() {
               <tr>
                 <th className="table-cell font-semibold text-gray-700">#</th>
                 <th className="table-cell font-semibold text-gray-700">Chamado</th>
+                <th className="table-cell font-semibold text-gray-700">Situação GLPI</th>
                 <th className="table-cell font-semibold text-gray-700">Cliente</th>
                 <th className="table-cell font-semibold text-gray-700">Tipo SLA</th>
                 <th className="table-cell font-semibold text-gray-700">Limite</th>
-                <th className="table-cell font-semibold text-gray-700">Tempo</th>
+                <th className="table-cell font-semibold text-gray-700">Abertura</th>
+                <th className="table-cell font-semibold text-gray-700">Solução</th>
+                <th className="table-cell font-semibold text-gray-700">Tempo gasto</th>
                 <th className="table-cell font-semibold text-gray-700">Status</th>
                 <th className="table-cell font-semibold text-gray-700">Cobranca</th>
               </tr>
@@ -283,7 +293,11 @@ export function Sla() {
                   <td className="table-cell text-gray-500 font-mono text-xs">#{t.glpiTicketId}</td>
                   <td className="table-cell">
                     <div className="font-medium text-gray-900 dark:text-white truncate max-w-xs">{t.title}</div>
-                    <div className="text-xs text-gray-400">{t.dateOpened ? new Date(t.dateOpened).toLocaleDateString('pt-BR') : '-'}</div>
+                  </td>
+                  <td className="table-cell">
+                    <span className={t.status === 6 ? 'rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700' : 'rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700'}>
+                      {t.status === 6 ? 'Fechado' : 'Solucionado'}
+                    </span>
                   </td>
                   <td className="table-cell text-gray-600">{t.customer?.name || '-'}</td>
                   <td className="table-cell">
@@ -292,6 +306,8 @@ export function Sla() {
                     </span>
                   </td>
                   <td className="table-cell text-gray-600">{t.slaLimitHours}h</td>
+                  <td className="table-cell text-gray-600">{t.dateOpened ? new Date(t.dateOpened).toLocaleString('pt-BR') : '-'}</td>
+                  <td className="table-cell text-gray-600">{t.dateSolved ? new Date(t.dateSolved).toLocaleString('pt-BR') : (t.dateClosed ? new Date(t.dateClosed).toLocaleString('pt-BR') : '-')}</td>
                   <td className="table-cell">
                     <span className={t.slaExceeded ? 'text-red-600 font-bold' : 'text-gray-900'}>{Number(t.timeSpentHours).toFixed(1)}h</span>
                   </td>
