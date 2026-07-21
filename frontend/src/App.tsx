@@ -37,6 +37,11 @@ const Assinaturas = lazy(() => import('./pages/Assinaturas').then(module => ({ d
 const EmailSettings = lazy(() => import('./pages/EmailSettings').then(module => ({ default: module.EmailSettings })))
 const Bills = lazy(() => import('./pages/Bills').then(module => ({ default: module.Bills })))
 const Dre = lazy(() => import('./pages/Dre').then(module => ({ default: module.Dre })))
+const FinancialAdvanced = lazy(() => import('./pages/FinancialAdvanced').then(module => ({ default: module.FinancialAdvanced })))
+const StockAdvanced = lazy(() => import('./pages/StockAdvanced').then(module => ({ default: module.StockAdvanced })))
+const FiscalAdvanced = lazy(() => import('./pages/FiscalAdvanced').then(module => ({ default: module.FiscalAdvanced })))
+const InterAdvanced = lazy(() => import('./pages/InterAdvanced').then(module => ({ default: module.InterAdvanced })))
+const PurchasesAdvanced = lazy(() => import('./pages/PurchasesAdvanced').then(module => ({ default: module.PurchasesAdvanced })))
 
 function PageLoader() {
   return (
@@ -88,6 +93,11 @@ function App() {
               <Route path="/email-settings" element={<EmailSettings />} />
               <Route path="/contas-pagar" element={<Bills />} />
               <Route path="/dre" element={<Dre />} />
+              <Route path="/financeiro-avancado" element={<FinancialAdvanced />} />
+              <Route path="/estoque-avancado" element={<StockAdvanced />} />
+              <Route path="/fiscal-avancado" element={<FiscalAdvanced />} />
+              <Route path="/inter-avancado" element={<InterAdvanced />} />
+              <Route path="/compras-avancado" element={<PurchasesAdvanced />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
