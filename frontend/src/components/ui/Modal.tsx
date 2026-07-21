@@ -39,13 +39,13 @@ export function Modal({ open, title, description, children, footer, onClose, siz
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation">
-      <button className="absolute inset-0 bg-black/50" aria-label="Fechar janela" onClick={onClose} />
+      <button className="animate-backdrop-in absolute inset-0 bg-black/50" aria-label="Fechar janela" onClick={onClose} />
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
-        className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${sizes[size]}`}
+        className={`animate-dialog-in relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${sizes[size]}`}
       >
         <header className="flex items-start justify-between gap-4 border-b border-gray-100 p-5 sm:p-6">
           <div>

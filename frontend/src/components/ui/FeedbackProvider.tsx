@@ -48,7 +48,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         {toasts.map(toast => {
           const Icon = icons[toast.type]
           return (
-            <div key={toast.id} className={`flex items-start gap-3 rounded-xl border bg-white p-4 shadow-elevated ${colors[toast.type]}`} role={toast.type === 'error' ? 'alert' : 'status'}>
+            <div key={toast.id} className={`animate-toast-in flex items-start gap-3 rounded-xl border bg-white p-4 shadow-elevated ${colors[toast.type]}`} role={toast.type === 'error' ? 'alert' : 'status'}>
               <Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <p className="flex-1 text-sm font-medium">{toast.message}</p>
               <button type="button" onClick={() => setToasts(current => current.filter(item => item.id !== toast.id))} aria-label="Fechar notificação" className="rounded p-1 hover:bg-gray-100">

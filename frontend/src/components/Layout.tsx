@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Menu, X, ChevronDown, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
+import { LogOut, Menu, X, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { navigationSections, NavItem } from './navigation'
 import { api } from '../services/api'
@@ -129,11 +129,13 @@ export function Layout() {
                       {SectionIcon && <SectionIcon className={`w-[18px] h-[18px] ${isAnyActive ? 'text-primary-500' : 'text-gray-400'}`} />}
                       {section.title}
                     </span>
-                    {isOpen ? <ChevronDown className="w-4 h-4 text-gray-300" /> : <ChevronRight className="w-4 h-4 text-gray-300" />}
+                    <ChevronRight className={`h-4 w-4 text-gray-300 transition-transform duration-300 ease-out ${isOpen ? 'rotate-90' : ''}`} />
                   </button>
-                  <div className={`overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'}`}>
-                    <div className="ml-4 pl-3 border-l-2 border-gray-100 space-y-0.5">
-                      {section.items.map(item => <NavLink key={item.name} item={item} onClick={onClick} />)}
+                  <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+                    <div className="min-h-0 overflow-hidden">
+                      <div className={`ml-4 space-y-0.5 border-l-2 border-gray-100 pl-3 transition-transform duration-300 ease-out ${isOpen ? 'translate-y-0 py-1' : '-translate-y-1'}`}>
+                        {section.items.map((item, index) => <div key={item.name} style={{ transitionDelay: isOpen ? `${Math.min(index * 18, 90)}ms` : '0ms' }} className={`transition-[opacity,transform] duration-200 ${isOpen ? 'translate-x-0 opacity-100' : '-translate-x-1 opacity-0'}`}><NavLink item={item} onClick={onClick} /></div>)}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -208,7 +210,7 @@ export function Layout() {
                 <Bell className="h-5 w-5" />
                 {unreadNotifications > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
               </button>
-              {notificationsOpen && <div className="fixed left-3 right-3 top-16 z-50 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-elevated sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[390px]">
+              {notificationsOpen && <div className="animate-popover-in fixed left-3 right-3 top-16 z-50 origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-elevated sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[390px]">
                 <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3"><div><p className="font-semibold text-gray-900">Notificacoes</p><p className="text-xs text-gray-500">{unreadNotifications ? `${unreadNotifications} nao lida(s)` : 'Tudo em dia'}</p></div>{unreadNotifications > 0 && <button type="button" onClick={readAllNotifications} className="flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"><CheckCheck className="h-4 w-4"/>Marcar todas como lidas</button>}</div>
                 <div className="max-h-[min(65vh,480px)] overflow-y-auto">{notificationsLoading ? <div className="p-8 text-center text-sm text-gray-500">Atualizando...</div> : notifications.filter(item=>item.status!=='resolvida').length === 0 ? <div className="p-8 text-center"><Bell className="mx-auto mb-2 h-7 w-7 text-gray-300"/><p className="text-sm font-medium text-gray-700">Nenhuma notificacao pendente</p></div> : notifications.filter(item=>item.status!=='resolvida').map(item => {
                   const Icon = item.type === 'fiscal' ? AlertCircle : item.type === 'estoque' ? Package : item.type === 'aprovacao' ? ShieldCheck : Receipt
@@ -228,7 +230,7 @@ export function Layout() {
 
         {/* Page content */}
         <main id="main-content" tabIndex={-1} className="p-4 sm:p-5 lg:p-8">
-          <Outlet />
+          <div key={location.pathname} className="animate-page-in"><Outlet /></div>
         </main>
       </div>
     </div>
