@@ -35,8 +35,20 @@ const NFCE_MG_PROD = {
   NFeConsultaProtocolo4: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeConsultaProtocolo4',
   NFeRecepcaoEvento4: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeRecepcaoEvento4',
   NFeStatusServico4: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeStatusServico4',
+  NFeInutilizacao4: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeInutilizacao4',
   qrCodeUrl: 'https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml',
   urlChave: 'https://portalsped.fazenda.mg.gov.br/portalnfce',
+};
+
+const NFCE_MG_HOM = {
+  NFeAutorizacao4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeAutorizacao4',
+  NFeRetAutorizacao4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeRetAutorizacao4',
+  NFeConsultaProtocolo4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeConsultaProtocolo4',
+  NFeInutilizacao4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeInutilizacao4',
+  NFeRecepcaoEvento4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeRecepcaoEvento4',
+  NFeStatusServico4: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeStatusServico4',
+  qrCodeUrl: 'https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml',
+  urlChave: 'https://hportalsped.fazenda.mg.gov.br/portalnfce',
 };
 
 @Injectable()
@@ -53,7 +65,7 @@ export class NfeService {
   ) {}
 
   private getEndpoints(config: FiscalConfig, modelo: string) {
-    if (modelo === '65') return NFCE_MG_PROD;
+    if (modelo === '65') return config.environment === 1 ? NFCE_MG_PROD : NFCE_MG_HOM;
     return config.environment === 1 ? SEFAZ_MG_PROD : SEFAZ_MG_HOM;
   }
 
@@ -316,7 +328,8 @@ export class NfeService {
   async consult(accessKey: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const endpoints = this.getEndpoints(config, '55');
+    const modelo = accessKey?.substring(20, 22) || '55';
+    const endpoints = this.getEndpoints(config, modelo);
     const tpAmb = config.environment;
 
     const xml = `<consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>${tpAmb}</tpAmb><xServ>CONSULTAR</xServ><chNFe>${accessKey}</chNFe></consSitNFe>`;
@@ -327,10 +340,69 @@ export class NfeService {
       const cStat = this.extractTag(response, 'cStat');
       const xMotivo = this.extractTag(response, 'xMotivo');
       const nProt = this.extractTag(response, 'nProt');
-      return { cStat, xMotivo, nProt, raw: response.substring(0, 1000) };
+      const status = ['100', '150'].includes(cStat) ? 'autorizada'
+        : ['101', '151', '155'].includes(cStat) ? 'cancelada'
+        : ['110', '301', '302'].includes(cStat) ? 'denegada'
+        : cStat === '217' ? 'nao_encontrada' : 'processando';
+      return { configured: true, provider: 'sefaz', status, cStat, xMotivo, nProt, protocolNumber: nProt, raw: response.substring(0, 4000) };
     } catch (e) {
       throw new BadRequestException('Erro ao consultar: ' + e.message);
     }
+  }
+
+  async correctionLetter(invoiceId: string, text: string, certId: string, userId?: string): Promise<any> {
+    const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
+    if (!invoice || invoice.type !== 'nfe' || invoice.status !== 'autorizada') throw new BadRequestException('NF-e autorizada nao encontrada');
+    if (!text || text.length < 15 || text.length > 1000) throw new BadRequestException('Correcao deve ter entre 15 e 1000 caracteres');
+    const config = await this.configRepository.findOne({ where: {} });
+    const agent = await this.certificateService.getHttpsAgent(certId);
+    const endpoints = this.getEndpoints(config, '55');
+    const sequence = invoice.correctionProtocol ? 2 : 1;
+    const dhEvento = this.eventDate();
+    const eventId = `ID110110${invoice.accessKey}${String(sequence).padStart(2, '0')}`;
+    const condition = 'A Carta de Correcao e disciplinada pelo paragrafo 1o-A do art. 7o do Convenio S/N, de 15 de dezembro de 1970 e pode ser utilizada para regularizacao de erro ocorrido na emissao de documento fiscal, desde que o erro nao esteja relacionado com as variaveis que determinam o valor do imposto, a correcao de dados cadastrais que implique mudanca do remetente ou do destinatario e a data de emissao ou de saida.';
+    const xml = `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><infEvento Id="${eventId}"><cOrgao>31</cOrgao><tpAmb>${config.environment}</tpAmb><CNPJ>${(config.cnpj || '').replace(/\D/g, '')}</CNPJ><chNFe>${invoice.accessKey}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110110</tpEvento><nSeqEvento>${sequence}</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Carta de Correcao</descEvento><xCorrecao>${this.escXml(text)}</xCorrecao><xCondUso>${this.escXml(condition)}</xCondUso></detEvento></infEvento></evento>`;
+    const signed = await this.signEventXml(xml, certId);
+    const envelope = this.buildSoapEnvelope(`<envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now()}</idLote>${signed}</envEvento>`, 'NFeRecepcaoEvento4');
+    const response = await this.soapRequest(endpoints.NFeRecepcaoEvento4, envelope, agent);
+    const cStat = this.extractFromBlock(response, 'retEvento', 'cStat') || this.extractTag(response, 'cStat');
+    const reason = this.extractFromBlock(response, 'retEvento', 'xMotivo') || this.extractTag(response, 'xMotivo');
+    if (!['135', '136'].includes(cStat)) throw new BadRequestException(`${cStat}: ${reason}`);
+    invoice.correctionLetter = text;
+    invoice.correctionProtocol = this.extractFromBlock(response, 'retEvento', 'nProt') || '';
+    await this.invoiceRepository.save(invoice);
+    await this.auditService.safeCreate({ userId, action: 'fiscal.nfe_correction_letter', entity: 'invoice', entityId: invoice.id, newData: { protocol: invoice.correctionProtocol, text } });
+    return { configured: true, sent: true, protocol: invoice.correctionProtocol, cStat, reason, raw: response.substring(0, 4000) };
+  }
+
+  async invalidateNumbering(payload: any, certId: string, userId?: string): Promise<any> {
+    const config = await this.configRepository.findOne({ where: {} });
+    const model = String(payload.model || '55');
+    const series = Number(payload.series);
+    const start = Number(payload.startNumber);
+    const end = Number(payload.endNumber || start);
+    if (!['55', '65'].includes(model) || !series || !start || end < start) throw new BadRequestException('Modelo, serie ou faixa invalidos');
+    if (!payload.reason || payload.reason.length < 15) throw new BadRequestException('Justificativa deve ter no minimo 15 caracteres');
+    const cnpj = (config.cnpj || '').replace(/\D/g, '');
+    const year = String(new Date().getFullYear()).slice(-2);
+    const id = `ID31${year}${cnpj}${model}${String(series).padStart(3, '0')}${String(start).padStart(9, '0')}${String(end).padStart(9, '0')}`;
+    const xml = `<inutNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><infInut Id="${id}"><tpAmb>${config.environment}</tpAmb><xServ>INUTILIZAR</xServ><cUF>31</cUF><ano>${year}</ano><CNPJ>${cnpj}</CNPJ><mod>${model}</mod><serie>${series}</serie><nNFIni>${start}</nNFIni><nNFFin>${end}</nNFFin><xJust>${this.escXml(payload.reason)}</xJust></infInut></inutNFe>`;
+    const signed = await this.signGenericXml(xml, certId, id, 'infInut');
+    const endpoints = this.getEndpoints(config, model);
+    const agent = await this.certificateService.getHttpsAgent(certId);
+    const response = await this.soapRequest(endpoints.NFeInutilizacao4, this.buildSoapEnvelope(signed, 'NFeInutilizacao4'), agent);
+    const cStat = this.extractTag(response, 'cStat');
+    const reason = this.extractTag(response, 'xMotivo');
+    if (!['102', '563'].includes(cStat)) throw new BadRequestException(`${cStat}: ${reason}`);
+    const protocol = this.extractTag(response, 'nProt');
+    await this.auditService.safeCreate({ userId, action: 'fiscal.numbering_invalidated', entity: 'invoice_numbering', newData: { ...payload, protocol, cStat } });
+    return { configured: true, sent: true, protocol, cStat, reason, raw: response.substring(0, 4000) };
+  }
+
+  private eventDate(): string {
+    const date = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}-03:00`;
   }
 
   // ==================== XML BUILDING ====================
@@ -598,6 +670,24 @@ export class NfeService {
     let result = sig.getSignedXml();
     result = result.replace(/<\?xml[^?]*\?>/g, '').trim();
     return result;
+  }
+
+  private async signGenericXml(xml: string, certId: string, refId: string, elementName: string): Promise<string> {
+    const { pfx, password } = await this.certificateService.getPfxBuffer(certId);
+    const p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(pfx.toString('binary')), password);
+    const keyBag = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag];
+    const certBag = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag];
+    if (!keyBag?.[0]?.key || !certBag?.[0]?.cert) throw new BadRequestException('Certificado sem chave privada valida');
+    const certBase64 = forge.pki.certificateToPem(certBag[0].cert).replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, '');
+    const sig = new SignedXml({
+      privateKey: forge.pki.privateKeyToPem(keyBag[0].key),
+      canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+      signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+      getKeyInfoContent: () => `<X509Data><X509Certificate>${certBase64}</X509Certificate></X509Data>`,
+    } as any);
+    sig.addReference({ xpath: `//*[@Id='${refId}']`, digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1', transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature', 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'] });
+    sig.computeSignature(xml, { prefix: '', location: { reference: `//*[local-name()='${elementName}']`, action: 'after' } });
+    return sig.getSignedXml().replace(/<\?xml[^?]*\?>/g, '').trim();
   }
 
   // ==================== HELPERS ====================

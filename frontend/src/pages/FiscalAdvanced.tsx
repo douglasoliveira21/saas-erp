@@ -9,14 +9,16 @@ export function FiscalAdvanced() {
   const [queue, setQueue] = useState<any[]>([])
   const [rejections, setRejections] = useState<any[]>([])
   const [events, setEvents] = useState<any[]>([])
+  const [certificates, setCertificates] = useState<any[]>([])
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('')
   const [correctionText, setCorrectionText] = useState('')
-  const [invalidateForm, setInvalidateForm] = useState({ type: 'nfe', series: '1', startNumber: '', endNumber: '', reason: '' })
+  const [invalidateForm, setInvalidateForm] = useState({ model: '55', certId: '', series: '1', startNumber: '', endNumber: '', reason: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
   useEffect(() => { load() }, [tab])
+  useEffect(() => { api.get('/fiscal/certificates').then(({ data }) => { setCertificates(data); const active = data.find((item: any) => item.isActive); if (active) setInvalidateForm((form) => ({ ...form, certId: active.id })) }) }, [])
 
   async function load() {
     setLoading(true)
@@ -121,7 +123,8 @@ export function FiscalAdvanced() {
         <form onSubmit={invalidate} className="max-w-xl space-y-4 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-900"><XCircle className="h-4 w-4" /> Inutilização de numeração</div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Tipo" value={invalidateForm.type} onChange={(v) => setInvalidateForm({ ...invalidateForm, type: v })} />
+            <label className="block text-sm"><span className="mb-1 block font-medium text-gray-700">Modelo</span><select className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={invalidateForm.model} onChange={(e) => setInvalidateForm({ ...invalidateForm, model: e.target.value })}><option value="55">55 - NF-e</option><option value="65">65 - NFC-e</option></select></label>
+            <label className="block text-sm"><span className="mb-1 block font-medium text-gray-700">Certificado</span><select required className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={invalidateForm.certId} onChange={(e) => setInvalidateForm({ ...invalidateForm, certId: e.target.value })}><option value="">Selecione</option>{certificates.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <Field label="Série" value={invalidateForm.series} onChange={(v) => setInvalidateForm({ ...invalidateForm, series: v })} />
             <Field label="Número inicial" value={invalidateForm.startNumber} onChange={(v) => setInvalidateForm({ ...invalidateForm, startNumber: v })} />
             <Field label="Número final" value={invalidateForm.endNumber} onChange={(v) => setInvalidateForm({ ...invalidateForm, endNumber: v })} />

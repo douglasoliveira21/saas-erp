@@ -23,11 +23,10 @@ export class FiscalIntegrationService {
     if (invoice.type === 'nfse') return this.nfseService.queryInvoiceStatus(invoice);
     if (!invoice.accessKey) throw new BadRequestException('NF-e sem chave de acesso para consulta');
 
-    const response = await this.nfeService.consult(invoice.accessKey, invoice.certificateId);
-    return { configured: true, provider: 'sefaz', status: invoice.status, raw: response };
+    return this.nfeService.consult(invoice.accessKey, invoice.certificateId);
   }
 
-  async sendCorrectionLetter(invoice: Invoice, text: string): Promise<any> {
+  async sendCorrectionLetter(invoice: Invoice, text: string, userId?: string): Promise<any> {
     if (invoice.type === 'nfse') {
       return {
         configured: false,
@@ -36,20 +35,11 @@ export class FiscalIntegrationService {
       };
     }
 
-    return {
-      configured: false,
-      sent: false,
-      message: 'Evento CC-e da NF-e ainda nao possui transmissao SEFAZ implementada.',
-      text,
-    };
+    return this.nfeService.correctionLetter(invoice.id, text, invoice.certificateId, userId);
   }
 
-  async invalidateNumbering(payload: any): Promise<any> {
-    return {
-      configured: false,
-      sent: false,
-      message: 'Inutilizacao pertence ao fluxo NF-e/NFC-e da SEFAZ e nao se aplica a NFS-e Cidade360.',
-      payload,
-    };
+  async invalidateNumbering(payload: any, userId?: string): Promise<any> {
+    if (!payload.certId) throw new BadRequestException('Certificado A1 obrigatorio');
+    return this.nfeService.invalidateNumbering(payload, payload.certId, userId);
   }
 }

@@ -16,7 +16,7 @@ export class Customer {
   @Column({ length: 255 })
   name: string;
 
-  @Column({ name: 'cpf_cnpj', length: 20, nullable: true })
+  @Column({ name: 'cpf_cnpj', length: 40, nullable: true })
   cpfCnpj: string;
 
   @Column({ length: 20, nullable: true })

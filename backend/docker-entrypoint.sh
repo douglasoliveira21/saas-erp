@@ -12,4 +12,7 @@ done
 echo "✅ PostgreSQL is ready!"
 echo "🚀 Starting application..."
 
+echo "Applying database migrations..."
+./node_modules/.bin/typeorm migration:run -d dist/config/database.config.js
+
 exec node dist/main

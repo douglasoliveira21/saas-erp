@@ -206,6 +206,12 @@ export class FiscalController {
     });
     const saved = await this.invoiceRepo.save(invoice);
     const result = await this.nfeService.emit(saved.id, body.saleData, body.certId);
+    await this.eventRepo.save(this.eventRepo.create({
+      invoiceId: saved.id, type: 'emission_attempt', status: result.status,
+      message: result.rejectionReason || `NF-e processada: ${result.status}`,
+      payload: { protocol: result.protocolNumber, accessKey: result.accessKey, response: result },
+      createdBy: req.user?.id,
+    }));
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
     }
@@ -273,7 +279,7 @@ export class FiscalController {
   // === NFS-e ===
   @Post('nfse/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  async emitNfse(@Body() body: { saleId: string; certId: string; serviceData?: any }) {
+  async emitNfse(@Body() body: { saleId: string; certId: string; serviceData?: any }, @Request() req: any) {
     const taxDetails = this.calculateNfseTaxes(body.serviceData || {});
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
@@ -287,6 +293,12 @@ export class FiscalController {
     });
     const saved = await this.invoiceRepo.save(invoice);
     const result = await this.nfseService.emit(saved.id, body.serviceData, body.certId);
+    await this.eventRepo.save(this.eventRepo.create({
+      invoiceId: saved.id, type: 'emission_attempt', status: result.status,
+      message: result.rejectionReason || `NFS-e processada: ${result.status}`,
+      payload: { protocol: result.protocolNumber, accessKey: result.accessKey, response: result },
+      createdBy: req.user?.id,
+    }));
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
       // Enviar NFS-e por email ao cliente
@@ -543,7 +555,7 @@ export class FiscalController {
   async correctionLetter(@Param('id') id: string, @Body() body: any, @Request() req: any) {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
-    const response = await this.fiscalIntegration.sendCorrectionLetter(invoice, body.text);
+    const response = await this.fiscalIntegration.sendCorrectionLetter(invoice, body.text, req.user.id);
     if (response.configured === false || response.sent === false) {
       throw new BadRequestException(response.message);
     }
@@ -565,7 +577,7 @@ export class FiscalController {
   @Roles(UserRole.ADMIN)
   @Permissions('fiscal.invalidate_numbering')
   async invalidateNumbering(@Body() body: any, @Request() req: any) {
-    const response = await this.fiscalIntegration.invalidateNumbering(body);
+    const response = await this.fiscalIntegration.invalidateNumbering(body, req.user.id);
     const event = await this.eventRepo.save(this.eventRepo.create({
       type: 'numbering_invalidated',
       status: response.configured === false ? 'pendente_integracao' : 'enviado',

@@ -76,7 +76,7 @@ export class Invoice {
   @Column({ name: 'issuer_cnpj', length: 20, nullable: true })
   issuerCnpj: string;
 
-  @Column({ name: 'recipient_cnpj', length: 20, nullable: true })
+  @Column({ name: 'recipient_cnpj', length: 40, nullable: true })
   recipientCnpj: string;
 
   @Column({ name: 'recipient_name', length: 255, nullable: true })

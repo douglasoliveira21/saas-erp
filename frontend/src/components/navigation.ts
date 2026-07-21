@@ -1,4 +1,4 @@
-import { LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign, UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank, ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3, Landmark, Archive, Building2 } from 'lucide-react'
+import { LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign, UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank, ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3, Landmark, Archive, Building2, ShieldCheck } from 'lucide-react'
 
 export interface NavItem { name: string; href: string; icon: LucideIcon; roles: string[] }
 export interface NavSection { title: string; items: NavItem[]; expandable?: boolean; expandId?: string }
@@ -46,6 +46,7 @@ export const navigationSections: NavSection[] = [
   ]},
   { title: 'Administração', items: [
     { name: 'Usuários', href: '/users', icon: UserCog, roles: ['admin'] },
+    { name: 'Controles ERP', href: '/controles-erp', icon: ShieldCheck, roles: ['admin', 'financeiro'] },
     { name: 'Email', href: '/email-settings', icon: Mail, roles: ['admin'] },
   ]},
 ]

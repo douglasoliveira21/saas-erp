@@ -42,6 +42,7 @@ const StockAdvanced = lazy(() => import('./pages/StockAdvanced').then(module => 
 const FiscalAdvanced = lazy(() => import('./pages/FiscalAdvanced').then(module => ({ default: module.FiscalAdvanced })))
 const InterAdvanced = lazy(() => import('./pages/InterAdvanced').then(module => ({ default: module.InterAdvanced })))
 const PurchasesAdvanced = lazy(() => import('./pages/PurchasesAdvanced').then(module => ({ default: module.PurchasesAdvanced })))
+const Operations = lazy(() => import('./pages/Operations').then(module => ({ default: module.Operations })))
 
 function PageLoader() {
   return (
@@ -98,6 +99,7 @@ function App() {
               <Route path="/fiscal-avancado" element={<FiscalAdvanced />} />
               <Route path="/inter-avancado" element={<InterAdvanced />} />
               <Route path="/compras-avancado" element={<PurchasesAdvanced />} />
+              <Route path="/controles-erp" element={<Operations />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>

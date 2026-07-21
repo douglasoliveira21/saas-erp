@@ -5,7 +5,7 @@ export class FiscalConfig {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 20, unique: true })
+  @Column({ length: 40, unique: true })
   cnpj: string;
 
   @Column({ name: 'company_name', length: 255 })
