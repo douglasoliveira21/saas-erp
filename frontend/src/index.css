@@ -88,7 +88,7 @@
 }
 
 @layer utilities {
-  .animate-page-in { animation: page-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .animate-page-in { animation: page-in 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
   .animate-popover-in { animation: popover-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .animate-dialog-in { animation: dialog-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .animate-backdrop-in { animation: backdrop-in 180ms ease-out both; }
