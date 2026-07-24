@@ -892,6 +892,22 @@ export class FinancialService implements OnModuleInit {
     };
   }
 
+  async getProjectedCashFlow(startDate: string, endDate: string, granularity: 'day' | 'week' | 'month' = 'day') {
+    if (!startDate || !endDate) throw new BadRequestException('Informe startDate e endDate');
+    const trunc = granularity === 'month' ? 'month' : granularity === 'week' ? 'week' : 'day';
+    const sql = `WITH projected_in AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_receivable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido') GROUP BY 1), projected_out AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_payable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido') GROUP BY 1), realized AS (SELECT date_trunc($3, date::timestamp) bucket, SUM(CASE WHEN type='receita' AND is_forecast=false THEN value ELSE 0 END)::numeric income, SUM(CASE WHEN type IN ('despesa','estorno') AND is_forecast=false THEN value ELSE 0 END)::numeric expense FROM financial_movements WHERE date BETWEEN $1 AND $2 GROUP BY 1), buckets AS (SELECT generate_series(date_trunc($3,$1::timestamp),date_trunc($3,$2::timestamp),CASE WHEN $3='month' THEN interval '1 month' WHEN $3='week' THEN interval '1 week' ELSE interval '1 day' END) bucket) SELECT b.bucket::date date, COALESCE(i.value,0)::numeric projected_income, COALESCE(o.value,0)::numeric projected_expense, COALESCE(r.income,0)::numeric realized_income, COALESCE(r.expense,0)::numeric realized_expense FROM buckets b LEFT JOIN projected_in i ON i.bucket=b.bucket LEFT JOIN projected_out o ON o.bucket=b.bucket LEFT JOIN realized r ON r.bucket=b.bucket ORDER BY b.bucket`;
+    const rows = await this.dataSource.query(sql, [startDate, endDate, trunc]);
+    let accumulated = 0;
+    const series = rows.map((r: any) => {
+      const projectedIncome=Number(r.projected_income), projectedExpense=Number(r.projected_expense), realizedIncome=Number(r.realized_income), realizedExpense=Number(r.realized_expense);
+      accumulated += realizedIncome-realizedExpense;
+      return { date:r.date, projectedIncome, projectedExpense, realizedIncome, realizedExpense, projectedBalance:projectedIncome-projectedExpense, realizedBalance:realizedIncome-realizedExpense, accumulatedRealized:accumulated, scenarios:{ optimistic:Number((projectedIncome-projectedExpense*0.95).toFixed(2)), realistic:Number((projectedIncome*0.85-projectedExpense).toFixed(2)), pessimistic:Number((projectedIncome*0.6-projectedExpense*1.1).toFixed(2)) } };
+    });
+    const overdue = await this.dataSource.query("SELECT COUNT(*)::int count, COALESCE(SUM(pending_value),0)::numeric total FROM accounts_receivable WHERE due_date < CURRENT_DATE AND status IN ('pendente','parcial','vencido')");
+    const totals = series.reduce((a: any,x: any)=>{ for(const k of ['projectedIncome','projectedExpense','realizedIncome','realizedExpense','projectedBalance','realizedBalance']) a[k]+=x[k]; return a; },{projectedIncome:0,projectedExpense:0,realizedIncome:0,realizedExpense:0,projectedBalance:0,realizedBalance:0});
+    return { period:{startDate,endDate,granularity}, totals, overdue:{count:Number(overdue[0]?.count||0),total:Number(overdue[0]?.total||0)}, series };
+  }
+
   private async ensurePeriodOpen(date?: string): Promise<void> {
     if (!date) return;
     const period = date.substring(0, 7);

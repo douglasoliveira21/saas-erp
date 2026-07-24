@@ -43,6 +43,7 @@ const FiscalAdvanced = lazy(() => import('./pages/FiscalAdvanced').then(module =
 const InterAdvanced = lazy(() => import('./pages/InterAdvanced').then(module => ({ default: module.InterAdvanced })))
 const PurchasesAdvanced = lazy(() => import('./pages/PurchasesAdvanced').then(module => ({ default: module.PurchasesAdvanced })))
 const Operations = lazy(() => import('./pages/Operations').then(module => ({ default: module.Operations })))
+const Crm = lazy(() => import('./pages/Crm').then(module => ({ default: module.Crm })))
 const Tutorial = lazy(() => import('./pages/Tutorial').then(module => ({ default: module.Tutorial })))
 
 function PageLoader() {
@@ -69,6 +70,7 @@ function App() {
               <Route path="/products" element={<Products />} />
               <Route path="/services" element={<Services />} />
               <Route path="/customers" element={<Customers />} />
+              <Route path="/crm" element={<Crm />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/sales/new" element={<NewSale />} />
               <Route path="/commissions" element={<Commissions />} />

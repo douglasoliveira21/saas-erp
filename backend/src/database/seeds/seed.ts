@@ -13,42 +13,18 @@ async function seed() {
 
   console.log('🌱 Iniciando seed do banco de dados...');
 
-  // Usuários
+  // O seed nunca cria credenciais conhecidas. O primeiro administrador só é criado
+  // quando as credenciais forem informadas explicitamente no ambiente.
   const userRepository = dataSource.getRepository(User);
   const existingUsers = await userRepository.count();
-
   if (existingUsers === 0) {
-    console.log('📝 Criando usuários...');
-    
-    const users = [
-      {
-        name: 'Administrador',
-        email: 'admin@empresa.com',
-        password: await bcrypt.hash('Admin@123', 10),
-        role: UserRole.ADMIN,
-      },
-      {
-        name: 'Maria Financeiro',
-        email: 'financeiro@empresa.com',
-        password: await bcrypt.hash('Financeiro@123', 10),
-        role: UserRole.FINANCEIRO,
-      },
-      {
-        name: 'João Técnico',
-        email: 'tecnico@empresa.com',
-        password: await bcrypt.hash('Tecnico@123', 10),
-        role: UserRole.TECNICO,
-      },
-      {
-        name: 'Pedro Técnico',
-        email: 'pedro@empresa.com',
-        password: await bcrypt.hash('Tecnico@123', 10),
-        role: UserRole.TECNICO,
-      },
-    ];
-
-    await userRepository.save(users);
-    console.log('✅ Usuários criados com sucesso!');
+    const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
+    if (!email || password.length < 12) {
+      throw new Error('Banco sem usuários: defina BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD (mínimo 12 caracteres) para executar o seed manual.');
+    }
+    await userRepository.save({ name: process.env.BOOTSTRAP_ADMIN_NAME || 'Administrador', email, password: await bcrypt.hash(password, 12), role: UserRole.ADMIN });
+    console.log('✅ Administrador inicial criado a partir das variáveis de ambiente.');
   }
 
   // Clientes
@@ -210,10 +186,6 @@ async function seed() {
   }
 
   console.log('🎉 Seed concluído com sucesso!');
-  console.log('\n📋 Usuários criados:');
-  console.log('Admin: admin@empresa.com / Admin@123');
-  console.log('Financeiro: financeiro@empresa.com / Financeiro@123');
-  console.log('Técnico: tecnico@empresa.com / Tecnico@123');
 
   await dataSource.destroy();
 }

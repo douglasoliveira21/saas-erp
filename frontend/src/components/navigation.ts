@@ -17,6 +17,7 @@ export const navigationSections: NavSection[] = [
   ]},
   { id: 'comercial', title: 'Comercial e vendas', icon: ShoppingCart, expandable: true, items: [
     { name: 'Clientes', href: '/customers', icon: Users, roles: all },
+    { name: 'CRM de oportunidades', href: '/crm', icon: BarChart3, roles: all },
     { name: 'Orçamentos', href: '/orcamentos', icon: FileText, roles: all },
     { name: 'Pré-vendas', href: '/pre-vendas', icon: ClipboardList, roles: all },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart, roles: all },

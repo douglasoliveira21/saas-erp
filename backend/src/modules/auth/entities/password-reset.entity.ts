@@ -9,14 +9,17 @@ export class PasswordReset {
   @Column({ name: 'user_id' })
   userId: string;
 
-  @Column({ length: 255, unique: true })
-  token: string;
+  @Column({ name: 'token_hash', length: 64, unique: true })
+  tokenHash: string;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
   expiresAt: Date;
 
   @Column({ default: false })
   used: boolean;
+
+  @Column({ name: 'used_at', type: 'timestamp', nullable: true })
+  usedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

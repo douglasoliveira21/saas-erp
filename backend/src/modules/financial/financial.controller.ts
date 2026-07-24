@@ -149,6 +149,10 @@ export class FinancialController {
     return this.financialService.getCashFlowSeparated(startDate, endDate);
   }
 
+  @Get('cash-flow/projected')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getProjectedCashFlow(@Query('startDate') startDate: string, @Query('endDate') endDate: string, @Query('granularity') granularity: 'day' | 'week' | 'month' = 'day') { return this.financialService.getProjectedCashFlow(startDate, endDate, granularity); }
+
   @Get('overdue')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getOverdue() {

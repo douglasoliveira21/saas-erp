@@ -25,6 +25,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { QuotesModule } from './modules/quotes/quotes.module';
 import { OperationsModule } from './modules/operations/operations.module';
+import { CrmModule } from './modules/crm/crm.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 import { APP_INTERCEPTOR } from '@nestjs/core';
@@ -60,6 +61,7 @@ import { AuditInterceptor } from './modules/audit/audit.interceptor';
     SuppliersModule,
     QuotesModule,
     OperationsModule,
+    CrmModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

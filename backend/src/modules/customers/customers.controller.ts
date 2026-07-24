@@ -30,6 +30,9 @@ export class CustomersController {
     return this.customersService.findAll();
   }
 
+  @Get(':id/history')
+  history(@Param('id') id: string) { return this.customersService.getHistory(id); }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.customersService.findOne(id);

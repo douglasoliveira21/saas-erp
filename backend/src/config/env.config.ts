@@ -30,3 +30,21 @@ export const env = {
     account: process.env.INTER_ACCOUNT || '',
   },
 };
+
+const unsafeSecrets = new Set([
+  'secret-key-change-in-production', 'change-me', 'changeme',
+  'uma-chave-forte-para-certificados', 'uma-chave-forte-para-tokens',
+  'uma-chave-forte-para-o-banco-inter',
+]);
+
+export function validateProductionSecrets(): void {
+  if (env.server.nodeEnv !== 'production') return;
+  const required = ['JWT_SECRET', 'CERT_ENCRYPTION_KEY', 'CREDENTIAL_ENCRYPTION_KEY', 'INTER_WEBHOOK_SECRET'];
+  const invalid = required.filter((name) => {
+    const value = (process.env[name] || '').trim();
+    return value.length < 32 || unsafeSecrets.has(value.toLowerCase());
+  });
+  if (invalid.length) {
+    throw new Error(`Inicialização recusada: configure segredos fortes (mínimo 32 caracteres) em: ${invalid.join(', ')}`);
+  }
+}

@@ -37,6 +37,15 @@ export class User {
   @Column({ default: true })
   active: boolean;
 
+  @Column({ name: 'failed_login_attempts', type: 'int', default: 0 })
+  failedLoginAttempts: number;
+
+  @Column({ name: 'locked_until', type: 'timestamp', nullable: true })
+  lockedUntil: Date;
+
+  @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
+  lastLoginAt: Date;
+
   @Column({ type: 'text', nullable: true })
   observations: string;
 
