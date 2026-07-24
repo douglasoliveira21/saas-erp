@@ -10,13 +10,17 @@ import {
 } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 
 @Controller('customers')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   create(@Body() createCustomerDto: any) {
     return this.customersService.create(createCustomerDto);
   }
@@ -32,11 +36,13 @@ export class CustomersController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   update(@Param('id') id: string, @Body() updateCustomerDto: any) {
     return this.customersService.update(id, updateCustomerDto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) {
     return this.customersService.remove(id);
   }

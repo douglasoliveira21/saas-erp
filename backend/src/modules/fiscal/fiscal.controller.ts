@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res, Query } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,6 +19,7 @@ import { AuditService } from '../audit/audit.service';
 import { FiscalEvent } from './entities/fiscal-event.entity';
 import { FiscalIntegrationService } from './services/fiscal-integration.service';
 import { FiscalJobsService } from './services/fiscal-jobs.service';
+import { Sale } from '../sales/entities/sale.entity';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -32,12 +33,26 @@ export class FiscalController {
     @InjectRepository(FiscalEvent) private eventRepo: Repository<FiscalEvent>,
     @InjectRepository(FinancialTask) private taskRepo: Repository<FinancialTask>,
     @InjectRepository(FinancialMovement) private movementRepo: Repository<FinancialMovement>,
+    @InjectRepository(Sale) private saleRepo: Repository<Sale>,
     private mailService: MailService,
     private auditService: AuditService,
     private fiscalIntegration: FiscalIntegrationService,
     private fiscalJobs: FiscalJobsService,
   ) {}
 
+  private async validateSaleForInvoice(saleId: string, type: 'nfe' | 'nfse', submitted: any): Promise<any> {
+    if (!saleId) throw new BadRequestException('Venda obrigatória para emissão');
+    const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer', 'items'] });
+    if (!sale) throw new BadRequestException('Venda não encontrada');
+    if (['cancelada','finalizada'].includes(sale.operationalStatus) || ['cancelado','finalizado'].includes(sale.status as any)) throw new BadRequestException('Venda finalizada ou cancelada não pode emitir nota');
+    const now = new Date(); const today = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+    if (sale.dueDate && sale.dueDate < today) throw new BadRequestException('Não é permitido emitir nota para venda com vencimento anterior a hoje');
+    const duplicate = await this.invoiceRepo.findOne({ where: { saleId, type } });
+    if (duplicate && !['cancelada', 'rejeitada', 'erro'].includes(duplicate.status)) throw new BadRequestException(`Já existe ${type.toUpperCase()} ativa para esta venda`);
+    if (!sale.customer) throw new BadRequestException('Venda sem cliente');
+    const items = sale.items.map((item, index) => ({ ...(submitted?.items?.[index] || {}), productId: item.productId, serviceId: item.serviceId, name: item.name, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice) }));
+    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, totalValue: Number(sale.totalAmount), items };
+  }
   private async completeNfTask(saleId: string) {
     if (!saleId) return;
     try {
@@ -50,7 +65,7 @@ export class FiscalController {
       }
       // Atualizar status da venda para nf_emitida se estiver pendente
       await this.invoiceRepo.manager.query(
-        `UPDATE sales SET status = 'nf_emitida', updated_at = NOW() WHERE id = $1 AND status = 'pendente'`,
+        `UPDATE sales SET status = CASE WHEN status = 'pendente' THEN 'nf_emitida' ELSE status END, fiscal_status = 'autorizada', updated_at = NOW() WHERE id = $1`,
         [saleId]
       );
     } catch {}
@@ -148,14 +163,14 @@ export class FiscalController {
   // === NOTAS FISCAIS ===
   @Get('invoices')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  getInvoices() {
-    return this.invoiceRepo.find({
+  async getInvoices(@Query('page') page = '1', @Query('limit') limit = '50') {
+    const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const [data, total] = await this.invoiceRepo.findAndCount({
       select: ['id', 'type', 'number', 'series', 'accessKey', 'protocolNumber', 'verificationCode', 'status', 'recipientName', 'recipientCnpj', 'totalValue', 'rejectionReason', 'cancelReason', 'issuedAt', 'createdAt', 'saleId', 'environment'],
-      relations: ['sale', 'sale.customer'],
-      order: { createdAt: 'DESC' },
+      relations: ['sale', 'sale.customer'], order: { createdAt: 'DESC' }, skip: (safePage - 1) * safeLimit, take: safeLimit,
     });
+    return { data, total, page: safePage, limit: safeLimit };
   }
-
   @Get('invoices/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getInvoice(@Param('id') id: string) {
@@ -194,6 +209,7 @@ export class FiscalController {
   @Post('nfe/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async emitNfe(@Body() body: { saleId: string; certId: string; saleData?: any }, @Request() req: any) {
+    body.saleData = await this.validateSaleForInvoice(body.saleId, 'nfe', body.saleData);
     // Criar registro de invoice
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
@@ -252,7 +268,10 @@ export class FiscalController {
   @Post('nfe/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async cancelNfe(@Body() body: { invoiceId: string; reason: string; certId: string }, @Request() req: any) {
-    return this.nfeService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
+    const result = await this.nfeService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
+    const invoice = await this.invoiceRepo.findOne({ where: { id: body.invoiceId } });
+    if (invoice?.saleId) await this.saleRepo.update(invoice.saleId, { fiscalStatus: 'cancelada' });
+    return result;
   }
 
   @Get('nfe/download-xml/:id')
@@ -280,6 +299,7 @@ export class FiscalController {
   @Post('nfse/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async emitNfse(@Body() body: { saleId: string; certId: string; serviceData?: any }, @Request() req: any) {
+    body.serviceData = await this.validateSaleForInvoice(body.saleId, 'nfse', body.serviceData);
     const taxDetails = this.calculateNfseTaxes(body.serviceData || {});
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
@@ -473,7 +493,10 @@ export class FiscalController {
   @Post('nfse/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async cancelNfse(@Body() body: { invoiceId: string; reason: string; certId: string }, @Request() req: any) {
-    return this.nfseService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
+    const result = await this.nfseService.cancel(body.invoiceId, body.reason, body.certId, req.user?.id);
+    const invoice = await this.invoiceRepo.findOne({ where: { id: body.invoiceId } });
+    if (invoice?.saleId) await this.saleRepo.update(invoice.saleId, { fiscalStatus: 'cancelada' });
+    return result;
   }
 
   @Get('queue')

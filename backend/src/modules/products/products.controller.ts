@@ -20,11 +20,13 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   create(@Body() createProductDto: any) {
     return this.productsService.create(createProductDto);
   }
 
   @Post('import')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   importProducts(@Body() body: { products: any[] }) {
     return this.productsService.importFromXml(body.products);
   }
@@ -45,11 +47,13 @@ export class ProductsController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   update(@Param('id') id: string, @Body() updateProductDto: any) {
     return this.productsService.update(id, updateProductDto);
   }
 
   @Delete(':id')
+  @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
   }

@@ -132,7 +132,9 @@ export class NfeService {
       // Determinar serie e numero
       const isNfce = modelo === '65';
       const series = isNfce ? (config.nfceSeries || 1) : config.nfeSeries;
-      const number = isNfce ? (config.nfceNextNumber || 1) : config.nfeNextNumber;
+const numberRows = await this.configRepository.query(isNfce ? `UPDATE fiscal_config SET nfce_next_number = COALESCE(nfce_next_number,1) + 1 WHERE id=$1 RETURNING nfce_next_number - 1 AS number` : `UPDATE fiscal_config SET nfe_next_number = nfe_next_number + 1 WHERE id=$1 RETURNING nfe_next_number - 1 AS number`, [config.id]);
+      const number = Number(numberRows[0]?.number);
+      if (!Number.isInteger(number) || number <= 0) throw new BadRequestException('Não foi possível reservar a numeração fiscal');
       invoice.number = number;
       invoice.series = series;
 
@@ -234,13 +236,6 @@ export class NfeService {
       }
 
       await this.invoiceRepository.save(invoice);
-
-      // Incrementar numero
-      if (isNfce) {
-        await this.configRepository.update(config.id, { nfceNextNumber: number + 1 });
-      } else {
-        await this.configRepository.update(config.id, { nfeNextNumber: number + 1 });
-      }
 
       return invoice;
     } catch (e) {

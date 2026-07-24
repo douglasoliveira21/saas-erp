@@ -1,13 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GlpiTicket } from './entities/glpi-ticket.entity';
 import { GlpiConfig } from './entities/glpi-config.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Contract } from '../contracts/entities/contract.entity';
+import { decryptField, encryptField, isEncryptedField, maskSecret, requireEncryptionSecret } from '../../common/security/field-encryption';
 
 @Injectable()
-export class GlpiService {
+export class GlpiService implements OnModuleInit {
+  private readonly credentialKey = requireEncryptionSecret('CREDENTIAL_ENCRYPTION_KEY');
+  private readonly previousCredentialKey = process.env.CREDENTIAL_ENCRYPTION_KEY_PREVIOUS || '';
   private readonly logger = new Logger(GlpiService.name);
 
   constructor(
@@ -21,10 +24,43 @@ export class GlpiService {
     private contractsRepository: Repository<Contract>,
   ) {}
 
+  async onModuleInit(): Promise<void> {
+    const config = await this.configRepository.findOne({ where: {} });
+    if (!config) return;
+    let changed = false;
+    for (const field of ['appToken', 'userToken'] as const) {
+      const value = config[field];
+      if (!value) continue;
+      if (!isEncryptedField(value)) {
+        config[field] = encryptField(value, this.credentialKey);
+        changed = true;
+      } else {
+        try {
+          decryptField(value, [this.credentialKey]);
+        } catch {
+          const plainValue = decryptField(value, [this.previousCredentialKey]);
+          config[field] = encryptField(plainValue, this.credentialKey);
+          changed = true;
+        }
+      }
+    }
+    if (config.sessionToken) {
+      config.sessionToken = null;
+      changed = true;
+    }
+    if (changed) await this.configRepository.save(config);
+  }
+
   private async getConfig(): Promise<GlpiConfig> {
     const config = await this.configRepository.findOne({ where: {} });
     if (!config) throw new Error('Configuracao GLPI nao encontrada');
-    return config;
+    const keys = [this.credentialKey, this.previousCredentialKey];
+    return {
+      ...config,
+      appToken: decryptField(config.appToken, keys),
+      userToken: config.userToken ? decryptField(config.userToken, keys) : null,
+      sessionToken: null,
+    } as GlpiConfig;
   }
 
   private async initSession(config: GlpiConfig): Promise<string> {
@@ -397,25 +433,25 @@ export class GlpiService {
       { monthStart: start, monthEnd: end },
     );
   }
-  async getConfig2(): Promise<GlpiConfig | null> {
+  async getConfig2(): Promise<Partial<GlpiConfig> | null> {
     const config = await this.configRepository.findOne({ where: {} });
-    return config;
+    if (!config) return null;
+    return { id: config.id, apiUrl: config.apiUrl, appToken: maskSecret(config.appToken), userToken: maskSecret(config.userToken), lastSync: config.lastSync, createdAt: config.createdAt };
   }
 
-  async updateConfig(dto: any): Promise<GlpiConfig> {
+  async updateConfig(dto: any): Promise<Partial<GlpiConfig>> {
     let config = await this.configRepository.findOne({ where: {} });
-
+    const isMasked = (value: unknown) => typeof value === 'string' && /^\*+$/.test(value);
     if (!config) {
-      // Criar config se não existe
-      config = this.configRepository.create({
-        apiUrl: dto.apiUrl,
-        appToken: dto.appToken,
-        userToken: dto.userToken || null,
-      });
+      if (!dto.appToken || isMasked(dto.appToken)) throw new Error('App Token e obrigatorio');
+      config = this.configRepository.create({ apiUrl: dto.apiUrl, appToken: encryptField(dto.appToken, this.credentialKey), userToken: dto.userToken && !isMasked(dto.userToken) ? encryptField(dto.userToken, this.credentialKey) : null, sessionToken: null });
     } else {
-      Object.assign(config, dto);
+      if (dto.apiUrl !== undefined) config.apiUrl = dto.apiUrl;
+      if (dto.appToken && !isMasked(dto.appToken)) config.appToken = encryptField(dto.appToken, this.credentialKey);
+      if (dto.userToken !== undefined && !isMasked(dto.userToken)) config.userToken = dto.userToken ? encryptField(dto.userToken, this.credentialKey) : null;
+      config.sessionToken = null;
     }
-
-    return this.configRepository.save(config);
+    const saved = await this.configRepository.save(config);
+    return { id: saved.id, apiUrl: saved.apiUrl, appToken: maskSecret(saved.appToken), userToken: maskSecret(saved.userToken), lastSync: saved.lastSync, createdAt: saved.createdAt };
   }
 }

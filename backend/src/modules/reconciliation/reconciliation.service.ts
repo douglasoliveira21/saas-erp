@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, DataSource } from 'typeorm';
 import { BankStatement } from './entities/bank-statement.entity';
 import { InterService } from '../inter/inter.service';
+import { FinancialService } from '../financial/financial.service';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class ReconciliationService {
@@ -13,6 +15,7 @@ export class ReconciliationService {
     private statementsRepo: Repository<BankStatement>,
     private dataSource: DataSource,
     private interService: InterService,
+    private financialService: FinancialService,
   ) {}
 
   // Import from Inter API (extrato)
@@ -27,7 +30,7 @@ export class ReconciliationService {
 
     for (const tx of transacoes) {
       // Campos do extrato Inter: dataEntrada, tipoTransacao, tipoOperacao, valor, titulo, descricao
-      const transactionId = tx.idTransacao || tx.codigoTransacao || `INTER-${tx.dataEntrada}-${tx.valor}-${Math.random().toString(36).slice(2, 8)}`;
+      const transactionId = tx.idTransacao || tx.codigoTransacao || `INTER-${createHash('sha256').update(JSON.stringify([tx.dataEntrada, tx.dataMovimento, tx.valor, tx.titulo, tx.descricao, tx.detalhamento])).digest('hex').slice(0, 32)}`;
       
       // Verificar duplicata
       const existing = await this.statementsRepo.findOne({ where: { transactionId, bankAccount: 'inter' } });
@@ -120,7 +123,6 @@ export class ReconciliationService {
       SELECT id, type, category, description, value, date, payment_method, reference_id, is_forecast, sale_id
       FROM financial_movements
       WHERE date BETWEEN $1 AND $2
-        AND is_forecast = false
         AND id NOT IN (SELECT matched_movement_id FROM bank_statements WHERE matched_movement_id IS NOT NULL)
       ORDER BY date ASC
     `, [toleranceStart.toISOString().split('T')[0], toleranceEnd.toISOString().split('T')[0]]);
@@ -140,7 +142,10 @@ export class ReconciliationService {
         }
       }
 
-      if (bestScore >= minScore && bestMatch) {
+      if (bestScore >= minScore && bestMatch) {        if (stmt.type === 'credito' && bestMatch.sale_id && bestMatch.is_forecast) {
+          await this.financialService.settleSale(bestMatch.sale_id, stmt.category === 'pix' ? 'pix' : 'transferencia', null as any, `bank:${stmt.bankAccount || 'unknown'}:${stmt.transactionId || stmt.id}`, new Date(stmt.date + 'T12:00:00'));
+          bestMatch.is_forecast = false;
+        }
         // Auto-reconcile
         stmt.status = 'conciliado_auto';
         stmt.matchedMovementId = bestMatch.id;
@@ -169,17 +174,22 @@ export class ReconciliationService {
 
   // Manual reconcile
   async manualReconcile(statementId: string, movementId: string, userId: string): Promise<BankStatement> {
-    const stmt = await this.statementsRepo.findOne({ where: { id: statementId } });
-    if (!stmt) throw new BadRequestException('Lançamento do extrato não encontrado');
-
-    stmt.status = 'conciliado_manual';
-    stmt.matchedMovementId = movementId;
-    stmt.matchScore = 100;
-    stmt.reconciledBy = userId;
-    stmt.reconciledAt = new Date();
-    return this.statementsRepo.save(stmt);
+    const initialStatement = await this.statementsRepo.findOne({ where: { id: statementId } });
+    if (!initialStatement) throw new BadRequestException('Lançamento do extrato não encontrado');
+    const initialRows = await this.dataSource.query(`SELECT id,type,value,is_forecast,sale_id FROM financial_movements WHERE id=$1`, [movementId]);
+    const initialMovement = initialRows[0]; if (!initialMovement) throw new BadRequestException('Movimento financeiro não encontrado');
+    if (initialStatement.type === 'credito' && initialMovement.sale_id && initialMovement.is_forecast) await this.financialService.settleSale(initialMovement.sale_id, initialStatement.category === 'pix' ? 'pix' : 'transferencia', userId, `bank:${initialStatement.bankAccount || 'unknown'}:${initialStatement.transactionId || initialStatement.id}`, new Date(initialStatement.date + 'T12:00:00'));
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(BankStatement);
+      const stmt = await repo.findOne({ where: { id: statementId }, lock: { mode: 'pessimistic_write' } });
+      if (!stmt || stmt.status.startsWith('conciliado')) throw new BadRequestException('Lançamento inexistente ou já conciliado');
+      if (await repo.findOne({ where: { matchedMovementId: movementId } })) throw new BadRequestException('Movimento financeiro já conciliado');
+      const movement = (await manager.query(`SELECT id,type,value FROM financial_movements WHERE id=$1`, [movementId]))[0];
+      const sameType = (stmt.type === 'credito') === (movement?.type === 'receita');
+      if (!movement || !sameType || Math.abs(Number(stmt.amount)-Number(movement.value)) > 0.01) throw new BadRequestException('Tipo ou valor do extrato diverge do movimento');
+      stmt.status = 'conciliado_manual'; stmt.matchedMovementId = movementId; stmt.matchScore = 100; stmt.reconciledBy = userId; stmt.reconciledAt = new Date(); return repo.save(stmt);
+    });
   }
-
   // Undo reconciliation
   async undoReconcile(statementId: string, userId: string): Promise<BankStatement> {
     const stmt = await this.statementsRepo.findOne({ where: { id: statementId } });

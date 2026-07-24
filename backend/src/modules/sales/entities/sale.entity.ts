@@ -34,6 +34,21 @@ export class Sale {
   })
   status: SaleStatus;
 
+  @Column({ name: 'operational_status', type: 'varchar', length: 30, default: 'aberta' })
+  operationalStatus: string;
+
+  @Column({ name: 'fiscal_status', type: 'varchar', length: 30, default: 'pendente' })
+  fiscalStatus: string;
+
+  @Column({ name: 'billing_status', type: 'varchar', length: 30, default: 'nao_emitido' })
+  billingStatus: string;
+
+  @Column({ name: 'payment_status', type: 'varchar', length: 30, default: 'pendente' })
+  paymentStatus: string;
+
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
+
   @Column({
     name: 'payment_method',
     type: 'varchar',

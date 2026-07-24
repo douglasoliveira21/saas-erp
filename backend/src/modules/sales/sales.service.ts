@@ -48,6 +48,8 @@ export class SalesService {
   ) {}
 
   async create(createSaleDto: any, userId?: string): Promise<Sale> {
+    const today = new Date(); const todayLocal = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    if (createSaleDto.dueDate && createSaleDto.dueDate < todayLocal) throw new BadRequestException('Vencimento da venda não pode estar no passado');
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -150,13 +152,10 @@ export class SalesService {
         await queryRunner.manager.save(FinancialTask, boletoTask);
       }
 
-      await queryRunner.commitTransaction();
+      // A venda e seus registros financeiros devem confirmar ou falhar juntos.
+      await this.financialService.createFromSale(savedSale, userId || saleData.technicianId, queryRunner.manager);
 
-      // Gerar contas a receber e movimentações financeiras
-      try {
-        const fullSale = await this.findOne(savedSale.id);
-        await this.financialService.createFromSale(fullSale, saleData.technicianId);
-      } catch { /* nao bloquear venda se financeiro falhar */ }
+      await queryRunner.commitTransaction();
 
       // Notificar financeiro por email
       try {
@@ -201,13 +200,16 @@ export class SalesService {
     }
   }
 
-  async findAll(): Promise<Sale[]> {
-    return this.salesRepository.find({
-      relations: ['technician', 'customer', 'items', 'events', 'attachments'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(page?: number, limit?: number): Promise<Sale[] | { data: Sale[]; total: number; page: number; limit: number }> {
+    const qb = this.salesRepository.createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.technician', 'technician').leftJoinAndSelect('sale.customer', 'customer')
+      .leftJoinAndSelect('sale.items', 'items').leftJoinAndSelect('sale.events', 'events').leftJoinAndSelect('sale.attachments', 'attachments')
+      .where('sale.archivedAt IS NULL').orderBy('sale.createdAt', 'DESC');
+    if (!page && !limit) return qb.take(500).getMany();
+    const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const [data, total] = await qb.skip((safePage - 1) * safeLimit).take(safeLimit).getManyAndCount();
+    return { data, total, page: safePage, limit: safeLimit };
   }
-
   async findOne(id: string): Promise<Sale> {
     const sale = await this.salesRepository.findOne({
       where: { id },
@@ -224,16 +226,13 @@ export class SalesService {
       throw new BadRequestException('Apenas vendas pendentes podem ter NF emitida');
     }
     sale.status = 'nf_emitida' as any;
+    sale.operationalStatus = 'aprovada';
+    sale.fiscalStatus = 'pendente';
     sale.approvedBy = userId as any;
     sale.approvedAt = new Date();
     const saved = await this.salesRepository.save(sale);
 
-    // Concluir pendencia de NF
-    await this.dataSource.query(
-      "UPDATE financial_tasks SET status = 'concluido', completed_by = $1, completed_at = NOW() WHERE sale_id = $2 AND type = 'emissao_nf' AND status = 'pendente'",
-      [userId, id]
-    );
-
+    await this.addEvent(id, 'sale.approved_for_invoicing', saved.status as any, 'Venda aprovada para emissão fiscal', userId);
     return saved;
   }
 
@@ -243,6 +242,7 @@ export class SalesService {
       throw new BadRequestException('Esta venda nao pode ter boleto emitido neste status');
     }
     sale.status = 'boleto_emitido' as any;
+    sale.billingStatus = 'emitido';
     const saved = await this.salesRepository.save(sale);
 
     // Concluir pendencia de boleto
@@ -254,32 +254,22 @@ export class SalesService {
     return saved;
   }
 
-  async markPaid(id: string, userId: string): Promise<Sale> {
+  async markPaid(id: string, userId: string, data: { paymentMethod: string; paidAt: string; bankAccountId?: string }, idempotencyKey?: string): Promise<Sale> {
     const sale = await this.findOne(id);
-    const oldStatus = sale.status;
-    if (!['pendente', 'nf_emitida', 'boleto_emitido'].includes(sale.status as string)) {
-      throw new BadRequestException('Esta venda nao pode ser marcada como paga');
-    }
-    sale.status = 'pago' as any;
-    const saved = await this.salesRepository.save(sale);
-    await this.addEvent(id, 'sale.paid', saved.status as any, 'Venda marcada como paga', userId);
-    await this.auditService.safeCreate({
-      userId,
-      action: 'sale.paid',
-      entity: 'sale',
-      entityId: id,
-      oldData: { status: oldStatus },
-      newData: { status: saved.status },
-    });
-    return saved;
+    if (['cancelado', 'finalizado'].includes(sale.status as string)) throw new BadRequestException('Esta venda não pode receber pagamento');
+    if (!idempotencyKey || !data?.paymentMethod || !data?.paidAt) throw new BadRequestException('Forma, data e chave de idempotência são obrigatórias');
+    const paidAt = new Date(data.paidAt); if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Data de pagamento inválida');
+    await this.financialService.settleSale(id, data.paymentMethod, userId, idempotencyKey, paidAt, data.bankAccountId);
+    await this.addEvent(id, 'sale.paid', 'pago' as any, 'Venda e financeiro marcados como pagos', userId);
+    return this.findOne(id);
   }
-
   async finalize(id: string): Promise<Sale> {
     const sale = await this.findOne(id);
-    if (sale.status !== 'pago') {
+    if (sale.paymentStatus !== 'pago' && sale.status !== 'pago') {
       throw new BadRequestException('Apenas vendas pagas podem ser finalizadas');
     }
     sale.status = 'finalizado' as any;
+    sale.operationalStatus = 'finalizada';
     return this.salesRepository.save(sale);
   }
 
@@ -351,6 +341,8 @@ export class SalesService {
       }
 
       sale.status = 'cancelado' as any;
+      sale.operationalStatus = 'cancelada';
+      sale.billingStatus = 'cancelado';
       await queryRunner.manager.save(Sale, sale);
 
       await queryRunner.manager.update(
@@ -604,36 +596,11 @@ export class SalesService {
 
   async remove(id: string, userId?: string): Promise<void> {
     const sale = await this.findOne(id);
-    if (sale.status !== 'cancelado' as any) {
-      throw new BadRequestException('Apenas vendas canceladas podem ser excluidas');
-    }
-    // Verificar se tem nota fiscal autorizada vinculada
-    const hasAuthorizedInvoice = await this.dataSource.query(
-      `SELECT COUNT(*) as count FROM invoices WHERE sale_id = $1 AND status = 'autorizada'`, [id]
-    );
-    if (parseInt(hasAuthorizedInvoice[0]?.count) > 0) {
-      throw new BadRequestException('Nao e possivel excluir venda com nota fiscal autorizada vinculada');
-    }
-    // Deletar registros relacionados primeiro
-    await this.dataSource.query('DELETE FROM financial_movements WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM installments WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM accounts_receivable WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM invoices WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM financial_tasks WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM commissions WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM stock_movements WHERE sale_id = $1', [id]);
-    await this.dataSource.query('DELETE FROM sale_items WHERE sale_id = $1', [id]);
-    await this.salesRepository.remove(sale);
-    await this.auditService.safeCreate({
-      userId,
-      action: 'sale.deleted',
-      entity: 'sale',
-      entityId: id,
-      oldData: sale,
-      newData: { deleted: true },
-    });
+    if (sale.status !== 'cancelado' as any && sale.operationalStatus !== 'cancelada') throw new BadRequestException('Apenas vendas canceladas podem ser arquivadas');
+    sale.archivedAt = new Date();
+    await this.salesRepository.save(sale);
+    await this.auditService.safeCreate({ userId, action: 'sale.archived', entity: 'sale', entityId: id, oldData: { archivedAt: null }, newData: { archivedAt: sale.archivedAt } });
   }
-
   async approveCommercial(id: string, userId: string) {
     const sale = await this.findOne(id);
     sale.commercialApprovedBy = userId;

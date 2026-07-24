@@ -13,3 +13,6 @@ Este diretório é a fonte canônica de documentação do projeto.
 ## Regra de manutenção
 
 Toda mudança relevante deve atualizar o documento canônico correspondente. Guias pontuais não devem ser criados na raiz. Materiais antigos ficam em `legacy/` e não representam necessariamente o comportamento atual.
+- [Rotação de chaves e webhooks](SECURITY-KEY-ROTATION.md)
+
+- [Integridade de vendas, financeiro, cobrança e fiscal](./SALES-FINANCIAL-INTEGRITY.md)

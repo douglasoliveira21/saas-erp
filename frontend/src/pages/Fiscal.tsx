@@ -104,7 +104,7 @@ export function Fiscal() {
         api.get('/sales'),
         api.get('/fiscal/config').catch(() => ({ data: null })),
       ])
-      setCertificates(certs.data); setInvoices(invs.data); setSales(salesRes.data)
+      setCertificates(certs.data); setInvoices(invs.data.data || invs.data); const today = new Date().toISOString().split('T')[0]; setSales((salesRes.data.data || salesRes.data).filter((sale: any) => sale.status !== 'cancelado' && sale.fiscalStatus !== 'autorizada' && (!sale.dueDate || sale.dueDate >= today)))
       if (cfgRes.data) setNfeAmbiente(cfgRes.data.environment || 1)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar') }
     finally { setLoading(false) }

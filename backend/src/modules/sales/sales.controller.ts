@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Body, Patch, Param, Query, Delete, UseGuards, Request, UseInterceptors, UploadedFile, Res, Headers } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { Response } from 'express';
@@ -19,13 +19,14 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   create(@Body() createSaleDto: any, @Request() req: any) {
     return this.salesService.create({ ...createSaleDto, technicianId: createSaleDto.technicianId || req.user.id }, req.user.id);
   }
 
   @Get()
-  findAll() {
-    return this.salesService.findAll();
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.salesService.findAll(page ? Number(page) : undefined, limit ? Number(limit) : undefined);
   }
 
   @Get(':id')
@@ -47,8 +48,8 @@ export class SalesController {
 
   @Patch(':id/mark-paid')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  markPaid(@Param('id') id: string, @Request() req: any) {
-    return this.salesService.markPaid(id, req.user.id);
+  markPaid(@Param('id') id: string, @Request() req: any, @Body() body: { paymentMethod: string; paidAt: string; bankAccountId?: string }, @Headers('idempotency-key') key?: string) {
+    return this.salesService.markPaid(id, req.user.id, body, key);
   }
 
   @Patch(':id/finalize')
@@ -128,6 +129,7 @@ export class SalesController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   update(@Param('id') id: string, @Body() updateSaleDto: any, @Request() req: any) {
     return this.salesService.update(id, updateSaleDto, req.user.id);
   }
