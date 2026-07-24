@@ -169,7 +169,10 @@ export class FinancialService implements OnModuleInit {
       const forecasts = await movementRepo.find({ where: { saleId: installment.saleId, category: 'venda', isForecast: true } });
       for (const forecast of forecasts) { if (fullyPaid) await movementRepo.remove(forecast); else { forecast.value = Math.max(0, total-paid); await movementRepo.save(forecast); } }
       await manager.getRepository(AccountReceivable).update(installment.accountId, { paidValue: paid, pendingValue: Math.max(0, total-paid), status: fullyPaid ? 'pago' : paid > 0 ? 'parcial' : 'pendente', paidAt: fullyPaid ? paidAt : null });
-      if (fullyPaid) await manager.getRepository(Sale).update(installment.saleId, { status: 'pago' as any, paymentStatus: 'pago' });
+      if (fullyPaid) {
+        await manager.getRepository(Sale).update(installment.saleId, { status: 'pago' as any, paymentStatus: 'pago', billingStatus: 'pago' });
+        await manager.query(`UPDATE payments SET status='pago', paid_at=COALESCE(paid_at,$2), account_id=COALESCE(account_id,$3), updated_at=NOW() WHERE sale_id=$1 AND status<>'cancelado'`, [installment.saleId, paidAt, installment.accountId]);
+      }
       else if (paid > 0) await manager.getRepository(Sale).update(installment.saleId, { paymentStatus: 'parcial' });
       return { installment, oldData, duplicate: false };
     });
@@ -182,8 +185,8 @@ export class FinancialService implements OnModuleInit {
       const sale = await manager.getRepository(Sale).findOne({ where: { id: saleId }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       if (sale.operationalStatus === 'cancelada' || sale.status === 'cancelado' as any) throw new BadRequestException('Venda cancelada não pode receber pagamento');
-      const account = await manager.getRepository(AccountReceivable).findOne({ where: { saleId }, lock: { mode: 'pessimistic_write' } });
-      if (!account) throw new NotFoundException('Conta a receber da venda não encontrada');
+      let account = await manager.getRepository(AccountReceivable).findOne({ where: { saleId }, lock: { mode: 'pessimistic_write' } });
+      if (!account) account = await this.createFromSale(sale, userId || null, manager);
       const installments = await manager.getRepository(Installment).find({ where: { accountId: account.id }, order: { number: 'ASC' } });
       const movementRepo = manager.getRepository(FinancialMovement); const paymentRepo = manager.getRepository(InstallmentPayment);
       const saleForecasts = await movementRepo.find({ where: { saleId, category: 'venda', isForecast: true } });
@@ -200,7 +203,9 @@ export class FinancialService implements OnModuleInit {
         await paymentRepo.save(paymentRepo.create({ installmentId: installment.id, movementId: movement.id, idempotencyKey: key, value: remaining, paymentMethod, bankAccountId: bankAccountId || null, paidAt, createdBy: userId || null }));
       }
       account.paidValue = Number(account.totalValue); account.pendingValue = 0; account.status = 'pago'; account.paidAt = paidAt; await manager.getRepository(AccountReceivable).save(account);
-      sale.status = 'pago' as any; sale.paymentStatus = 'pago'; await manager.getRepository(Sale).save(sale);
+      sale.status = 'pago' as any; sale.paymentStatus = 'pago'; sale.billingStatus = 'pago';
+      await manager.getRepository(Sale).save(sale);
+      await manager.query(`UPDATE payments SET status='pago', paid_at=COALESCE(paid_at,$2), account_id=COALESCE(account_id,$3), updated_at=NOW() WHERE sale_id=$1 AND status<>'cancelado'`, [saleId, paidAt, account.id]);
     };
     if (transactionManager) await execute(transactionManager); else await this.dataSource.transaction(execute);
     await this.auditService.safeCreate({ userId: userId || null, action: 'financial.sale_settled', entity: 'sale', entityId: saleId, newData: { paymentMethod, idempotencyKey, paidAt } });
@@ -209,71 +214,23 @@ export class FinancialService implements OnModuleInit {
    * Cancel an account receivable and its pending installments.
    */
   async cancelAccount(accountId: string, reason: string, userId: string): Promise<AccountReceivable> {
-    const account = await this.accountRepo.findOne({
-      where: { id: accountId },
-      relations: ['installmentsList'],
+    if (!reason?.trim()) throw new BadRequestException('Motivo do cancelamento obrigatório');
+    const result = await this.dataSource.transaction(async (manager) => {
+      const accountRepo=manager.getRepository(AccountReceivable), installmentRepo=manager.getRepository(Installment), movementRepo=manager.getRepository(FinancialMovement);
+      const account=await accountRepo.findOne({where:{id:accountId},relations:['installmentsList'],lock:{mode:'pessimistic_write'}});
+      if (!account) throw new NotFoundException('Conta a receber não encontrada');
+      if (account.status==='cancelado') throw new BadRequestException('Conta já está cancelada');
+      const oldData={...account};
+      for (const installment of account.installmentsList.filter(i=>['pendente','parcial','vencido'].includes(i.status))) { installment.status='cancelado'; await installmentRepo.save(installment); }
+      account.status='cancelado'; account.canceledAt=new Date(); account.cancelReason=reason.trim(); account.pendingValue=0; await accountRepo.save(account);
+      if (Number(account.paidValue)>0) await movementRepo.save(movementRepo.create({type:'estorno',category:'estorno',description:`Cancelamento: ${reason.trim()}`,value:Number(account.paidValue),date:new Date().toISOString().split('T')[0],saleId:account.saleId,accountId:account.id,paymentMethod:account.paymentMethod,isForecast:false,createdBy:userId,referenceId:account.id,referenceType:'account_receivable_cancellation'}));
+      await manager.query(`UPDATE payments SET status='cancelado',updated_at=NOW() WHERE sale_id=$1 AND status<>'cancelado'`,[account.saleId]);
+      const sale=await manager.getRepository(Sale).findOne({where:{id:account.saleId},lock:{mode:'pessimistic_write'}});
+      if (sale) { sale.paymentStatus='cancelado'; sale.billingStatus='cancelado'; if (sale.status==='pago' as any) sale.status='pendente' as any; await manager.getRepository(Sale).save(sale); }
+      return {account,oldData};
     });
-
-    if (!account) {
-      throw new NotFoundException('Conta a receber não encontrada');
-    }
-
-    const oldData = { ...account };
-
-    if (account.status === 'cancelado') {
-      throw new BadRequestException('Conta já está cancelada');
-    }
-
-    // Cancel pending installments
-    const pendingInstallments = account.installmentsList.filter(
-      (i) => i.status === 'pendente' || i.status === 'vencido',
-    );
-
-    for (const installment of pendingInstallments) {
-      installment.status = 'cancelado';
-      await this.installmentRepo.save(installment);
-    }
-
-    // Update account
-    account.status = 'cancelado';
-    account.canceledAt = new Date();
-    account.cancelReason = reason;
-    account.pendingValue = 0;
-
-    await this.accountRepo.save(account);
-
-    // Create estorno movement if there was paid value
-    if (Number(account.paidValue) > 0) {
-      await this.movementRepo.save(
-        this.movementRepo.create({
-          type: 'estorno',
-          category: 'estorno',
-          description: `Cancelamento: ${reason}`,
-          value: Number(account.paidValue),
-          date: new Date().toISOString().split('T')[0],
-          saleId: account.saleId,
-          accountId: account.id,
-          paymentMethod: account.paymentMethod,
-          isForecast: false,
-          createdBy: userId,
-        }),
-      );
-    }
-
-    await this.auditService.safeCreate({
-      userId,
-      action: 'financial.account_cancelled',
-      entity: 'account_receivable',
-      entityId: account.id,
-      oldData,
-      newData: {
-        status: account.status,
-        cancelReason: reason,
-        pendingValue: account.pendingValue,
-      },
-    });
-
-    return account;
+    await this.auditService.safeCreate({userId,action:'financial.account_cancelled',entity:'account_receivable',entityId:result.account.id,oldData:result.oldData,newData:{status:result.account.status,cancelReason:reason.trim(),pendingValue:0}});
+    return result.account;
   }
 
   /**
@@ -420,7 +377,33 @@ export class FinancialService implements OnModuleInit {
     return overdue;
   }
 
+  async repairPaidPaymentIntegrity(source = 'manual'): Promise<{ checked: number; repaired: number; failed: number; details: any[] }> {
+    const rows = await this.dataSource.query(`
+      SELECT DISTINCT ON (p.sale_id) p.id, p.sale_id, p.type, p.codigo_solicitacao, p.paid_at,
+             s.payment_status, s.billing_status, a.status AS account_status
+      FROM payments p
+      JOIN sales s ON s.id=p.sale_id
+      LEFT JOIN accounts_receivable a ON a.sale_id=p.sale_id
+      WHERE p.status='pago'
+        AND (s.payment_status<>'pago' OR s.billing_status<>'pago' OR a.id IS NULL OR a.status<>'pago' OR EXISTS (SELECT 1 FROM installments i WHERE i.account_id=a.id AND (i.status<>'pago' OR i.paid_value<i.value)) OR EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.sale_id=s.id AND fm.category='venda' AND fm.is_forecast=true))
+        AND COALESCE(s.operational_status,'')<>'cancelada' AND s.status<>'cancelado'
+      ORDER BY p.sale_id, p.paid_at DESC NULLS LAST, p.updated_at DESC
+      LIMIT 500
+    `);
+    let repaired=0, failed=0; const details:any[]=[];
+    for (const row of rows) {
+      try {
+        const paidAt=row.paid_at ? new Date(row.paid_at) : new Date();
+        await this.settleSale(row.sale_id,row.type||'boleto',null as any,`repair:${row.id}`,Number.isNaN(paidAt.getTime())?new Date():paidAt);
+        repaired++; details.push({saleId:row.sale_id,paymentId:row.id,status:'reparado'});
+      } catch (error) { failed++; details.push({saleId:row.sale_id,paymentId:row.id,status:'erro',error:error instanceof Error?error.message:String(error)}); }
+    }
+    if (rows.length) await this.auditService.safeCreate({userId:null,action:'financial.paid_integrity_repaired',entity:'payment',entityId:null,newData:{source,checked:rows.length,repaired,failed,details}});
+    return {checked:rows.length,repaired,failed,details};
+  }
+
   async runFinancialJobs(source = 'manual') {
+    const paidIntegrity = await this.repairPaidPaymentIntegrity(source);
     const overdue = await this.getOverdue();
     if (overdue.length > 0) {
       await this.auditService.safeCreate({
@@ -435,7 +418,7 @@ export class FinancialService implements OnModuleInit {
         },
       });
     }
-    return { overdue: overdue.length };
+    return { overdue: overdue.length, paidIntegrity };
   }
 
   /**
@@ -809,17 +792,37 @@ export class FinancialService implements OnModuleInit {
   async reverseMovement(id: string, reason: string, userId: string) {
     if (!reason?.trim()) throw new BadRequestException('Motivo do estorno obrigatório');
     const today = new Date().toISOString().split('T')[0]; await this.ensurePeriodOpen(today);
-    const reversal = await this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(FinancialMovement);
       const movement = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
       if (!movement) throw new NotFoundException('Lançamento não encontrado');
       if (movement.type === 'estorno') throw new BadRequestException('Um estorno não pode ser estornado diretamente');
       const existing = await repo.findOne({ where: { referenceId: id, referenceType: 'financial_movement_reversal' } });
-      if (existing) return existing;
-      return repo.save(repo.create({ type: 'estorno', category: movement.category || 'estorno', description: `Estorno de ${movement.description || movement.id}: ${reason.trim()}`, value: Number(movement.value), date: today, competenceDate: movement.competenceDate, dueDate: movement.dueDate, referenceId: movement.id, referenceType: 'financial_movement_reversal', paymentMethod: movement.paymentMethod, bankAccountId: movement.bankAccountId, costCenterId: movement.costCenterId, chartAccountId: movement.chartAccountId, isForecast: false, createdBy: userId }));
+      if (existing) return { reversal: existing, duplicate: true };
+      const reversal = await repo.save(repo.create({ type: 'estorno', category: movement.category || 'estorno', description: `Estorno de ${movement.description || movement.id}: ${reason.trim()}`, value: Number(movement.value), date: today, competenceDate: movement.competenceDate, dueDate: movement.dueDate, referenceId: movement.id, referenceType: 'financial_movement_reversal', paymentMethod: movement.paymentMethod, bankAccountId: movement.bankAccountId, costCenterId: movement.costCenterId, chartAccountId: movement.chartAccountId, isForecast: false, createdBy: userId }));
+      if (movement.accountId && movement.saleId) {
+        const installmentRepo = manager.getRepository(Installment);
+        const linked = await manager.query(`SELECT DISTINCT installment_id FROM installment_payments WHERE movement_id=$1`,[movement.id]);
+        const affectedIds = Array.from(new Set([movement.installmentId,...linked.map((x:any)=>x.installment_id)].filter(Boolean))) as string[];
+        for (const installmentId of affectedIds) {
+          const installment = await installmentRepo.findOne({ where: { id: installmentId }, lock: { mode: 'pessimistic_write' } });
+          if (!installment) continue;
+          const net = await manager.query(`SELECT COALESCE(SUM(ip.value),0)::numeric paid FROM installment_payments ip WHERE ip.installment_id=$1 AND NOT EXISTS (SELECT 1 FROM financial_movements r WHERE r.reference_type='financial_movement_reversal' AND r.reference_id=ip.movement_id)`, [installment.id]);
+          installment.paidValue = Number(net[0]?.paid || 0);
+          installment.status = installment.paidValue <= 0 ? 'pendente' : installment.paidValue + 0.001 >= Number(installment.value) ? 'pago' : 'parcial';
+          installment.paidAt = installment.status === 'pago' ? installment.paidAt : null;
+          await installmentRepo.save(installment);
+        }
+        const totals = await installmentRepo.createQueryBuilder('i').select('COALESCE(SUM(i.paidValue),0)','paid').addSelect('COALESCE(SUM(i.value),0)','total').where('i.accountId=:accountId',{accountId:movement.accountId}).getRawOne();
+        const paid=Number(totals.paid), total=Number(totals.total), fullyPaid=paid+0.001>=total;
+        await manager.getRepository(AccountReceivable).update(movement.accountId,{paidValue:paid,pendingValue:Math.max(0,total-paid),status:fullyPaid?'pago':paid>0?'parcial':'pendente',paidAt:fullyPaid?movement.paidAt:null});
+        const sale = await manager.getRepository(Sale).findOne({where:{id:movement.saleId},lock:{mode:'pessimistic_write'}});
+        if (sale) { sale.paymentStatus=fullyPaid?'pago':paid>0?'parcial':'pendente'; if (!fullyPaid && sale.status === 'pago' as any) sale.status=(sale.billingStatus==='emitido'||sale.billingStatus==='pago'?'boleto_emitido':'pendente') as any; if (!fullyPaid && sale.billingStatus==='pago') sale.billingStatus='emitido'; await manager.getRepository(Sale).save(sale); }
+      }
+      return { reversal, duplicate: false };
     });
-    await this.auditService.safeCreate({ userId, action: 'financial.movement_reversed', entity: 'financial_movement', entityId: id, newData: { reversalId: reversal.id, reason } });
-    return reversal;
+    if (!result.duplicate) await this.auditService.safeCreate({ userId, action: 'financial.movement_reversed', entity: 'financial_movement', entityId: id, newData: { reversalId: result.reversal.id, reason } });
+    return result.reversal;
   }
   async closeMonth(period: string, userId: string, notes?: string) {
     if (!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new BadRequestException('Período inválido; use AAAA-MM');

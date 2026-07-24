@@ -488,19 +488,24 @@ export class InterService implements OnModuleInit {
     return boleto;
   }
 
-  async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; paid: number; failed: number; details: any[] }> {
+  async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; paid: number; repaired: number; failed: number; details: any[] }> {
     if (this.reconciliationRunning) {
-      return { checked: 0, updated: 0, paid: 0, failed: 0, details: [] };
+      return { checked: 0, updated: 0, paid: 0, repaired: 0, failed: 0, details: [] };
     }
 
     this.reconciliationRunning = true;
     let checked = 0;
     let updated = 0;
     let paid = 0;
+    let repaired = 0;
     let failed = 0;
     const details: any[] = [];
 
     try {
+      const integrity = await this.financialService.repairPaidPaymentIntegrity('inter:' + source);
+      repaired = integrity.repaired;
+      failed += integrity.failed;
+      if (integrity.details.length) details.push(...integrity.details);
       const limit = Math.max(Number(process.env.INTER_RECONCILE_BATCH_SIZE || 50), 1);
       const payments = await this.saleRepo.manager.query(
         `SELECT id, sale_id, codigo_solicitacao, type, status, customer_name
@@ -551,10 +556,10 @@ export class InterService implements OnModuleInit {
         }
       }
 
-      const result = { checked, updated, paid, failed, details };
+      const result = { checked: checked + integrity.checked, updated, paid, repaired, failed, details };
       await this.auditInter('inter.reconcile_finished', null, {
         source,
-        result: { checked, updated, paid, failed },
+        result: { checked: checked + integrity.checked, updated, paid, repaired, failed },
       });
       return result;
     } finally {

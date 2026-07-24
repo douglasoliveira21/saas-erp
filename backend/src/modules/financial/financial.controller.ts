@@ -285,6 +285,10 @@ export class FinancialController {
   @Get('integrity-report')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getIntegrityReport() { return this.financialService.getIntegrityReport(); }
+  @Post('integrity-repair')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  repairPaidIntegrity() { return this.financialService.repairPaidPaymentIntegrity('manual-api'); }
+
   @Get('monthly-closings')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   listClosings() {

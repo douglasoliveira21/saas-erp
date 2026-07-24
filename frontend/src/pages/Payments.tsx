@@ -82,7 +82,7 @@ export function Payments() {
     try {
       const res = await api.post('/inter/reconcile')
       const data = res.data?.data || res.data
-      alert(`Conciliacao concluida: ${data.checked || 0} verificado(s), ${data.updated || 0} atualizado(s), ${data.failed || 0} erro(s).`)
+      alert(`Conciliacao concluida: ${data.checked || 0} verificado(s), ${data.updated || 0} atualizado(s), ${data.repaired || 0} inconsistência(s) reparada(s), ${data.failed || 0} erro(s).`)
       load()
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao conciliar pagamentos')
