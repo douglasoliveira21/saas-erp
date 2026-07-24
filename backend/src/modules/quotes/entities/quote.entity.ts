@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
+  DeleteDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { User } from '../../users/entities/user.entity';
 
@@ -51,6 +52,9 @@ export class Quote {
 
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason: string;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

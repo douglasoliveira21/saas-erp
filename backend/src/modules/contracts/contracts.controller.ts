@@ -42,6 +42,7 @@ export class ContractsController {
       slaExternal: parseInt(body.slaExternal) || 24,
       slaTotalHours: body.slaTotalHours ? parseFloat(body.slaTotalHours) : 0,
       slaOverageRate: body.slaOverageRate ? parseFloat(body.slaOverageRate) : 80,
+      slaCalculationMode: ['glpi_actiontime','business_hours','elapsed'].includes(body.slaCalculationMode) ? body.slaCalculationMode : 'glpi_actiontime',
       observations: body.observations,
       adjustmentIndex: body.adjustmentIndex || null,
       adjustmentPercentage: body.adjustmentPercentage ? parseFloat(body.adjustmentPercentage) : null,

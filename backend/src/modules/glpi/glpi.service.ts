@@ -5,6 +5,7 @@ import { GlpiTicket } from './entities/glpi-ticket.entity';
 import { GlpiConfig } from './entities/glpi-config.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Contract } from '../contracts/entities/contract.entity';
+import { SlaMonthlySnapshot } from './entities/sla-monthly-snapshot.entity';
 import { decryptField, encryptField, isEncryptedField, maskSecret, requireEncryptionSecret } from '../../common/security/field-encryption';
 
 @Injectable()
@@ -22,6 +23,8 @@ export class GlpiService implements OnModuleInit {
     private customersRepository: Repository<Customer>,
     @InjectRepository(Contract)
     private contractsRepository: Repository<Contract>,
+    @InjectRepository(SlaMonthlySnapshot)
+    private snapshotsRepository: Repository<SlaMonthlySnapshot>,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -112,6 +115,21 @@ export class GlpiService implements OnModuleInit {
     }
   }
 
+  private businessHours(start: Date | null, end: Date | null): number {
+    if (!start || !end || end <= start) return 0;
+    let total = 0; const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    while (cursor < end) {
+      const day = cursor.getDay();
+      if (day >= 1 && day <= 5) {
+        const workStart = new Date(cursor); workStart.setHours(8,0,0,0);
+        const workEnd = new Date(cursor); workEnd.setHours(18,0,0,0);
+        total += Math.max(0, Math.min(end.getTime(), workEnd.getTime()) - Math.max(start.getTime(), workStart.getTime()));
+      }
+      cursor.setDate(cursor.getDate()+1);
+    }
+    return total / 3600000;
+  }
+
   async syncTickets(): Promise<{ synced: number; exceeded: number; totalCharge: number; failedEntities: Array<{ entityId: number; customer: string; error: string }> }> {
     const config = await this.getConfig();
     let session: string;
@@ -139,7 +157,8 @@ export class GlpiService implements OnModuleInit {
       try {
         const ticketsById = new Map<number, any>();
 
-        for (let start = 0; start < 20000; start += pageSize) {
+        for (let start = 0; ; start += pageSize) {
+          if (start >= 1000000) throw new Error('Limite de segurança de sincronização atingido');
           const end = start + pageSize - 1;
           const payload = await this.glpiRequest(
             '/Ticket',
@@ -182,9 +201,9 @@ export class GlpiService implements OnModuleInit {
           const dateOpened = parseDate(ticket.date);
           const dateSolved = parseDate(ticket.solvedate) || parseDate(ticket.closedate);
           const dateClosed = parseDate(ticket.closedate);
-          const timeSpent = dateOpened && dateSolved
-            ? Math.max(0, (dateSolved.getTime() - dateOpened.getTime()) / (1000 * 60 * 60))
-            : 0;
+          const elapsedHours = dateOpened && dateSolved ? Math.max(0, (dateSolved.getTime() - dateOpened.getTime()) / 3600000) : 0;
+          const actionTimeSeconds = Number(ticket.actiontime || ticket.action_time || 0);
+          let timeSpent = actionTimeSeconds > 0 ? actionTimeSeconds / 3600 : elapsedHours;
 
           const type = Number(ticket.type);
           const slaType = type === 2 ? 'externo' : 'interno';
@@ -196,6 +215,10 @@ export class GlpiService implements OnModuleInit {
             (!contractEnd || dateOpened <= contractEnd),
           );
           const ticketContract = isWithinContract ? contract : null;
+          const calculationMode = ticketContract?.slaCalculationMode || 'glpi_actiontime';
+          if (calculationMode === 'elapsed') timeSpent = elapsedHours;
+          else if (calculationMode === 'business_hours') timeSpent = this.businessHours(dateOpened, dateSolved);
+          else timeSpent = actionTimeSeconds > 0 ? actionTimeSeconds / 3600 : elapsedHours;
 
           let savedTicket = await this.ticketsRepository.findOne({
             where: { glpiTicketId: Number(ticket.id) },
@@ -224,6 +247,7 @@ export class GlpiService implements OnModuleInit {
             slaType,
             slaLimitHours: Number(ticketContract?.slaTotalHours || 0),
             timeSpentHours: Number(timeSpent.toFixed(2)),
+            timeSource: calculationMode === 'glpi_actiontime' && actionTimeSeconds <= 0 ? 'elapsed_fallback' : calculationMode,
             slaExceeded: false,
             exceededHours: 0,
             exceededCharge: 0,
@@ -344,94 +368,88 @@ export class GlpiService implements OnModuleInit {
       await this.recalculateContractSla(contract);
     }
   }
+  private monthBounds(month: string): { start: Date; end: Date } | null {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month || '')) return null;
+    const [year, value] = month.split('-').map(Number);
+    return { start: new Date(year, value - 1, 1), end: new Date(year, value, 1) };
+  }
+
+  private allocatedHours(ticket: GlpiTicket, month: string): number {
+    const bounds = this.monthBounds(month);
+    if (!bounds) return Math.max(0, Number(ticket.timeSpentHours || 0));
+    const opened = ticket.dateOpened || ticket.dateSolved || ticket.dateClosed;
+    const solved = ticket.dateSolved || ticket.dateClosed || ticket.dateOpened;
+    if (!opened || !solved) return 0;
+    const totalMs = Math.max(0, solved.getTime() - opened.getTime());
+    const overlapMs = Math.max(0, Math.min(solved.getTime(), bounds.end.getTime()) - Math.max(opened.getTime(), bounds.start.getTime()));
+    if (totalMs === 0) return opened >= bounds.start && opened < bounds.end ? Math.max(0, Number(ticket.timeSpentHours || 0)) : 0;
+    return Number((Math.max(0, Number(ticket.timeSpentHours || 0)) * overlapMs / totalMs).toFixed(2));
+  }
+
   async getTickets(filters?: { customerId?: string; exceeded?: boolean; month?: string }): Promise<GlpiTicket[]> {
-    const qb = this.ticketsRepository.createQueryBuilder('t')
-      .leftJoinAndSelect('t.customer', 'customer')
-      .leftJoinAndSelect('t.contract', 'contract')
-      .orderBy('t.dateOpened', 'DESC');
-
+    const qb = this.ticketsRepository.createQueryBuilder('t').leftJoinAndSelect('t.customer', 'customer').leftJoinAndSelect('t.contract', 'contract').orderBy('t.dateOpened', 'ASC');
     if (filters?.customerId) qb.andWhere('t.customer_id = :cid', { cid: filters.customerId });
-    if (filters?.exceeded) qb.andWhere('t.sla_exceeded = true');
     this.applyMonthFilter(qb, filters?.month);
-
-    return qb.getMany();
+    const tickets = await qb.getMany();
+    const grouped = new Map<string, GlpiTicket[]>();
+    for (const ticket of tickets) {
+      ticket.timeSpentHours = filters?.month ? this.allocatedHours(ticket, filters.month) : Number(ticket.timeSpentHours || 0);
+      const key = ticket.contractId || 'customer:' + ticket.customerId;
+      grouped.set(key, [...(grouped.get(key) || []), ticket]);
+    }
+    for (const items of grouped.values()) {
+      const included = Math.max(0, Number(items[0]?.contract?.slaTotalHours || 0));
+      const rate = Math.max(0, Number(items[0]?.contract?.slaOverageRate || 0));
+      let consumed = 0; let previousOverflow = 0;
+      for (const ticket of items) {
+        consumed = Number((consumed + Number(ticket.timeSpentHours || 0)).toFixed(2));
+        const cumulative = included > 0 ? Math.max(0, consumed - included) : 0;
+        ticket.exceededHours = Number(Math.max(0, cumulative - previousOverflow).toFixed(2));
+        ticket.slaExceeded = ticket.exceededHours > 0;
+        ticket.slaLimitHours = included;
+        ticket.chargeRate = rate;
+        ticket.exceededCharge = Number((ticket.exceededHours * rate).toFixed(2));
+        previousOverflow = cumulative;
+      }
+    }
+    const result = filters?.exceeded ? tickets.filter(ticket => ticket.slaExceeded) : tickets;
+    return result.sort((a, b) => (b.dateOpened?.getTime() || 0) - (a.dateOpened?.getTime() || 0));
   }
 
   async getSlaReport(month?: string, customerId?: string): Promise<any> {
+    const targetMonth = month && this.monthBounds(month) ? month : new Date().toISOString().slice(0, 7);
     await this.recalculateStoredContractSlas(customerId);
-    const qb = this.ticketsRepository.createQueryBuilder('ticket')
-      .leftJoinAndSelect('ticket.customer', 'customer')
-      .leftJoinAndSelect('ticket.contract', 'contract');
-    this.applyMonthFilter(qb, month, 'ticket');
-    if (customerId) qb.andWhere('ticket.customer_id = :customerId', { customerId });
-    const tickets = await qb.getMany();
-    const exceeded = tickets.filter(t => t.slaExceeded);
-    const totalCharge = exceeded.reduce((s, t) => s + Number(t.exceededCharge), 0);
-
-    // Agrupar consumo da franquia e excedente por cliente
-    const byCustomer: Record<string, {
-      name: string;
-      tickets: number;
-      exceeded: number;
-      consumedHours: number;
-      includedHours: number;
-      exceededHours: number;
-      overageRate: number;
-      charge: number;
-    }> = {};
-    for (const t of tickets) {
-      const cid = t.customerId || 'sem-cliente';
-      const name = t.customer?.name || 'Sem cliente';
-      if (!byCustomer[cid]) {
-        byCustomer[cid] = {
-          name,
-          tickets: 0,
-          exceeded: 0,
-          consumedHours: 0,
-          includedHours: Number(t.contract?.slaTotalHours || 0),
-          exceededHours: 0,
-          overageRate: Number(t.contract?.slaOverageRate || 0),
-          charge: 0,
-        };
-      }
-      byCustomer[cid].tickets++;
-      byCustomer[cid].consumedHours += Number(t.timeSpentHours || 0);
-      byCustomer[cid].includedHours = Math.max(byCustomer[cid].includedHours, Number(t.contract?.slaTotalHours || 0));
-      byCustomer[cid].overageRate = Math.max(byCustomer[cid].overageRate, Number(t.contract?.slaOverageRate || 0));
-      if (t.slaExceeded) {
-        byCustomer[cid].exceeded++;
-        byCustomer[cid].exceededHours += Number(t.exceededHours || 0);
-        byCustomer[cid].charge += Number(t.exceededCharge);
-      }
+    const tickets = await this.getTickets({ customerId, month: targetMonth });
+    const byCustomer: Record<string, any> = {};
+    for (const ticket of tickets) {
+      const cid = ticket.customerId || 'sem-cliente';
+      if (!byCustomer[cid]) byCustomer[cid] = { customerId: cid, contractId: ticket.contractId || null, name: ticket.customer?.name || 'Sem cliente', tickets: 0, exceeded: 0, consumedHours: 0, includedHours: Number(ticket.contract?.slaTotalHours || 0), exceededHours: 0, overageRate: Number(ticket.contract?.slaOverageRate || 0), charge: 0, details: [] };
+      const item = byCustomer[cid];
+      item.tickets++; item.consumedHours += Number(ticket.timeSpentHours || 0);
+      item.details.push({ ticketId: ticket.id, glpiTicketId: ticket.glpiTicketId, openedAt: ticket.dateOpened, solvedAt: ticket.dateSolved || ticket.dateClosed, allocatedHours: Number(ticket.timeSpentHours || 0), timeSource: ticket.timeSource, exceededHours: Number(ticket.exceededHours || 0), charge: Number(ticket.exceededCharge || 0) });
+      if (ticket.slaExceeded) { item.exceeded++; item.exceededHours += Number(ticket.exceededHours || 0); item.charge += Number(ticket.exceededCharge || 0); }
     }
-
-    for (const item of Object.values(byCustomer)) {
-      item.consumedHours = Number(item.consumedHours.toFixed(2));
-      item.exceededHours = Number(item.exceededHours.toFixed(2));
-      item.charge = Number(item.charge.toFixed(2));
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    for (const item of Object.values(byCustomer) as any[]) {
+      item.consumedHours = Number(item.consumedHours.toFixed(2)); item.exceededHours = Number(item.exceededHours.toFixed(2)); item.charge = Number(item.charge.toFixed(2));
+      const existing = await this.snapshotsRepository.findOne({ where: { month: targetMonth, customerId: item.customerId, contractId: item.contractId } });
+      if (existing?.isFrozen) {
+        item.tickets = existing.ticketCount; item.consumedHours = Number(existing.consumedHours); item.includedHours = Number(existing.includedHours); item.exceededHours = Number(existing.exceededHours); item.overageRate = Number(existing.overageRate); item.charge = Number(existing.totalCharge); item.exceeded = (existing.calculationDetails || []).filter((detail: any) => Number(detail.exceededHours) > 0).length; item.details = existing.calculationDetails || [];
+      } else {
+        const snapshot = existing || this.snapshotsRepository.create({ month: targetMonth, customerId: item.customerId, contractId: item.contractId });
+        Object.assign(snapshot, { includedHours: item.includedHours, consumedHours: item.consumedHours, exceededHours: item.exceededHours, overageRate: item.overageRate, totalCharge: item.charge, ticketCount: item.tickets, calculationDetails: item.details, isFrozen: targetMonth < currentMonth });
+        await this.snapshotsRepository.save(snapshot);
+      }
+      delete item.details; delete item.customerId; delete item.contractId;
     }
-    const customerSummary = Object.values(byCustomer).sort((a, b) => b.charge - a.charge);
-    return {
-      totalTickets: tickets.length,
-      totalExceeded: exceeded.length,
-      totalConsumedHours: Number(customerSummary.reduce((sum, item) => sum + item.consumedHours, 0).toFixed(2)),
-      totalExceededHours: Number(customerSummary.reduce((sum, item) => sum + item.exceededHours, 0).toFixed(2)),
-      contractsWithoutAllowance: customerSummary.filter(item => item.includedHours <= 0).length,
-      totalCharge,
-      byCustomer: customerSummary,
-    };
+    const summary = Object.values(byCustomer).sort((a: any, b: any) => b.charge - a.charge) as any[];
+    return { totalTickets: summary.reduce((sum, item) => sum + item.tickets, 0), totalExceeded: summary.reduce((sum, item) => sum + item.exceeded, 0), totalConsumedHours: Number(summary.reduce((sum, item) => sum + item.consumedHours, 0).toFixed(2)), totalExceededHours: Number(summary.reduce((sum, item) => sum + item.exceededHours, 0).toFixed(2)), contractsWithoutAllowance: summary.filter(item => item.includedHours <= 0).length, totalCharge: Number(summary.reduce((sum, item) => sum + item.charge, 0).toFixed(2)), byCustomer: summary };
   }
+
   private applyMonthFilter(qb: any, month?: string, alias = 't'): void {
-    if (!month || !/^\d{4}-\d{2}$/.test(month)) return;
-    const [year, monthNumber] = month.split('-').map(Number);
-    if (monthNumber < 1 || monthNumber > 12) return;
-    const start = new Date(year, monthNumber - 1, 1);
-    const end = new Date(year, monthNumber, 1);
-    const referenceColumn = 'COALESCE(' + alias + '.date_solved, ' + alias + '.date_closed, ' + alias + '.date_opened)';
-    qb.andWhere(
-      referenceColumn + ' >= :monthStart AND ' + referenceColumn + ' < :monthEnd',
-      { monthStart: start, monthEnd: end },
-    );
+    const bounds = month ? this.monthBounds(month) : null;
+    if (!bounds) return;
+    qb.andWhere(alias + '.date_opened < :monthEnd AND COALESCE(' + alias + '.date_solved, ' + alias + '.date_closed, ' + alias + '.date_opened) >= :monthStart', { monthStart: bounds.start, monthEnd: bounds.end });
   }
   async getConfig2(): Promise<Partial<GlpiConfig> | null> {
     const config = await this.configRepository.findOne({ where: {} });

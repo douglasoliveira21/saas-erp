@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
+  DeleteDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { User } from '../../users/entities/user.entity';
 
@@ -36,6 +37,9 @@ export class Contract {
 
   @Column({ name: 'sla_total_hours', type: 'decimal', precision: 10, scale: 2, default: 0 })
   slaTotalHours: number;
+
+  @Column({ name: 'sla_calculation_mode', type: 'varchar', length: 30, default: 'glpi_actiontime' })
+  slaCalculationMode: string;
 
   @Column({ name: 'sla_overage_rate', type: 'decimal', precision: 10, scale: 2, default: 80 })
   slaOverageRate: number;
@@ -78,6 +82,9 @@ export class Contract {
 
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

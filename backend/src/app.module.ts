@@ -27,6 +27,8 @@ import { QuotesModule } from './modules/quotes/quotes.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditInterceptor } from './modules/audit/audit.interceptor';
 
 @Module({
   imports: [
@@ -60,5 +62,6 @@ import { HealthController } from './health.controller';
     OperationsModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
 })
 export class AppModule {}

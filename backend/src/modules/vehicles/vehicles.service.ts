@@ -70,7 +70,7 @@ export class VehiclesService {
 
   async remove(id: string): Promise<void> {
     const vehicle = await this.findOne(id);
-    await this.vehiclesRepository.remove(vehicle);
+    await this.vehiclesRepository.softRemove(vehicle);
   }
 
   async searchPlate(plate: string): Promise<any> {

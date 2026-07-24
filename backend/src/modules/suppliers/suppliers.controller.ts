@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request, Headers } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -60,7 +60,7 @@ export class BillsController {
 
   @Patch(':id/pay')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  payBill(@Param('id') id: string, @Body() body: any) { return this.service.payBill(id, body); }
+  payBill(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) { return this.service.payBill(id, body, idempotencyKey); }
 
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)

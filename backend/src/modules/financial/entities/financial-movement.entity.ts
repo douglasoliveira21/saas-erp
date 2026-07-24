@@ -71,6 +71,9 @@ export class FinancialMovement {
   @Column({ name: 'reference_type', type: 'varchar', length: 50, nullable: true })
   referenceType: string;
 
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 150, nullable: true })
+  idempotencyKey: string;
+
   @Column({ name: 'is_forecast', type: 'boolean', default: false })
   isForecast: boolean;
 

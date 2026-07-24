@@ -39,10 +39,9 @@ export function Payments() {
   }
 
   async function downloadPdf(codigoSolicitacao: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     try {
       const res = await fetch(`/api/inter/pdf/${codigoSolicitacao}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       })
       if (!res.ok) { setError('Erro ao baixar PDF'); return }
       const blob = await res.blob()
@@ -56,10 +55,9 @@ export function Payments() {
   }
 
   async function viewPdf(codigoSolicitacao: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     try {
       const res = await fetch(`/api/inter/pdf/${codigoSolicitacao}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       })
       if (!res.ok) { setError('Erro ao visualizar boleto'); return }
       const blob = await res.blob()

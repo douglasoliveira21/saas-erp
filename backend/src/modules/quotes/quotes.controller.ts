@@ -5,7 +5,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { JwtService } from '@nestjs/jwt';
 
 @Controller('quotes')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -52,28 +51,4 @@ export class QuotesController {
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) { return this.service.remove(id); }
-}
-
-// Controller público para PDF (sem JWT guard - usa token via query)
-@Controller('quotes-public')
-export class QuotesPublicController {
-  constructor(private readonly service: QuotesService, private readonly jwtService: JwtService) {}
-
-  @Get(':id/pdf')
-  async getPdf(@Param('id') id: string, @Query('token') token: string, @Res() res: Response) {
-    if (!token) {
-      res.status(401).json({ message: 'Token obrigatório' });
-      return;
-    }
-    try {
-      const payload = await this.jwtService.verifyAsync(token);
-      if (!payload?.sub) throw new Error('Invalid');
-    } catch {
-      res.status(401).json({ message: 'Token inválido ou expirado' });
-      return;
-    }
-    const html = await this.service.generatePdfHtml(id);
-    res.setHeader('Content-Type', 'text/html');
-    res.send(html);
-  }
 }

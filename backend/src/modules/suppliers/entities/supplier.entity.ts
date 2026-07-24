@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
+  DeleteDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('suppliers')
 export class Supplier {
@@ -37,6 +38,9 @@ export class Supplier {
 
   @Column({ default: true })
   active: boolean;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
