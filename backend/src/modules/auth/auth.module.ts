@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
 import { PasswordReset } from './entities/password-reset.entity';
 import { env } from '../../config/env.config';
+import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { env } from '../../config/env.config';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, OptionalJwtAuthGuard],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

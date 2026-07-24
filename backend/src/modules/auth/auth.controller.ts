@@ -3,6 +3,7 @@ import { Response as ExpressResponse } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -19,6 +20,12 @@ export class AuthController {
   logout(@Response({ passthrough: true }) response: ExpressResponse) {
     response.clearCookie('access_token', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/' });
     return { success: true };
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
+  @Get('session')
+  async getSession(@Request() req) {
+    return { user: req.user || null };
   }
 
   @UseGuards(JwtAuthGuard)
