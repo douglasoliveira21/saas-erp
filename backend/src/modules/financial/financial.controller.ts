@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  Headers,
 } from '@nestjs/common';
 import { FinancialService } from './financial.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -30,11 +31,16 @@ export class FinancialController {
     @Query('customerId') customerId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
-    @Query('paymentMethod') paymentMethod?: string,
+    @Query('paymentMethod') paymentMethod?: string, @Query('page') page?: string, @Query('limit') limit?: string,
   ) {
-    return this.financialService.findAll({ status, customerId, startDate, endDate, paymentMethod });
+    return this.financialService.findAll({ status, customerId, startDate, endDate, paymentMethod, page: page ? Number(page) : undefined, limit: limit ? Number(limit) : undefined });
   }
 
+  @Get('accounts/by-sale/:saleId')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  findAccountBySale(@Param('saleId') saleId: string) {
+    return this.financialService.findAccountBySale(saleId);
+  }
   // ==================== Installments ====================
 
   @Get('installments')
@@ -43,9 +49,9 @@ export class FinancialController {
     @Query('status') status?: string,
     @Query('accountId') accountId?: string,
     @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
+    @Query('endDate') endDate?: string, @Query('page') page?: string, @Query('limit') limit?: string,
   ) {
-    return this.financialService.findInstallments({ status, accountId, startDate, endDate });
+    return this.financialService.findInstallments({ status, accountId, startDate, endDate, page: page ? Number(page) : undefined, limit: limit ? Number(limit) : undefined });
   }
 
   // ==================== Movements ====================
@@ -76,6 +82,7 @@ export class FinancialController {
     @Param('installmentId') installmentId: string,
     @Body() body: { value: number; paymentMethod: string; bankAccountId?: string; paidAt?: string; observations?: string },
     @Request() req: any,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.financialService.payInstallment(
       installmentId,
@@ -86,6 +93,7 @@ export class FinancialController {
         bankAccountId: body.bankAccountId,
         paidAt: body.paidAt,
         observations: body.observations,
+        idempotencyKey,
       },
     );
   }
@@ -270,12 +278,21 @@ export class FinancialController {
     return this.financialService.payPayable(id, body, req.user.id);
   }
 
+  @Get('integrity-report')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getIntegrityReport() { return this.financialService.getIntegrityReport(); }
   @Get('monthly-closings')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   listClosings() {
     return this.financialService.listClosings();
   }
 
+  @Post('monthly-closings/:period/reopen')
+  @Roles(UserRole.ADMIN)
+  @Permissions('financial.reopen_month')
+  reopenMonth(@Param('period') period: string, @Body() body: { reason: string }, @Request() req: any) {
+    return this.financialService.reopenMonth(period, req.user.id, body.reason);
+  }
   @Post('monthly-closings')
   @Roles(UserRole.ADMIN)
   @Permissions('financial.close_month')

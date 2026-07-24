@@ -39,7 +39,11 @@ export class NfseService {
 
     try {
       invoice.status = 'processando';
-      invoice.number = config.nfseNextNumber;
+const numberRows = await this.configRepository.query(`UPDATE fiscal_config SET nfse_next_number = nfse_next_number + 1 WHERE id=$1 RETURNING nfse_next_number - 1 AS number`, [config.id]);
+      const reservedNumber = Number(numberRows[0]?.number);
+      if (!Number.isInteger(reservedNumber) || reservedNumber <= 0) throw new BadRequestException('Não foi possível reservar a numeração da NFS-e');
+      config.nfseNextNumber = reservedNumber;
+      invoice.number = reservedNumber;
       invoice.series = config.nfseSeries;
       await this.invoiceRepository.save(invoice);
 
@@ -100,7 +104,6 @@ export class NfseService {
       }
 
       await this.invoiceRepository.save(invoice);
-      await this.configRepository.update(config.id, { nfseNextNumber: config.nfseNextNumber + 1 });
 
       return invoice;
     } catch (e) {

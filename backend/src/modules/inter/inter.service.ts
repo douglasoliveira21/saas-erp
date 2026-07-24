@@ -4,10 +4,12 @@ import { Repository } from 'typeorm';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { Sale } from '../sales/entities/sale.entity';
 import { FinancialService } from '../financial/financial.service';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
+import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
 
 interface TokenCache {
   accessToken: string;
@@ -25,6 +27,8 @@ export class InterService implements OnModuleInit {
   constructor(
     @InjectRepository(Sale)
     private readonly saleRepo: Repository<Sale>,
+    @InjectRepository(InterWebhookEvent)
+    private readonly webhookEventRepo: Repository<InterWebhookEvent>,
     private readonly financialService: FinancialService,
     private readonly mailService: MailService,
     private readonly auditService: AuditService,
@@ -236,9 +240,8 @@ export class InterService implements OnModuleInit {
       );
 
       await this.saleRepo.manager.query(
-        `UPDATE payments
-         SET status = 'cancelado', updated_at = NOW()
-         WHERE codigo_solicitacao = $1`,
+        `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+         UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
         [codigoSolicitacao],
       );
 
@@ -281,6 +284,12 @@ export class InterService implements OnModuleInit {
     }
   }
 
+  async cancelPix(txid: string): Promise<void> {
+    const params = new URLSearchParams(); params.append('client_id', process.env.INTER_CLIENT_ID); params.append('client_secret', process.env.INTER_CLIENT_SECRET); params.append('scope', 'pix.write'); params.append('grant_type', 'client_credentials');
+    const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), { 'Content-Type': 'application/x-www-form-urlencoded' });
+    await this.httpRequest('PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { Authorization: `Bearer ${tokenRes.access_token}`, 'Content-Type': 'application/json' });
+    await this.saleRepo.manager.query(`UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1`, [txid]);
+  }
   onModuleInit() {
     const enabled = process.env.INTER_AUTO_RECONCILE !== 'false';
     if (!enabled) return;
@@ -333,9 +342,8 @@ export class InterService implements OnModuleInit {
     );
 
     for (const payment of payments) {
-      if (payment.type === 'boleto') {
-        await this.cancelBoleto(payment.codigo_solicitacao, motivoCancelamento);
-      }
+      if (payment.type === 'boleto') await this.cancelBoleto(payment.codigo_solicitacao, motivoCancelamento);
+      else if (payment.type === 'pix') await this.cancelPix(payment.codigo_solicitacao);
     }
   }
 
@@ -389,7 +397,13 @@ export class InterService implements OnModuleInit {
    * Consulta QR Code PIX via GET /pix/v2/cob/{txid}
    */
   async getPixQrCode(txid: string) {
-    const token = await this.getAccessToken();
+    const params = new URLSearchParams();
+    params.append('client_id', process.env.INTER_CLIENT_ID);
+    params.append('client_secret', process.env.INTER_CLIENT_SECRET);
+    params.append('scope', 'pix.read');
+    params.append('grant_type', 'client_credentials');
+    const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), { 'Content-Type': 'application/x-www-form-urlencoded' });
+    const token = tokenRes.access_token;
 
     this.logger.log(`Consultando PIX QR Code: ${txid}`);
 
@@ -422,38 +436,10 @@ export class InterService implements OnModuleInit {
     return 'a_receber';
   }
 
-  private async markSaleAsPaid(saleId: string, paymentMethod = 'boleto'): Promise<void> {
-    await this.saleRepo.manager.query(
-      `UPDATE sales SET status = 'pago', updated_at = NOW() WHERE id = $1 AND status != 'pago'`,
-      [saleId],
-    );
-
-    await this.saleRepo.manager.query(
-      `UPDATE accounts_receivable
-       SET paid_value = total_value, pending_value = 0, status = 'pago', paid_at = COALESCE(paid_at, NOW()), updated_at = NOW()
-       WHERE sale_id = $1 AND status != 'pago'`,
-      [saleId],
-    );
-
-    await this.saleRepo.manager.query(
-      `UPDATE installments
-       SET paid_value = value, status = 'pago', paid_at = COALESCE(paid_at, NOW()), payment_method = $2, updated_at = NOW()
-       WHERE sale_id = $1 AND status != 'pago'`,
-      [saleId, paymentMethod],
-    );
-
-    await this.saleRepo.manager.query(
-      `UPDATE financial_movements
-       SET is_forecast = false, date = CURRENT_DATE, payment_method = $2
-       WHERE sale_id = $1 AND type = 'receita' AND category = 'venda' AND is_forecast = true`,
-      [saleId, paymentMethod],
-    );
-  }
-
   private async markBoletoAsIssued(saleId: string): Promise<void> {
     await this.saleRepo.manager.query(
       `UPDATE sales
-       SET status = 'boleto_emitido', updated_at = NOW()
+       SET status = 'boleto_emitido', billing_status = 'emitido', updated_at = NOW()
        WHERE id = $1 AND status IN ('pendente', 'nf_emitida')`,
       [saleId],
     );
@@ -468,66 +454,31 @@ export class InterService implements OnModuleInit {
     );
   }
 
-  private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<{
-    saleId?: string;
-    type?: string;
-    oldStatus?: string;
-    newStatus: string;
-    changed: boolean;
-    situacao?: string;
-  }> {
-    const cobranca = interData?.cobranca || interData;
-    const boleto = interData?.boleto || {};
-    const pix = interData?.pix || {};
-    const situacao = cobranca?.situacao || interData?.situacao || interData?.status;
-    const localStatus = this.getLocalPaymentStatus(situacao);
-
-    const previous = await this.saleRepo.manager.query(
-      `SELECT sale_id, type, status
-       FROM payments
-       WHERE codigo_solicitacao = $1
-       LIMIT 1`,
-      [codigoSolicitacao],
-    );
-
-    const updated = await this.saleRepo.manager.query(
-      `UPDATE payments
-       SET status = $1,
-           linha_digitavel = COALESCE($2, linha_digitavel),
-           pix_copia_e_cola = COALESCE($3, pix_copia_e_cola),
-           nosso_numero = COALESCE($4, nosso_numero),
-           updated_at = NOW()
-       WHERE codigo_solicitacao = $5
-       RETURNING sale_id, type`,
-      [
-        localStatus,
-        boleto?.linhaDigitavel || interData?.linhaDigitavel || null,
-        pix?.pixCopiaECola || interData?.pixCopiaECola || null,
-        boleto?.nossoNumero || interData?.nossoNumero || null,
-        codigoSolicitacao,
-      ],
-    );
-
-    if (updated[0]?.sale_id && updated[0].type === 'boleto' && localStatus !== 'cancelado') {
-      await this.markBoletoAsIssued(updated[0].sale_id);
-    }
-
-    if (localStatus === 'pago' && updated[0]?.sale_id) {
-      await this.markSaleAsPaid(updated[0].sale_id, updated[0].type || 'boleto');
-    }
-
-    return {
-      saleId: updated[0]?.sale_id || previous[0]?.sale_id,
-      type: updated[0]?.type || previous[0]?.type,
-      oldStatus: previous[0]?.status,
-      newStatus: localStatus,
-      changed: Boolean(previous[0]) && previous[0].status !== localStatus,
-      situacao,
-    };
+  private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<{ saleId?: string; type?: string; oldStatus?: string; newStatus: string; changed: boolean; situacao?: string }> {
+    const cobranca = interData?.cobranca || interData; const boleto = interData?.boleto || {}; const pix = interData?.pix || {};
+    const situacao = cobranca?.situacao || interData?.situacao || interData?.status; const localStatus = this.getLocalPaymentStatus(situacao);
+    return this.saleRepo.manager.transaction(async (manager) => {
+      const previous = await manager.query(`SELECT sale_id, type, status FROM payments WHERE codigo_solicitacao=$1 FOR UPDATE`, [codigoSolicitacao]);
+      if (!previous[0]) throw new HttpException('Cobrança local não encontrada', HttpStatus.NOT_FOUND);
+      const updated = await manager.query(`UPDATE payments SET status=$1, linha_digitavel=COALESCE($2,linha_digitavel), pix_copia_e_cola=COALESCE($3,pix_copia_e_cola), nosso_numero=COALESCE($4,nosso_numero), paid_at=CASE WHEN $1='pago' THEN COALESCE(paid_at,NOW()) ELSE paid_at END, updated_at=NOW() WHERE codigo_solicitacao=$5 RETURNING sale_id,type`, [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao]);
+      const saleId = updated[0]?.sale_id; const type = updated[0]?.type;
+      if (saleId) {
+        const billingStatus = localStatus === 'pago' ? 'pago' : localStatus === 'vencido' ? 'vencido' : localStatus === 'cancelado' ? 'cancelado' : 'emitido';
+        await manager.query(`UPDATE sales SET billing_status=$2, status=CASE WHEN status IN ('pendente','nf_emitida') AND $2='emitido' THEN 'boleto_emitido' ELSE status END, updated_at=NOW() WHERE id=$1`, [saleId, billingStatus]);
+        if (localStatus !== 'cancelado') await manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Cobrança emitida via Banco Inter') WHERE sale_id=$1 AND type='emissao_boleto' AND status='pendente'`, [saleId]);
+      }
+      if (localStatus === 'pago' && saleId) {
+        const rawPaidAt = cobranca?.dataPagamento || cobranca?.dataHoraPagamento || interData?.dataPagamento;
+        const parsedPaidAt = rawPaidAt ? new Date(rawPaidAt) : new Date();
+        await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt, undefined, manager);
+      }
+      return { saleId, type, oldStatus: previous[0].status, newStatus: localStatus, changed: previous[0].status !== localStatus, situacao };
+    });
   }
-
   async syncBoletoStatus(codigoSolicitacao: string): Promise<any> {
-    const boleto = await this.getBoleto(codigoSolicitacao);
+    const local = await this.saleRepo.manager.query(`SELECT type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
+    if (!local[0]) throw new HttpException('Cobrança não encontrada', HttpStatus.NOT_FOUND);
+    const boleto = local[0].type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
     const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
     await this.auditInter('inter.status_sync', statusUpdate.saleId || null, {
       codigoSolicitacao,
@@ -552,9 +503,9 @@ export class InterService implements OnModuleInit {
     try {
       const limit = Math.max(Number(process.env.INTER_RECONCILE_BATCH_SIZE || 50), 1);
       const payments = await this.saleRepo.manager.query(
-        `SELECT id, sale_id, codigo_solicitacao, status, customer_name
+        `SELECT id, sale_id, codigo_solicitacao, type, status, customer_name
          FROM payments
-         WHERE type = 'boleto'
+         WHERE type IN ('boleto','pix')
            AND status IN ('a_receber', 'vencido')
            AND COALESCE(codigo_solicitacao, '') <> ''
          ORDER BY updated_at ASC NULLS FIRST, created_at ASC
@@ -570,7 +521,7 @@ export class InterService implements OnModuleInit {
       for (const payment of payments) {
         checked++;
         try {
-          const boleto = await this.getBoleto(payment.codigo_solicitacao);
+          const boleto = payment.type === 'pix' ? await this.getPixQrCode(payment.codigo_solicitacao) : await this.getBoleto(payment.codigo_solicitacao);
           const statusUpdate = await this.applyPaymentStatus(payment.codigo_solicitacao, boleto);
           if (statusUpdate.changed) {
             updated++;
@@ -615,102 +566,51 @@ export class InterService implements OnModuleInit {
    * Processa webhook de pagamento do Banco Inter.
    * Localiza a venda pelo seuNumero, atualiza status e registra no financeiro.
    */
-  async handleWebhook(payload: any): Promise<{ success: boolean; message: string }> {
-    this.logger.log('Webhook recebido do Banco Inter: ' + JSON.stringify(payload));
-    await this.auditInter('inter.webhook_received', null, { payload });
-
+  async handleWebhook(payload: any, sourceIp?: string): Promise<{ success: boolean; message: string }> {
+    const eventHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    let storedEvent: InterWebhookEvent;
+    try {
+      storedEvent = await this.webhookEventRepo.save(this.webhookEventRepo.create({ eventHash, sourceIp: sourceIp || null, status: 'recebido', payload }));
+    } catch (error) {
+      if ((error as any)?.code !== '23505') throw error;
+      const existing = await this.webhookEventRepo.findOne({ where: { eventHash } });
+      if (!existing || existing.status !== 'erro') return { success: true, message: 'Evento ja processado' };
+      existing.status = 'recebido';
+      existing.error = null;
+      existing.sourceIp = sourceIp || existing.sourceIp;
+      storedEvent = await this.webhookEventRepo.save(existing);
+    }
+    await this.auditInter('inter.webhook_received', null, { eventHash, sourceIp });
     try {
       const events = Array.isArray(payload) ? payload : [payload];
       let processed = 0;
-
       for (const event of events) {
-        const codigoSolicitacao = event.codigoSolicitacao || event.cobranca?.codigoSolicitacao;
-        if (codigoSolicitacao) {
-          const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, event);
-          await this.auditInter('inter.webhook_processed', statusUpdate.saleId || null, {
-            codigoSolicitacao,
-            statusUpdate,
-            event,
-          });
-          processed++;
-          continue;
-        }
-
-        const seuNumero = event.cobranca?.seuNumero || event.seuNumero || event.txid;
-        const situacao = event.cobranca?.situacao || event.situacao || event.status;
-
-        if (!seuNumero) {
-          this.logger.warn('Webhook sem identificador de venda (seuNumero/txid/codigoSolicitacao)');
-          await this.auditInter('inter.webhook_ignored', null, {
-            reason: 'missing_identifier',
-            event,
-          });
-          continue;
-        }
-
-        if (this.getLocalPaymentStatus(situacao) !== 'pago') {
-          await this.auditInter('inter.webhook_ignored', null, {
-            reason: 'not_paid',
-            seuNumero,
-            situacao,
-            event,
-          });
-          this.logger.log(`Webhook com situação "${situacao}" - ignorando (não é pagamento confirmado)`);
-          processed++;
-          continue;
-        }
-
-        let foundSale = await this.saleRepo.findOne({
-          where: { id: seuNumero },
-          relations: ['customer'],
-        });
-
-        if (!foundSale) {
-          const sales = await this.saleRepo
-            .createQueryBuilder('sale')
-            .leftJoinAndSelect('sale.customer', 'customer')
-            .where('sale.id LIKE :id', { id: `${seuNumero}%` })
-            .getMany();
-
-          if (sales.length === 1) {
-            foundSale = sales[0];
+        let codigoSolicitacao = event.codigoSolicitacao || event.cobranca?.codigoSolicitacao;
+        if (!codigoSolicitacao) {
+          const ref = event.cobranca?.seuNumero || event.seuNumero || event.txid;
+          if (ref) {
+            const payment = await this.saleRepo.manager.query(`SELECT codigo_solicitacao FROM payments WHERE sale_id::text = $1 OR sale_id::text LIKE $2 ORDER BY created_at DESC LIMIT 1`, [ref, `${ref}%`]);
+            codigoSolicitacao = payment[0]?.codigo_solicitacao;
           }
         }
-
-        if (!foundSale) {
-          this.logger.warn(`Venda não encontrada para seuNumero: ${seuNumero}`);
-          await this.auditInter('inter.webhook_ignored', null, {
-            reason: 'sale_not_found',
-            seuNumero,
-            situacao,
-            event,
-          });
+        if (!codigoSolicitacao) {
+          await this.auditInter('inter.webhook_ignored', null, { eventHash, reason: 'missing_verified_charge_identifier' });
           continue;
         }
-
-        await this.markSaleAsPaid(foundSale.id, 'boleto');
-        await this.auditInter('inter.webhook_sale_paid', foundSale.id, {
-          seuNumero,
-          situacao,
-          event,
-        });
-        this.logger.log(`Venda ${foundSale.id} marcada como paga via webhook`);
-
-        if (foundSale.customer?.email) {
-          await this.sendPaymentConfirmationEmail(foundSale);
-        }
-
+        const paymentType = await this.saleRepo.manager.query(`SELECT type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
+        const verifiedCharge = paymentType[0]?.type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
+        const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, verifiedCharge);
+        await this.auditInter('inter.webhook_processed', statusUpdate.saleId || null, { eventHash, codigoSolicitacao, statusUpdate });
         processed++;
       }
-
-      return { success: true, message: `${processed} evento(s) processado(s)` };
+      storedEvent.status = 'processado'; storedEvent.processedAt = new Date();
+      await this.webhookEventRepo.save(storedEvent);
+      return { success: true, message: `${processed} evento(s) confirmado(s) no Inter` };
     } catch (error) {
-      this.logger.error('Erro ao processar webhook: ' + error.message);
-      await this.auditInter('inter.webhook_error', null, {
-        payload,
-        error: error.message,
-      });
-      return { success: false, message: 'Erro interno ao processar webhook' };
+      storedEvent.status = 'erro'; storedEvent.error = error instanceof Error ? error.message : String(error);
+      await this.webhookEventRepo.save(storedEvent);
+      await this.auditInter('inter.webhook_error', null, { eventHash, error: storedEvent.error });
+      return { success: false, message: 'Nao foi possivel confirmar o evento no Banco Inter' };
     }
   }
 
@@ -726,6 +626,14 @@ export class InterService implements OnModuleInit {
     if (!customer) {
       throw new HttpException('Venda sem cliente associado', HttpStatus.BAD_REQUEST);
     }
+    if (sale.operationalStatus === 'cancelada' || ['cancelado', 'finalizado'].includes(sale.status as any)) throw new HttpException('Venda cancelada ou finalizada não pode gerar cobrança', HttpStatus.BAD_REQUEST);
+    if (sale.paymentStatus === 'pago' || sale.status === 'pago' as any) throw new HttpException('Venda já está paga', HttpStatus.BAD_REQUEST);
+    if (!Number.isFinite(Number(sale.totalAmount)) || Number(sale.totalAmount) <= 0) throw new HttpException('Valor da venda deve ser positivo', HttpStatus.BAD_REQUEST);
+    const document = (customer.cpfCnpj || '').replace(/\D/g, '');
+    const missing = [!customer.name && 'nome', ![11, 14].includes(document.length) && 'CPF/CNPJ', !customer.address && 'endereço', !customer.city && 'cidade', !customer.uf && 'UF', !/^\d{8}$/.test((customer.cep || '').replace(/\D/g, '')) && 'CEP'].filter(Boolean);
+    if (missing.length) throw new HttpException(`Complete o cadastro do cliente: ${missing.join(', ')}`, HttpStatus.BAD_REQUEST);
+    const active = await this.saleRepo.manager.query(`SELECT id, codigo_solicitacao, type, status, due_date FROM payments WHERE sale_id=$1 AND type=$2 AND status IN ('pendente','a_receber','vencido') ORDER BY created_at DESC LIMIT 1`, [sale.id, type]);
+    if (active[0]) throw new HttpException(`Já existe ${type === 'boleto' ? 'boleto' : 'PIX'} ativo para esta venda`, HttpStatus.CONFLICT);
 
     if (type === 'boleto') {
       // Usar data de vencimento da venda ou calcular +7 dias
@@ -743,6 +651,8 @@ export class InterService implements OnModuleInit {
         }
         dataVencimento = vencimento.getFullYear() + '-' + String(vencimento.getMonth()+1).padStart(2,'0') + '-' + String(vencimento.getDate()).padStart(2,'0');
       }
+      const today = new Date(); const todayLocal = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+      if (dataVencimento < todayLocal) throw new HttpException('Não é permitido gerar boleto com vencimento anterior a hoje', HttpStatus.BAD_REQUEST);
 
       const tipoPessoa = (customer.cpfCnpj?.length || 0) > 11 ? 'JURIDICA' : 'FISICA';
 
@@ -785,7 +695,7 @@ export class InterService implements OnModuleInit {
         };
       }
 
-      this.logger.log('Payload boleto: ' + JSON.stringify(boletoData));
+      this.logger.log('Solicitação de boleto preparada - venda: ' + sale.id + ', vencimento: ' + dataVencimento + ', valor: ' + Number(sale.totalAmount).toFixed(2));
 
       const result = await this.createBoleto(boletoData);
 
@@ -797,12 +707,13 @@ export class InterService implements OnModuleInit {
       );
       if (existingPayment.length === 0) {
         await this.saleRepo.manager.query(
-          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '']
+          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, idempotency_key)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '', 'charge:' + sale.id + ':boleto']
         );
       }
 
+      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`, [codigoSol]);
       await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente
@@ -863,6 +774,11 @@ export class InterService implements OnModuleInit {
       };
 
       const result = await this.createPixImmediate(pixData);
+      const pixCode = result.txid || result.codigoSolicitacao || result.loc?.id;
+      if (!pixCode) throw new HttpException('Banco Inter não retornou identificador do PIX', HttpStatus.BAD_GATEWAY);
+      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, pix_copia_e_cola, idempotency_key) VALUES ($1,$2,'pix',$3,'a_receber',$4,$5,$6,CURRENT_DATE,$7,$8)`, [sale.id, customer.id || null, pixCode, Number(sale.totalAmount), customer.name, document, result.pixCopiaECola || result.pixCopiaEColaBase64 || '', `charge:${sale.id}:pix`]);
+      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`, [pixCode]);
+      await this.saleRepo.manager.query(`UPDATE sales SET billing_status='emitido', updated_at=NOW() WHERE id=$1`, [sale.id]);
 
       // Enviar email com QR Code PIX
       if (customer.email) {

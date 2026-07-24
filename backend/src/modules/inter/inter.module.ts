@@ -7,10 +7,11 @@ import { FinancialModule } from '../financial/financial.module';
 import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, AuditLog]),
+    TypeOrmModule.forFeature([Sale, AuditLog, InterWebhookEvent]),
     FinancialModule,
     MailModule,
     AuditModule,

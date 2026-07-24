@@ -52,7 +52,10 @@ export class FiscalJobsService implements OnModuleInit {
           invoice.verificationCode = response.verificationCode || invoice.verificationCode;
           invoice.rejectionReason = response.rejectionReason || response.motivoRejeicao || invoice.rejectionReason;
         }
-        await this.invoiceRepo.save(invoice);
+        await this.invoiceRepo.save(invoice);        if (invoice.saleId && String(invoice.status).toLowerCase() === 'autorizada') {
+          await this.invoiceRepo.manager.query(`UPDATE sales SET fiscal_status='autorizada', status=CASE WHEN status='pendente' THEN 'nf_emitida' ELSE status END, updated_at=NOW() WHERE id=$1`, [invoice.saleId]);
+          await this.invoiceRepo.manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Nota autorizada pela sincronização fiscal') WHERE sale_id=$1 AND type='emissao_nf' AND status='pendente'`, [invoice.saleId]);
+        }
         await this.eventRepo.save(this.eventRepo.create({
           invoiceId: invoice.id,
           type: 'job_status_sync',

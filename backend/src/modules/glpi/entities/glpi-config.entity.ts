@@ -8,10 +8,10 @@ export class GlpiConfig {
   @Column({ name: 'api_url', length: 500 })
   apiUrl: string;
 
-  @Column({ name: 'app_token', length: 255 })
+  @Column({ name: 'app_token', type: 'text' })
   appToken: string;
 
-  @Column({ name: 'user_token', length: 255, nullable: true })
+  @Column({ name: 'user_token', type: 'text', nullable: true })
   userToken: string;
 
   @Column({ name: 'session_token', length: 255, nullable: true })

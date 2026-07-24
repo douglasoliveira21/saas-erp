@@ -11,6 +11,11 @@ interface Sale {
   technician: { id: string; name: string; email?: string }
   customer: { id: string; name: string; email?: string }
   status: string
+  operationalStatus?: string
+  fiscalStatus?: string
+  billingStatus?: string
+  paymentStatus?: string
+  dueDate?: string
   paymentMethod: string
   totalAmount: number
   netProfit: number
@@ -21,7 +26,7 @@ interface Sale {
 }
 
 const statusLabels: Record<string, string> = {
-  pendente: 'Pendente', nf_emitida: 'NF Emitida', boleto_emitido: 'Boleto Emitido',
+  pendente: 'Pendente', nf_emitida: 'Aprovada p/ emissão', boleto_emitido: 'Boleto Emitido',
   pago: 'Pago', finalizado: 'Finalizado', cancelado: 'Cancelado'
 }
 const statusColors: Record<string, string> = {
@@ -51,12 +56,12 @@ export function Sales() {
   const [emailBody, setEmailBody] = useState('')
   const [emailSending, setEmailSending] = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [])
 
   async function load() {
     try {
-      const res = await api.get('/sales')
-      setSales(res.data)
+      const res = await api.get('/sales', { params: { page: 1, limit: 100 } })
+      setSales(res.data.data || res.data)
     } catch { setError('Erro ao carregar vendas') }
     finally { setLoading(false) }
   }
@@ -64,13 +69,6 @@ export function Sales() {
   async function approve(id: string) {
     try {
       await api.patch(`/sales/${id}/approve`)
-      load(); setSelected(null)
-    } catch (e: any) { setError(e.response?.data?.message || 'Erro') }
-  }
-
-  async function markPaid(id: string) {
-    try {
-      await api.patch(`/sales/${id}/mark-paid`)
       load(); setSelected(null)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro') }
   }
@@ -230,7 +228,7 @@ export function Sales() {
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">{paymentLabels[s.paymentMethod] || s.paymentMethod}{s.installments > 1 ? ` (${s.installments}x)` : ''}</td>
                   <td className="table-cell font-semibold text-gray-900 dark:text-white">R$ {Number(s.totalAmount).toFixed(2)}</td>
                   <td className="table-cell">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[s.status]}`}>{statusLabels[s.status]}</span>
+                    <div className="flex flex-wrap gap-1"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[s.status] || ''}`}>{statusLabels[s.status] || s.status}</span>{s.fiscalStatus === 'autorizada' && <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">Fiscal autorizada</span>}{s.billingStatus === 'emitido' && <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700">Cobrança emitida</span>}{s.paymentStatus === 'parcial' && <span className="px-2 py-1 rounded-full text-xs bg-cyan-100 text-cyan-700">Pagamento parcial</span>}</div>
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-2">
@@ -238,7 +236,7 @@ export function Sales() {
                       {(isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status) && (
                         <Link to={`/sales/new?edit=${s.id}`} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar Venda"><Edit className="w-4 h-4" /></Link>
                       )}
-                      {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'pago', 'finalizado'].includes(s.status) && (
+                      {(isAdmin || isFinanceiro) && s.fiscalStatus !== 'autorizada' && !['cancelado', 'finalizado'].includes(s.status) && (!s.dueDate || s.dueDate >= new Date().toISOString().split('T')[0]) && (
                         <button onClick={() => window.location.href = '/fiscal?emit=' + s.id} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Emitir Nota Fiscal"><FileText className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida'].includes(s.status) && (
@@ -252,9 +250,7 @@ export function Sales() {
                           <Send className={'w-4 h-4 ' + (emailSending && emailSaleId === s.id ? 'animate-pulse' : '')} />
                         </button>
                       )}
-                      {(isAdmin || isFinanceiro) && ['pendente', 'nf_emitida', 'boleto_emitido'].includes(s.status) && (
-                        <button onClick={() => markPaid(s.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar Pagamento"><DollarSign className="w-4 h-4" /></button>
-                      )}
+
                       {(isAdmin || isFinanceiro) && s.status === 'pago' && (
                         <button onClick={() => finalize(s.id)} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Finalizar"><Check className="w-4 h-4" /></button>
                       )}
@@ -334,23 +330,11 @@ function SaleDetailModal({ sale, onClose, isAdmin, isFinanceiro, approve, cancel
   const [loadingInst, setLoadingInst] = useState(false)
 
   useEffect(() => {
-    if (sale.installments > 1 || sale.paymentMethod === 'boleto') {
-      setLoadingInst(true)
-      api.get('/financial/installments', { params: { accountId: sale.id } })
-        .then(r => {
-          // Se não encontrou por accountId (que é saleId aqui), buscar por sale
-          if (r.data.length === 0) {
-            return api.get('/financial/accounts', { params: {} }).then(ar => {
-              const account = ar.data.find((a: any) => a.saleId === sale.id)
-              if (account?.installmentsList) setInstallments(account.installmentsList)
-              else if (account) return api.get('/financial/installments', { params: { accountId: account.id } }).then(r2 => setInstallments(r2.data))
-            })
-          }
-          setInstallments(r.data)
-        })
-        .catch(() => {})
-        .finally(() => setLoadingInst(false))
-    }
+    setLoadingInst(true)
+    api.get('/financial/accounts/by-sale/' + sale.id)
+      .then(r => setInstallments(r.data?.installmentsList || []))
+      .catch(() => setInstallments([]))
+      .finally(() => setLoadingInst(false))
   }, [sale.id])
 
   const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', parcial: 'Parcial', vencido: 'Vencido', cancelado: 'Cancelado' }

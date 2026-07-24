@@ -1,37 +1,57 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import * as forge from 'node-forge';
 import { Certificate } from '../entities/certificate.entity';
+import { decryptField, encryptField, isEncryptedField, requireEncryptionSecret } from '../../../common/security/field-encryption';
 
-const ENCRYPTION_KEY = process.env.CERT_ENCRYPTION_KEY || 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6';
-const IV_LENGTH = 16;
+const LEGACY_DEFAULT_KEY = 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6';
 
-function encrypt(text: string): string {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
-}
-
-function decrypt(text: string): string {
+function decryptLegacy(text: string, secret: string): string {
   const parts = text.split(':');
   const iv = Buffer.from(parts.shift()!, 'hex');
   const encrypted = parts.join(':');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+  const key = Buffer.from(secret.padEnd(32, '0').slice(0, 32));
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  return decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8');
 }
 
 @Injectable()
-export class CertificateService {
+export class CertificateService implements OnModuleInit {
+  private readonly encryptionKey = requireEncryptionSecret('CERT_ENCRYPTION_KEY');
+  private readonly previousEncryptionKey = process.env.CERT_ENCRYPTION_KEY_PREVIOUS || '';
   constructor(
     @InjectRepository(Certificate)
     private certRepository: Repository<Certificate>,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    const certificates = await this.certRepository.find();
+    for (const certificate of certificates) {
+      const valuesUseCurrentKey = [certificate.pfxData, certificate.pfxPassword].every(value => {
+        if (!isEncryptedField(value)) return false;
+        try { decryptField(value, [this.encryptionKey]); return true; } catch { return false; }
+      });
+      if (valuesUseCurrentKey) continue;
+      const pfx = this.decryptProtected(certificate.pfxData);
+      const password = this.decryptProtected(certificate.pfxPassword);
+      certificate.pfxData = encryptField(pfx, this.encryptionKey);
+      certificate.pfxPassword = encryptField(password, this.encryptionKey);
+      await this.certRepository.save(certificate);
+    }
+  }
+
+  private decryptProtected(value: string): string {
+    if (isEncryptedField(value)) {
+      return decryptField(value, [this.encryptionKey, this.previousEncryptionKey]);
+    }
+    const legacyKeys = [this.encryptionKey, this.previousEncryptionKey, LEGACY_DEFAULT_KEY].filter(Boolean);
+    for (const key of legacyKeys) {
+      try { return decryptLegacy(value, key); } catch { /* try next legacy key */ }
+    }
+    throw new Error('Nao foi possivel descriptografar o certificado legado');
+  }
 
   async upload(pfxBuffer: Buffer, password: string, name: string, userId: string): Promise<Certificate> {
     // Validar certificado
@@ -61,8 +81,8 @@ export class CertificateService {
     if (cnpjMatch) cnpj = cnpjMatch[0];
 
     // Criptografar PFX e senha
-    const pfxEncrypted = encrypt(pfxBuffer.toString('base64'));
-    const passwordEncrypted = encrypt(password);
+    const pfxEncrypted = encryptField(pfxBuffer.toString('base64'), this.encryptionKey);
+    const passwordEncrypted = encryptField(password, this.encryptionKey);
 
     const certificate = this.certRepository.create({
       name,
@@ -97,8 +117,8 @@ export class CertificateService {
   async getPfxBuffer(certId: string): Promise<{ pfx: Buffer; password: string }> {
     const cert = await this.certRepository.findOne({ where: { id: certId } });
     if (!cert) throw new NotFoundException('Certificado nao encontrado');
-    const pfx = Buffer.from(decrypt(cert.pfxData), 'base64');
-    const password = decrypt(cert.pfxPassword);
+    const pfx = Buffer.from(this.decryptProtected(cert.pfxData), 'base64');
+    const password = this.decryptProtected(cert.pfxPassword);
     return { pfx, password };
   }
 

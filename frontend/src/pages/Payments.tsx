@@ -27,13 +27,13 @@ export function Payments() {
   const [error, setError] = useState('')
   const [reconciling, setReconciling] = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [])
 
   async function load() {
     setLoading(true)
     try {
-      const res = await api.get('/inter/payments')
-      setPayments(res.data)
+      const res = await api.get('/inter/payments', { params: { page: 1, limit: 100 } })
+      setPayments(res.data.data || res.data)
     } catch { setPayments([]) }
     finally { setLoading(false) }
   }

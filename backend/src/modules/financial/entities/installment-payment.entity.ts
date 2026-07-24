@@ -19,6 +19,9 @@ export class InstallmentPayment {
   @Column({ name: 'movement_id', type: 'uuid', nullable: true })
   movementId: string;
 
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 100, nullable: true, unique: true })
+  idempotencyKey: string;
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   value: number;
 

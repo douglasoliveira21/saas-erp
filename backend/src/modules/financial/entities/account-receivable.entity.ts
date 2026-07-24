@@ -18,7 +18,7 @@ export class AccountReceivable {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'sale_id' })
+  @Column({ name: 'sale_id', unique: true })
   saleId: string;
 
   @Column({ name: 'customer_id' })

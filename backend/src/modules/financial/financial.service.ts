@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan, In } from 'typeorm';
+import { EntityManager, Repository, Between, LessThan, In, DataSource } from 'typeorm';
 import { AccountReceivable } from './entities/account-receivable.entity';
 import { Installment } from './entities/installment.entity';
 import { FinancialMovement } from './entities/financial-movement.entity';
@@ -67,19 +67,27 @@ export class FinancialService implements OnModuleInit {
     @InjectRepository(AccountPayable)
     private readonly payableRepo: Repository<AccountPayable>,
     private readonly auditService: AuditService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
    * Creates financial records when a sale is created.
    * Handles different payment methods with appropriate logic.
    */
-  async createFromSale(sale: Sale, userId: string): Promise<AccountReceivable> {
+  async createFromSale(sale: Sale, userId: string, manager?: EntityManager): Promise<AccountReceivable> {
+    const accountRepo = manager?.getRepository(AccountReceivable) || this.accountRepo;
+    const installmentRepo = manager?.getRepository(Installment) || this.installmentRepo;
+    const movementRepo = manager?.getRepository(FinancialMovement) || this.movementRepo;
+    const cardFeeRepo = manager?.getRepository(CardFee) || this.cardFeeRepo;
+    const paymentRepo = manager?.getRepository(InstallmentPayment) || this.installmentPaymentRepo;
+    const existing = await accountRepo.findOne({ where: { saleId: sale.id } });
+    if (existing) return existing;
     const now = new Date();
-    const isImmediate = ['dinheiro', 'pix', 'cartao_debito', 'transferencia'].includes(sale.paymentMethod);
+    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const isCard = ['cartao_credito', 'cartao_debito'].includes(sale.paymentMethod);
 
     // Create account receivable
-    const account = this.accountRepo.create({
+    const account = accountRepo.create({
       saleId: sale.id,
       customerId: sale.customerId,
       description: `Venda #${sale.id.substring(0, 8)}`,
@@ -94,20 +102,25 @@ export class FinancialService implements OnModuleInit {
       createdBy: userId,
     });
 
-    const savedAccount = await this.accountRepo.save(account);
+    const savedAccount = await accountRepo.save(account);
 
     // Get card fee info if applicable
     let cardFee: CardFee | null = null;
     if (isCard) {
-      cardFee = await this.getCardFee(sale.paymentMethod, sale.installments || 1);
+      cardFee = await this.getCardFee(sale.paymentMethod, sale.installments || 1, cardFeeRepo);
     }
 
     // Create installments
     const installments = this.generateInstallments(sale, savedAccount, now, cardFee);
-    await this.installmentRepo.save(installments);
+    const savedInstallments = await installmentRepo.save(installments);
 
     // Create financial movements
-    await this.createMovementsFromSale(sale, savedAccount, userId, now, cardFee);
+    await this.createMovementsFromSale(sale, savedAccount, userId, now, cardFee, movementRepo);
+    if (isImmediate) {
+      const movement = await movementRepo.findOne({ where: { saleId: sale.id, accountId: savedAccount.id, category: 'venda', isForecast: false } });
+      if (movement) await paymentRepo.save(savedInstallments.map((installment) => paymentRepo.create({ installmentId: installment.id, movementId: movement.id, idempotencyKey: 'sale-create:' + sale.id + ':' + installment.id, value: Number(installment.value), paymentMethod: sale.paymentMethod, paidAt: now, createdBy: userId })));
+    }
+    if (isImmediate) await (manager?.getRepository(Sale) || this.dataSource.getRepository(Sale)).update(sale.id, { status: 'pago' as any, paymentStatus: 'pago' });
 
     return savedAccount;
   }
@@ -120,96 +133,78 @@ export class FinancialService implements OnModuleInit {
     value: number,
     paymentMethod: string,
     userId: string,
-    options?: { bankAccountId?: string; paidAt?: string; observations?: string },
+    options?: { bankAccountId?: string; paidAt?: string; observations?: string; idempotencyKey?: string },
   ): Promise<Installment> {
-    const installment = await this.installmentRepo.findOne({
-      where: { id: installmentId },
-      relations: ['account'],
-    });
-
-    if (!installment) {
-      throw new NotFoundException('Parcela não encontrada');
-    }
-
-    const oldData = { ...installment };
-
-    if (installment.status === 'pago' || installment.status === 'cancelado') {
-      throw new BadRequestException('Parcela já está paga ou cancelada');
-    }
-
-    const remaining = Number(installment.value) - Number(installment.paidValue);
-    if (value > remaining) {
-      throw new BadRequestException(`Valor excede o saldo da parcela (R$ ${remaining.toFixed(2)})`);
-    }
-
+    if (!Number.isFinite(Number(value)) || Number(value) <= 0) throw new BadRequestException('Valor do pagamento deve ser positivo');
     const paidAt = options?.paidAt ? new Date(options.paidAt) : new Date();
-    await this.ensurePeriodOpen(paidAt.toISOString().split('T')[0]);
+    if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Data de pagamento inválida');
+    const period = paidAt.toISOString().slice(0, 7);
 
-    const newPaidValue = Number(installment.paidValue) + value;
-    const isPaid = newPaidValue >= Number(installment.value);
-
-    installment.paidValue = newPaidValue;
-    installment.status = isPaid ? 'pago' : 'parcial';
-    installment.paidAt = isPaid ? paidAt : null;
-    installment.paymentMethod = paymentMethod;
-
-    await this.installmentRepo.save(installment);
-
-    // Update account totals
-    await this.updateAccountTotals(installment.accountId);
-
-    // Create realized movement
-    const movement = await this.movementRepo.save(
-      this.movementRepo.create({
-        type: 'receita',
-        category: 'venda',
-        description: `Pagamento parcela ${installment.number}`,
-        value,
-        date: paidAt.toISOString().split('T')[0],
-        competenceDate: installment.competenceDate || installment.dueDate,
-        dueDate: installment.dueDate,
-        paidAt,
-        saleId: installment.saleId,
-        accountId: installment.accountId,
-        installmentId: installment.id,
-        paymentMethod,
-        bankAccountId: options?.bankAccountId || null,
-        isForecast: false,
-        createdBy: userId,
-      }),
-    );
-
-    await this.installmentPaymentRepo.save(
-      this.installmentPaymentRepo.create({
-        installmentId: installment.id,
-        movementId: movement.id,
-        value,
-        paymentMethod,
-        bankAccountId: options?.bankAccountId || null,
-        paidAt,
-        observations: options?.observations || null,
-        createdBy: userId,
-      }),
-    );
-
-    await this.auditService.safeCreate({
-      userId,
-      action: 'financial.installment_paid',
-      entity: 'installment',
-      entityId: installment.id,
-      oldData,
-      newData: {
-        paidValue: installment.paidValue,
-        status: installment.status,
-        paymentMethod,
-        value,
-        bankAccountId: options?.bankAccountId,
-      },
+    const result = await this.dataSource.transaction(async (manager) => {
+      const closed = await manager.getRepository(MonthlyClosing).findOne({ where: { period } });
+      if (closed) throw new BadRequestException(`Período ${period} já está fechado para edição`);
+      const paymentRepo = manager.getRepository(InstallmentPayment);
+      if (options?.idempotencyKey) {
+        const duplicate = await paymentRepo.findOne({ where: { idempotencyKey: options.idempotencyKey }, relations: ['installment'] });
+        if (duplicate) return { installment: duplicate.installment, oldData: null, duplicate: true };
+      }
+      const installmentRepo = manager.getRepository(Installment);
+      const installment = await installmentRepo.findOne({ where: { id: installmentId }, relations: ['account'], lock: { mode: 'pessimistic_write' } });
+      if (!installment) throw new NotFoundException('Parcela não encontrada');
+      if (['pago', 'cancelado'].includes(installment.status)) throw new BadRequestException('Parcela já está paga ou cancelada');
+      const oldData = { ...installment };
+      const remaining = Number(installment.value) - Number(installment.paidValue);
+      if (Number(value) > remaining + 0.001) throw new BadRequestException(`Valor excede o saldo da parcela (R$ ${remaining.toFixed(2)})`);
+      const newPaidValue = Number(installment.paidValue) + Number(value);
+      installment.paidValue = newPaidValue;
+      installment.status = newPaidValue + 0.001 >= Number(installment.value) ? 'pago' : 'parcial';
+      installment.paidAt = installment.status === 'pago' ? paidAt : null;
+      installment.paymentMethod = paymentMethod;
+      await installmentRepo.save(installment);
+      const movementRepo = manager.getRepository(FinancialMovement);
+      const movement = await movementRepo.save(movementRepo.create({ type: 'receita', category: 'venda', description: `Pagamento parcela ${installment.number}`, value: Number(value), date: paidAt.toISOString().split('T')[0], competenceDate: installment.competenceDate || installment.dueDate, dueDate: installment.dueDate, paidAt, saleId: installment.saleId, accountId: installment.accountId, installmentId: installment.id, paymentMethod, bankAccountId: options?.bankAccountId || null, isForecast: false, createdBy: userId }));
+      await paymentRepo.save(paymentRepo.create({ installmentId: installment.id, movementId: movement.id, idempotencyKey: options?.idempotencyKey || null, value: Number(value), paymentMethod, bankAccountId: options?.bankAccountId || null, paidAt, observations: options?.observations || null, createdBy: userId }));
+      const totals = await installmentRepo.createQueryBuilder('i').select('COALESCE(SUM(i.paidValue),0)', 'paid').addSelect('COALESCE(SUM(i.value),0)', 'total').where('i.accountId = :accountId', { accountId: installment.accountId }).getRawOne();
+      const paid = Number(totals.paid); const total = Number(totals.total); const fullyPaid = paid + 0.001 >= total;
+      const forecasts = await movementRepo.find({ where: { saleId: installment.saleId, category: 'venda', isForecast: true } });
+      for (const forecast of forecasts) { if (fullyPaid) await movementRepo.remove(forecast); else { forecast.value = Math.max(0, total-paid); await movementRepo.save(forecast); } }
+      await manager.getRepository(AccountReceivable).update(installment.accountId, { paidValue: paid, pendingValue: Math.max(0, total-paid), status: fullyPaid ? 'pago' : paid > 0 ? 'parcial' : 'pendente', paidAt: fullyPaid ? paidAt : null });
+      if (fullyPaid) await manager.getRepository(Sale).update(installment.saleId, { status: 'pago' as any, paymentStatus: 'pago' });
+      else if (paid > 0) await manager.getRepository(Sale).update(installment.saleId, { paymentStatus: 'parcial' });
+      return { installment, oldData, duplicate: false };
     });
-
-    return installment;
+    if (!result.duplicate) await this.auditService.safeCreate({ userId, action: 'financial.installment_paid', entity: 'installment', entityId: result.installment.id, oldData: result.oldData, newData: { paidValue: result.installment.paidValue, status: result.installment.status, paymentMethod, value, idempotencyKey: options?.idempotencyKey } });
+    return result.installment;
   }
-
+  async settleSale(saleId: string, paymentMethod: string, userId: string, idempotencyKey: string, paidAt = new Date(), bankAccountId?: string, transactionManager?: EntityManager): Promise<void> {
+    if (!idempotencyKey) throw new BadRequestException('Chave de idempotência obrigatória');
+    const execute = async (manager: EntityManager) => {
+      const sale = await manager.getRepository(Sale).findOne({ where: { id: saleId }, lock: { mode: 'pessimistic_write' } });
+      if (!sale) throw new NotFoundException('Venda não encontrada');
+      if (sale.operationalStatus === 'cancelada' || sale.status === 'cancelado' as any) throw new BadRequestException('Venda cancelada não pode receber pagamento');
+      const account = await manager.getRepository(AccountReceivable).findOne({ where: { saleId }, lock: { mode: 'pessimistic_write' } });
+      if (!account) throw new NotFoundException('Conta a receber da venda não encontrada');
+      const installments = await manager.getRepository(Installment).find({ where: { accountId: account.id }, order: { number: 'ASC' } });
+      const movementRepo = manager.getRepository(FinancialMovement); const paymentRepo = manager.getRepository(InstallmentPayment);
+      const saleForecasts = await movementRepo.find({ where: { saleId, category: 'venda', isForecast: true } });
+      if (saleForecasts.length) await movementRepo.remove(saleForecasts);
+      for (const installment of installments) {
+        const key = `${idempotencyKey}:${installment.id}`.slice(0, 100);
+        if (await paymentRepo.findOne({ where: { idempotencyKey: key } })) continue;
+        const remaining = Math.max(0, Number(installment.value) - Number(installment.paidValue)); if (remaining <= 0) continue;
+        let movement = await movementRepo.findOne({ where: { installmentId: installment.id, isForecast: true } });
+        if (movement) { movement.isForecast = false; movement.date = paidAt.toISOString().split('T')[0]; movement.paidAt = paidAt; movement.paymentMethod = paymentMethod; movement.value = remaining; movement = await movementRepo.save(movement); }
+        else movement = await movementRepo.save(movementRepo.create({ type: 'receita', category: 'venda', description: `Recebimento venda ${saleId}`, value: remaining, date: paidAt.toISOString().split('T')[0], paidAt, saleId, accountId: account.id, installmentId: installment.id, paymentMethod, bankAccountId: bankAccountId || null, isForecast: false, createdBy: userId || null }));
+        installment.paidValue = Number(installment.value); installment.status = 'pago'; installment.paidAt = paidAt; installment.paymentMethod = paymentMethod;
+        await manager.getRepository(Installment).save(installment);
+        await paymentRepo.save(paymentRepo.create({ installmentId: installment.id, movementId: movement.id, idempotencyKey: key, value: remaining, paymentMethod, bankAccountId: bankAccountId || null, paidAt, createdBy: userId || null }));
+      }
+      account.paidValue = Number(account.totalValue); account.pendingValue = 0; account.status = 'pago'; account.paidAt = paidAt; await manager.getRepository(AccountReceivable).save(account);
+      sale.status = 'pago' as any; sale.paymentStatus = 'pago'; await manager.getRepository(Sale).save(sale);
+    };
+    if (transactionManager) await execute(transactionManager); else await this.dataSource.transaction(execute);
+    await this.auditService.safeCreate({ userId: userId || null, action: 'financial.sale_settled', entity: 'sale', entityId: saleId, newData: { paymentMethod, idempotencyKey, paidAt } });
+  }
   /**
    * Cancel an account receivable and its pending installments.
    */
@@ -452,6 +447,8 @@ export class FinancialService implements OnModuleInit {
     startDate?: string;
     endDate?: string;
     paymentMethod?: string;
+    page?: number;
+    limit?: number;
   }) {
     const query = this.accountRepo.createQueryBuilder('account')
       .leftJoinAndSelect('account.customer', 'customer')
@@ -474,9 +471,13 @@ export class FinancialService implements OnModuleInit {
       query.andWhere('account.paymentMethod = :paymentMethod', { paymentMethod: filters.paymentMethod });
     }
 
-    return query.getMany();
+    if (filters?.page || filters?.limit) { const page = Math.max(filters.page || 1, 1); const limit = Math.min(Math.max(filters.limit || 50, 1), 100); return query.skip((page-1)*limit).take(limit).getManyAndCount().then(([data,total]) => ({ data,total,page,limit })); }
+    return query.take(500).getMany();
   }
 
+  async findAccountBySale(saleId: string) {
+    return this.accountRepo.findOne({ where: { saleId }, relations: ['customer', 'installmentsList'] });
+  }
   /**
    * List installments with filters.
    */
@@ -485,6 +486,8 @@ export class FinancialService implements OnModuleInit {
     accountId?: string;
     startDate?: string;
     endDate?: string;
+    page?: number;
+    limit?: number;
   }) {
     const query = this.installmentRepo.createQueryBuilder('installment')
       .leftJoinAndSelect('installment.account', 'account')
@@ -505,7 +508,8 @@ export class FinancialService implements OnModuleInit {
       query.andWhere('installment.dueDate <= :endDate', { endDate: filters.endDate });
     }
 
-    return query.getMany();
+    if (filters?.page || filters?.limit) { const page = Math.max(filters.page || 1, 1); const limit = Math.min(Math.max(filters.limit || 50, 1), 100); return query.skip((page-1)*limit).take(limit).getManyAndCount().then(([data,total]) => ({ data,total,page,limit })); }
+    return query.take(500).getMany();
   }
 
   /**
@@ -635,6 +639,7 @@ export class FinancialService implements OnModuleInit {
     if (data.date || data.competenceDate) {
       await this.ensurePeriodOpen(data.competenceDate || data.date);
     }
+    if (!movement.isForecast) throw new BadRequestException('Lançamento realizado é imutável; faça um estorno');
     // Atualiza apenas o lançamento específico (não afeta outros meses do grupo)
     const oldData = { ...movement };
     Object.assign(movement, data);
@@ -821,40 +826,22 @@ export class FinancialService implements OnModuleInit {
   }
 
   async reverseMovement(id: string, reason: string, userId: string) {
-    const movement = await this.movementRepo.findOne({ where: { id } });
-    if (!movement) throw new NotFoundException('Lançamento não encontrado');
-    await this.ensurePeriodOpen(new Date().toISOString().split('T')[0]);
-
-    const reversal = await this.movementRepo.save(this.movementRepo.create({
-      type: 'estorno',
-      category: movement.category || 'estorno',
-      description: `Estorno de ${movement.description || movement.id}: ${reason}`,
-      value: Number(movement.value),
-      date: new Date().toISOString().split('T')[0],
-      competenceDate: movement.competenceDate,
-      dueDate: movement.dueDate,
-      referenceId: movement.id,
-      referenceType: 'financial_movement_reversal',
-      paymentMethod: movement.paymentMethod,
-      bankAccountId: movement.bankAccountId,
-      costCenterId: movement.costCenterId,
-      chartAccountId: movement.chartAccountId,
-      isForecast: false,
-      createdBy: userId,
-    }));
-
-    await this.auditService.safeCreate({
-      userId,
-      action: 'financial.movement_reversed',
-      entity: 'financial_movement',
-      entityId: movement.id,
-      oldData: movement,
-      newData: { reversalId: reversal.id, reason },
+    if (!reason?.trim()) throw new BadRequestException('Motivo do estorno obrigatório');
+    const today = new Date().toISOString().split('T')[0]; await this.ensurePeriodOpen(today);
+    const reversal = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(FinancialMovement);
+      const movement = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!movement) throw new NotFoundException('Lançamento não encontrado');
+      if (movement.type === 'estorno') throw new BadRequestException('Um estorno não pode ser estornado diretamente');
+      const existing = await repo.findOne({ where: { referenceId: id, referenceType: 'financial_movement_reversal' } });
+      if (existing) return existing;
+      return repo.save(repo.create({ type: 'estorno', category: movement.category || 'estorno', description: `Estorno de ${movement.description || movement.id}: ${reason.trim()}`, value: Number(movement.value), date: today, competenceDate: movement.competenceDate, dueDate: movement.dueDate, referenceId: movement.id, referenceType: 'financial_movement_reversal', paymentMethod: movement.paymentMethod, bankAccountId: movement.bankAccountId, costCenterId: movement.costCenterId, chartAccountId: movement.chartAccountId, isForecast: false, createdBy: userId }));
     });
+    await this.auditService.safeCreate({ userId, action: 'financial.movement_reversed', entity: 'financial_movement', entityId: id, newData: { reversalId: reversal.id, reason } });
     return reversal;
   }
-
   async closeMonth(period: string, userId: string, notes?: string) {
+    if (!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new BadRequestException('Período inválido; use AAAA-MM');
     const existing = await this.monthlyClosingRepo.findOne({ where: { period } });
     if (existing) return existing;
     const closing = await this.monthlyClosingRepo.save(this.monthlyClosingRepo.create({
@@ -873,6 +860,31 @@ export class FinancialService implements OnModuleInit {
     return closing;
   }
 
+  async reopenMonth(period: string, userId: string, reason: string) {
+    if (!reason?.trim()) throw new BadRequestException('Justificativa de reabertura obrigatória');
+    const closing = await this.monthlyClosingRepo.findOne({ where: { period } });
+    if (!closing) throw new NotFoundException('Fechamento mensal não encontrado');
+    await this.monthlyClosingRepo.remove(closing);
+    await this.auditService.safeCreate({ userId, action: 'financial.month_reopened', entity: 'monthly_closing', entityId: closing.id, oldData: closing, newData: { period, reason: reason.trim(), reopenedAt: new Date() } });
+    return { period, reopened: true };
+  }
+  async getIntegrityReport() {
+    const rows = await this.dataSource.query(`
+      SELECT s.id AS sale_id, s.status AS legacy_status, s.payment_status, s.fiscal_status, s.billing_status,
+             a.status AS account_status, a.total_value, a.paid_value, a.pending_value,
+             COALESCE(i.total,0) AS installments_total, COALESCE(i.paid,0) AS installments_paid,
+             EXISTS(SELECT 1 FROM payments p WHERE p.sale_id=s.id AND p.status='pago') AS bank_paid,
+             EXISTS(SELECT 1 FROM invoices n WHERE n.sale_id=s.id AND n.status='autorizada') AS invoice_authorized
+      FROM sales s LEFT JOIN accounts_receivable a ON a.sale_id=s.id
+      LEFT JOIN LATERAL (SELECT SUM(value) total, SUM(paid_value) paid FROM installments WHERE sale_id=s.id) i ON true
+      WHERE s.archived_at IS NULL AND (
+        (a.id IS NULL) OR ABS(COALESCE(a.total_value,0)-COALESCE(i.total,0)) > 0.01 OR ABS(COALESCE(a.paid_value,0)-COALESCE(i.paid,0)) > 0.01 OR
+        (s.payment_status='pago') <> (a.status='pago') OR
+        (EXISTS(SELECT 1 FROM payments p WHERE p.sale_id=s.id AND p.status='pago') AND a.status<>'pago') OR
+        (EXISTS(SELECT 1 FROM invoices n WHERE n.sale_id=s.id AND n.status='autorizada') AND s.fiscal_status<>'autorizada')
+      ) ORDER BY s.created_at DESC LIMIT 500`);
+    return { consistent: rows.length === 0, divergences: rows.length, items: rows };
+  }
   async listClosings() {
     return this.monthlyClosingRepo.find({ order: { period: 'DESC' } });
   }
@@ -921,7 +933,7 @@ export class FinancialService implements OnModuleInit {
     const numInstallments = sale.installments || 1;
     const totalAmount = Number(sale.totalAmount);
     const baseValue = Math.floor((totalAmount / numInstallments) * 100) / 100; // Arredondar para baixo
-    const isImmediate = ['dinheiro', 'pix', 'cartao_debito', 'transferencia'].includes(sale.paymentMethod);
+    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const installments: Partial<Installment>[] = [];
 
     let totalDistributed = 0;
@@ -956,7 +968,7 @@ export class FinancialService implements OnModuleInit {
   ): string {
     const dueDate = new Date(now);
 
-    if (['dinheiro', 'pix', 'cartao_debito', 'transferencia'].includes(sale.paymentMethod)) {
+    if (['dinheiro', 'cartao_debito'].includes(sale.paymentMethod)) {
       return dueDate.toISOString().split('T')[0];
     }
 
@@ -983,15 +995,16 @@ export class FinancialService implements OnModuleInit {
     userId: string,
     now: Date,
     cardFee: CardFee | null,
+    movementRepo: Repository<FinancialMovement> = this.movementRepo,
   ): Promise<void> {
-    const isImmediate = ['dinheiro', 'pix', 'cartao_debito', 'transferencia'].includes(sale.paymentMethod);
+    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const isCard = ['cartao_credito', 'cartao_debito'].includes(sale.paymentMethod);
     const today = now.toISOString().split('T')[0];
 
     if (isImmediate) {
       // Realized movement - full value received
-      await this.movementRepo.save(
-        this.movementRepo.create({
+      await movementRepo.save(
+        movementRepo.create({
           type: 'receita',
           category: 'venda',
           description: `Venda #${sale.id.substring(0, 8)} - ${sale.paymentMethod}`,
@@ -1010,8 +1023,8 @@ export class FinancialService implements OnModuleInit {
         ? this.calculateInstallmentDueDate(sale, now, 1, cardFee)
         : account.dueDate;
 
-      await this.movementRepo.save(
-        this.movementRepo.create({
+      await movementRepo.save(
+        movementRepo.create({
           type: 'receita',
           category: 'venda',
           description: `Venda #${sale.id.substring(0, 8)} - ${sale.paymentMethod} (previsão)`,
@@ -1030,8 +1043,8 @@ export class FinancialService implements OnModuleInit {
     if (isCard && cardFee) {
       const feeValue = Number(sale.totalAmount) * (Number(cardFee.feePercentage) / 100);
 
-      await this.movementRepo.save(
-        this.movementRepo.create({
+      await movementRepo.save(
+        movementRepo.create({
           type: 'despesa',
           category: 'taxa_cartao',
           description: `Taxa ${cardFee.operator} - ${cardFee.feePercentage}% sobre venda #${sale.id.substring(0, 8)}`,
@@ -1047,10 +1060,10 @@ export class FinancialService implements OnModuleInit {
     }
   }
 
-  private async getCardFee(paymentMethod: string, installments: number): Promise<CardFee | null> {
+  private async getCardFee(paymentMethod: string, installments: number, repository: Repository<CardFee> = this.cardFeeRepo): Promise<CardFee | null> {
     const paymentType = paymentMethod === 'cartao_credito' ? 'credito' : 'debito';
 
-    const fee = await this.cardFeeRepo
+    const fee = await repository
       .createQueryBuilder('fee')
       .where('fee.paymentType = :paymentType', { paymentType })
       .andWhere('fee.installmentsFrom <= :installments', { installments })
