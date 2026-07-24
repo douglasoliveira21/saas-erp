@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
@@ -33,6 +34,9 @@ export class Service {
 
   @Column({ default: true })
   active: boolean;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

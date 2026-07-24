@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, DeleteDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Supplier } from './supplier.entity';
 
 @Entity('bills')
@@ -59,6 +59,9 @@ export class Bill {
 
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -8,7 +8,13 @@ import { env } from '../../../config/env.config';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private authService: AuthService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (request: any) => {
+          const match = (request?.headers?.cookie || '').match(/(?:^|;\s*)access_token=([^;]+)/);
+          return match ? decodeURIComponent(match[1]) : null;
+        },
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: env.jwt.secret,
     });

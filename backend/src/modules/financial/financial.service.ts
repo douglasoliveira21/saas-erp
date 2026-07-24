@@ -776,53 +776,34 @@ export class FinancialService implements OnModuleInit {
     return saved;
   }
 
-  async payPayable(id: string, body: any, userId: string) {
-    const payable = await this.payableRepo.findOne({ where: { id } });
-    if (!payable) throw new NotFoundException('Conta a pagar não encontrada');
-    if (['pago', 'cancelado', 'estornado'].includes(payable.status)) {
-      throw new BadRequestException('Conta a pagar não aceita nova baixa');
-    }
-
+  async payPayable(id: string, body: any, userId: string, idempotencyKey?: string) {
     const paidAt = body.paidAt ? new Date(body.paidAt) : new Date();
+    if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Data de pagamento inválida');
     await this.ensurePeriodOpen(paidAt.toISOString().split('T')[0]);
-    const value = Number(body.value || payable.pendingValue);
-    if (value <= 0 || value > Number(payable.pendingValue)) {
-      throw new BadRequestException('Valor de baixa inválido');
-    }
-
-    payable.paidValue = Number(payable.paidValue) + value;
-    payable.pendingValue = Number(payable.totalValue) - Number(payable.paidValue);
-    payable.status = payable.pendingValue <= 0 ? 'pago' : 'parcial';
-    payable.paidAt = payable.status === 'pago' ? paidAt : null;
-    const saved = await this.payableRepo.save(payable);
-
-    await this.movementRepo.save(this.movementRepo.create({
-      type: 'despesa',
-      category: 'conta_pagar',
-      description: `Baixa conta a pagar: ${payable.description}`,
-      value,
-      date: paidAt.toISOString().split('T')[0],
-      competenceDate: payable.competenceDate,
-      dueDate: payable.dueDate,
-      paidAt,
-      referenceId: payable.id,
-      referenceType: 'account_payable',
-      paymentMethod: body.paymentMethod,
-      bankAccountId: body.bankAccountId || null,
-      costCenterId: payable.costCenterId,
-      chartAccountId: payable.chartAccountId,
-      isForecast: false,
-      createdBy: userId,
-    }));
-
-    await this.auditService.safeCreate({
-      userId,
-      action: 'financial.payable_paid',
-      entity: 'account_payable',
-      entityId: payable.id,
-      newData: { value, status: saved.status, paidValue: saved.paidValue, pendingValue: saved.pendingValue },
+    const result = await this.dataSource.transaction(async (manager) => {
+      const payableRepo = manager.getRepository(AccountPayable);
+      const movementRepo = manager.getRepository(FinancialMovement);
+      if (idempotencyKey) {
+        const existing = await movementRepo.findOne({ where: { idempotencyKey } });
+        if (existing) return payableRepo.findOne({ where: { id } });
+      }
+      const payable = await payableRepo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!payable) throw new NotFoundException('Conta a pagar não encontrada');
+      if (['pago', 'cancelado', 'estornado'].includes(payable.status)) throw new BadRequestException('Conta a pagar não aceita nova baixa');
+      const requested = body.value == null ? Number(payable.pendingValue) : Number(body.value);
+      const value = Math.round(requested * 100) / 100;
+      const pending = Math.round(Number(payable.pendingValue) * 100) / 100;
+      if (!Number.isFinite(value) || value <= 0 || value > pending) throw new BadRequestException('Valor de baixa inválido');
+      payable.paidValue = Math.round((Number(payable.paidValue) + value) * 100) / 100;
+      payable.pendingValue = Math.round((Number(payable.totalValue) - Number(payable.paidValue)) * 100) / 100;
+      payable.status = payable.pendingValue <= 0 ? 'pago' : 'parcial';
+      payable.paidAt = payable.status === 'pago' ? paidAt : null;
+      const saved = await payableRepo.save(payable);
+      await movementRepo.save(movementRepo.create({ type: 'despesa', category: 'conta_pagar', description: `Baixa conta a pagar: ${payable.description}`, value, date: paidAt.toISOString().split('T')[0], competenceDate: payable.competenceDate, dueDate: payable.dueDate, paidAt, referenceId: payable.id, referenceType: 'account_payable', idempotencyKey: idempotencyKey || null, paymentMethod: body.paymentMethod, bankAccountId: body.bankAccountId || null, costCenterId: payable.costCenterId, chartAccountId: payable.chartAccountId, isForecast: false, createdBy: userId }));
+      return saved;
     });
-    return saved;
+    await this.auditService.safeCreate({ userId, action: 'financial.payable_paid', entity: 'account_payable', entityId: id, newData: { value: body.value, status: result?.status, idempotencyKey: idempotencyKey || null } });
+    return result;
   }
 
   async reverseMovement(id: string, reason: string, userId: string) {
@@ -843,7 +824,8 @@ export class FinancialService implements OnModuleInit {
   async closeMonth(period: string, userId: string, notes?: string) {
     if (!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new BadRequestException('Período inválido; use AAAA-MM');
     const existing = await this.monthlyClosingRepo.findOne({ where: { period } });
-    if (existing) return existing;
+    if (existing?.status === 'fechado') return existing;
+    if (existing) { existing.status = 'fechado'; existing.closedBy = userId; existing.closedAt = new Date(); existing.notes = notes || existing.notes; existing.reopenedBy = null; existing.reopenedAt = null; existing.reopenReason = null; return this.monthlyClosingRepo.save(existing); }
     const closing = await this.monthlyClosingRepo.save(this.monthlyClosingRepo.create({
       period,
       closedBy: userId,
@@ -864,8 +846,13 @@ export class FinancialService implements OnModuleInit {
     if (!reason?.trim()) throw new BadRequestException('Justificativa de reabertura obrigatória');
     const closing = await this.monthlyClosingRepo.findOne({ where: { period } });
     if (!closing) throw new NotFoundException('Fechamento mensal não encontrado');
-    await this.monthlyClosingRepo.remove(closing);
-    await this.auditService.safeCreate({ userId, action: 'financial.month_reopened', entity: 'monthly_closing', entityId: closing.id, oldData: closing, newData: { period, reason: reason.trim(), reopenedAt: new Date() } });
+    const oldData = { ...closing };
+    closing.status = 'reaberto';
+    closing.reopenedBy = userId;
+    closing.reopenedAt = new Date();
+    closing.reopenReason = reason.trim();
+    await this.monthlyClosingRepo.save(closing);
+    await this.auditService.safeCreate({ userId, action: 'financial.month_reopened', entity: 'monthly_closing', entityId: closing.id, oldData, newData: closing });
     return { period, reopened: true };
   }
   async getIntegrityReport() {
@@ -909,7 +896,7 @@ export class FinancialService implements OnModuleInit {
     if (!date) return;
     const period = date.substring(0, 7);
     const closing = await this.monthlyClosingRepo.findOne({ where: { period } });
-    if (closing) {
+    if (closing?.status === 'fechado') {
       throw new BadRequestException(`Período ${period} já está fechado para edição`);
     }
   }

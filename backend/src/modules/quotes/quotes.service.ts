@@ -135,7 +135,7 @@ export class QuotesService {
 
   async remove(id: string): Promise<void> {
     const q = await this.findOne(id);
-    await this.quoteRepo.remove(q);
+    await this.quoteRepo.softRemove(q);
   }
 
   // Generate PDF HTML

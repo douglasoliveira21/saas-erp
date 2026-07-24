@@ -91,6 +91,7 @@ export function Bills() {
   // Pay Modal
   const [showPayModal, setShowPayModal] = useState(false)
   const [payingBill, setPayingBill] = useState<Bill | null>(null)
+  const [payRequestKey, setPayRequestKey] = useState('')
   const [payMethod, setPayMethod] = useState('pix')
   const [payValue, setPayValue] = useState('')
 
@@ -186,6 +187,7 @@ export function Bills() {
 
   function openPay(b: Bill) {
     setPayingBill(b)
+    setPayRequestKey(crypto.randomUUID())
     setPayValue(String(b.value))
     setPayMethod(b.paymentMethod || 'pix')
     setShowPayModal(true)
@@ -197,7 +199,7 @@ export function Bills() {
       await api.patch('/bills/' + payingBill.id + '/pay', {
         paymentMethod: payMethod,
         paidValue: parseFloat(payValue) || Number(payingBill.value),
-      })
+      }, { headers: { 'Idempotency-Key': payRequestKey || crypto.randomUUID() } })
       setShowPayModal(false); loadAll()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao pagar') }
   }

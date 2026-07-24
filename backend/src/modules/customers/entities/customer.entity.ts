@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
@@ -54,6 +55,9 @@ export class Customer {
 
   @Column({ name: 'glpi_entity_name', length: 255, nullable: true })
   glpiEntityName: string;
+
+  @DeleteDateColumn({ name: 'archived_at', type: 'timestamp', nullable: true })
+  archivedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

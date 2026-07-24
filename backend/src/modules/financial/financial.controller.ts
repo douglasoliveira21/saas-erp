@@ -274,8 +274,8 @@ export class FinancialController {
 
   @Post('payables/:id/pay')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  payPayable(@Param('id') id: string, @Body() body: any, @Request() req: any) {
-    return this.financialService.payPayable(id, body, req.user.id);
+  payPayable(@Param('id') id: string, @Body() body: any, @Request() req: any, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.financialService.payPayable(id, body, req.user.id, idempotencyKey);
   }
 
   @Get('integrity-report')

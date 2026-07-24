@@ -113,8 +113,7 @@ export function Orcamentos() {
   }
 
   function openPdf(id: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
-    window.open(`/api/quotes-public/${id}/pdf?token=${token}`, '_blank')
+    window.open(`/api/quotes/${id}/pdf`, '_blank')
   }
 
   const filtered = quotes.filter(q => {
@@ -247,8 +246,7 @@ export function Orcamentos() {
                       <div className="flex gap-1 flex-wrap">
                         <button onClick={() => openPdf(q.id)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Ver/Imprimir PDF"><Eye className="w-4 h-4" /></button>
                         <button onClick={() => { 
-                          const token = localStorage.getItem('@GestaoTI:token')
-                          const w = window.open(`/api/quotes-public/${q.id}/pdf?token=${token}`, '_blank')
+                          const w = window.open(`/api/quotes/${q.id}/pdf`, '_blank')
                           if (w) setTimeout(() => w.print(), 1000)
                         }} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Download PDF"><Download className="w-4 h-4" /></button>
                         {q.status === 'pendente' && !isExpired && (

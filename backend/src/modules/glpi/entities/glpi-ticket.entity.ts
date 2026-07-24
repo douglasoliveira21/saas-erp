@@ -46,6 +46,9 @@ export class GlpiTicket {
   @Column({ name: 'sla_limit_hours', type: 'decimal', precision: 10, scale: 2, nullable: true })
   slaLimitHours: number;
 
+  @Column({ name: 'time_source', type: 'varchar', length: 30, default: 'elapsed' })
+  timeSource: string;
+
   @Column({ name: 'time_spent_hours', type: 'decimal', precision: 10, scale: 2, default: 0 })
   timeSpentHours: number;
 

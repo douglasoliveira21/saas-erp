@@ -12,7 +12,7 @@ interface AuthContextData {
   user: User | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   isAdmin: boolean
   isFinanceiro: boolean
   isTecnico: boolean
@@ -25,33 +25,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('@GestaoTI:token')
-    const storedUser = localStorage.getItem('@GestaoTI:user')
-
-    if (token && storedUser) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
-      setUser(JSON.parse(storedUser))
-    }
-
-    setLoading(false)
+    api.get('/auth/me')
+      .then(({ data }) => setUser(data))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false))
   }, [])
 
   async function login(email: string, password: string) {
     const response = await api.post('/auth/login', { email, password })
-    const { access_token, user: userData } = response.data
-
-    localStorage.setItem('@GestaoTI:token', access_token)
-    localStorage.setItem('@GestaoTI:user', JSON.stringify(userData))
-
-    api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
+    const { user: userData } = response.data
     setUser(userData)
   }
 
-  function logout() {
-    localStorage.removeItem('@GestaoTI:token')
-    localStorage.removeItem('@GestaoTI:user')
-    delete api.defaults.headers.common['Authorization']
-    setUser(null)
+  async function logout() {
+    try { await api.post('/auth/logout') } finally { setUser(null) }
   }
 
   const isAdmin = user?.role === 'admin'

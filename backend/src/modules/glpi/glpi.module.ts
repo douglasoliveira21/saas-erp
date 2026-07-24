@@ -6,9 +6,10 @@ import { GlpiTicket } from './entities/glpi-ticket.entity';
 import { GlpiConfig } from './entities/glpi-config.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Contract } from '../contracts/entities/contract.entity';
+import { SlaMonthlySnapshot } from './entities/sla-monthly-snapshot.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([GlpiTicket, GlpiConfig, Customer, Contract])],
+  imports: [TypeOrmModule.forFeature([GlpiTicket, GlpiConfig, Customer, Contract, SlaMonthlySnapshot])],
   controllers: [GlpiController],
   providers: [GlpiService],
   exports: [GlpiService],

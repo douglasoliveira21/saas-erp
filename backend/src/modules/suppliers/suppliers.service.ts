@@ -36,7 +36,7 @@ export class SuppliersService {
 
   async removeSupplier(id: string): Promise<void> {
     const s = await this.findOneSupplier(id);
-    await this.supplierRepo.remove(s);
+    await this.supplierRepo.softRemove(s);
   }
 
   // ==================== BILLS ====================
@@ -101,17 +101,27 @@ export class SuppliersService {
     return this.billRepo.save(b);
   }
 
-  async payBill(id: string, paymentData?: { paymentMethod?: string; paidValue?: number }): Promise<Bill> {
-    const bill = await this.findOneBill(id);
-    if (bill.status === 'pago') throw new BadRequestException('Conta já está paga');
-
-    const paidValue = paymentData?.paidValue || Number(bill.value);
-    bill.paidValue = paidValue;
-    bill.paidAt = new Date();
-    bill.status = paidValue >= Number(bill.value) ? 'pago' : 'parcial';
-    if (paymentData?.paymentMethod) bill.paymentMethod = paymentData.paymentMethod;
-
-    return this.billRepo.save(bill);
+  async payBill(id: string, paymentData?: { paymentMethod?: string; paidValue?: number }, idempotencyKey?: string): Promise<Bill> {
+    return this.dataSource.transaction(async manager => {
+      if (idempotencyKey) {
+        const existing = await manager.query('SELECT bill_id FROM bill_payments WHERE idempotency_key=$1', [idempotencyKey]);
+        if (existing[0]) return manager.getRepository(Bill).findOne({ where: { id: existing[0].bill_id } }) as Promise<Bill>;
+      }
+      const repo = manager.getRepository(Bill);
+      const bill = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!bill) throw new NotFoundException('Conta não encontrada');
+      if (['pago','cancelado'].includes(bill.status)) throw new BadRequestException('Conta não aceita nova baixa');
+      const remaining = Math.round((Number(bill.value) - Number(bill.paidValue || 0)) * 100) / 100;
+      const paidValue = Math.round(Number(paymentData?.paidValue ?? remaining) * 100) / 100;
+      if (!Number.isFinite(paidValue) || paidValue <= 0 || paidValue > remaining) throw new BadRequestException('Valor de pagamento inválido');
+      bill.paidValue = Math.round((Number(bill.paidValue || 0) + paidValue) * 100) / 100;
+      bill.paidAt = new Date();
+      bill.status = Number(bill.paidValue) >= Number(bill.value) ? 'pago' : 'parcial';
+      if (paymentData?.paymentMethod) bill.paymentMethod = paymentData.paymentMethod;
+      const saved = await repo.save(bill);
+      await manager.query('INSERT INTO bill_payments (bill_id,value,payment_method,idempotency_key,paid_at) VALUES ($1,$2,$3,$4,now())', [id, paidValue, paymentData?.paymentMethod || null, idempotencyKey || null]);
+      return saved;
+    });
   }
 
   async cancelBill(id: string): Promise<Bill> {
@@ -122,7 +132,7 @@ export class SuppliersService {
 
   async removeBill(id: string): Promise<void> {
     const bill = await this.findOneBill(id);
-    await this.billRepo.remove(bill);
+    await this.billRepo.softRemove(bill);
   }
 
   // Alerts: bills due in next N days

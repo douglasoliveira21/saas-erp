@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { QuotesService } from './quotes.service';
-import { QuotesController, QuotesPublicController } from './quotes.controller';
+import { QuotesController } from './quotes.controller';
 import { Quote } from './entities/quote.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Quote]), AuthModule],
-  controllers: [QuotesController, QuotesPublicController],
+  controllers: [QuotesController],
   providers: [QuotesService],
   exports: [QuotesService],
 })

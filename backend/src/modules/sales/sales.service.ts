@@ -18,6 +18,7 @@ import { NfseService } from '../fiscal/services/nfse.service';
 import { AuditService } from '../audit/audit.service';
 import { SaleEvent } from './entities/sale-event.entity';
 import { SaleAttachment } from './entities/sale-attachment.entity';
+import { money, moneySum, moneyMultiply } from '../../common/money';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -72,11 +73,25 @@ export class SalesService {
         }
       }
 
+      const normalizedItems = items.map((item: any) => {
+        const unitPrice = money(item.unitPrice);
+        const totalPrice = moneyMultiply(unitPrice, item.quantity);
+        return { ...item, unitPrice, totalPrice };
+      });
+      const subtotal = moneySum(normalizedItems.map((item: any) => item.totalPrice));
+      const discountAmount = money(saleData.discountAmount || 0);
+      const taxAmount = money(saleData.taxAmount || 0);
+      saleData.subtotal = subtotal;
+      saleData.discountAmount = discountAmount;
+      saleData.taxAmount = taxAmount;
+      saleData.totalAmount = money(subtotal - discountAmount + taxAmount);
+      saleData.commissionAmount = moneyMultiply(saleData.totalAmount, Number(saleData.commissionPercentage || 0) / 100);
+
       // Criar venda e itens dentro da mesma transação do estoque.
       const sale = queryRunner.manager.create(Sale, saleData);
       const savedSale = await queryRunner.manager.save(Sale, sale);
 
-      for (const item of items) {
+      for (const item of normalizedItems) {
         const saleItem = queryRunner.manager.create(SaleItem, {
           ...item,
           quantity: Number(item.quantity),
@@ -524,73 +539,44 @@ export class SalesService {
   }
 
   async update(id: string, updateSaleDto: any, userId?: string): Promise<Sale> {
-    const sale = await this.salesRepository.findOne({ where: { id } });
-    if (!sale) throw new NotFoundException('Venda não encontrada');
-    const oldData = { ...sale };
-    
-    // Remover campos de relação que não devem ser sobrescritos diretamente
-    const { technician, customer, items, approver, ...safeDto } = updateSaleDto;
-    
-    // Verificar se dueDay mudou para atualizar parcelas
-    const dueDayChanged = safeDto.dueDay !== undefined && safeDto.dueDay !== sale.dueDay;
-    
-    Object.assign(sale, safeDto);
-    await this.salesRepository.save(sale);
-
-    // Se o dia de vencimento mudou, atualizar parcelas pendentes
-    if (dueDayChanged && safeDto.dueDay) {
-      try {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    let oldData: any;
+    let safeDto: any;
+    try {
+      const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!sale) throw new NotFoundException('Venda não encontrada');
+      oldData = { ...sale };
+      const { technician, customer, items, approver, ...allowedDto } = updateSaleDto;
+      safeDto = allowedDto;
+      const dueDayChanged = safeDto.dueDay !== undefined && Number(safeDto.dueDay) !== Number(sale.dueDay);
+      Object.assign(sale, safeDto);
+      if (dueDayChanged && safeDto.dueDay) {
         const newDueDay = Number(safeDto.dueDay);
-        
-        // Atualizar parcelas pendentes (installments)
-        const pendingInstallments = await this.dataSource.query(
-          `SELECT id, number, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente', 'vencido')`,
-          [id]
-        );
-
-        for (const inst of pendingInstallments) {
-          const oldDate = new Date(inst.due_date);
-          const newDate = new Date(oldDate.getFullYear(), oldDate.getMonth(), newDueDay);
-          // Se o novo dia é menor que hoje, pula para o próximo mês
-          if (newDate < new Date()) {
-            newDate.setMonth(newDate.getMonth() + 1);
-          }
-          const newDateStr = newDate.toISOString().split('T')[0];
-          await this.dataSource.query(
-            `UPDATE installments SET due_date = $1, status = 'pendente' WHERE id = $2`,
-            [newDateStr, inst.id]
-          );
+        if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) throw new BadRequestException('Dia de vencimento inválido');
+        const pending = await queryRunner.query(`SELECT id, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente','vencido') FOR UPDATE`, [id]);
+        for (const installment of pending) {
+          const oldDate = new Date(installment.due_date + 'T12:00:00');
+          const lastDay = new Date(oldDate.getFullYear(), oldDate.getMonth() + 1, 0).getDate();
+          const changed = new Date(oldDate.getFullYear(), oldDate.getMonth(), Math.min(newDueDay, lastDay), 12);
+          if (changed < new Date()) changed.setMonth(changed.getMonth() + 1);
+          const date = `${changed.getFullYear()}-${String(changed.getMonth()+1).padStart(2,'0')}-${String(changed.getDate()).padStart(2,'0')}`;
+          await queryRunner.query(`UPDATE installments SET due_date=$1, status='pendente' WHERE id=$2`, [date, installment.id]);
         }
-
-        // Atualizar conta a receber (due_date principal)
-        const account = await this.dataSource.query(
-          `SELECT id FROM accounts_receivable WHERE sale_id = $1 AND status IN ('pendente', 'parcial')`,
-          [id]
-        );
-        if (account.length > 0) {
-          const now = new Date();
-          const newAccountDate = new Date(now.getFullYear(), now.getMonth(), newDueDay);
-          if (newAccountDate < now) newAccountDate.setMonth(newAccountDate.getMonth() + 1);
-          await this.dataSource.query(
-            `UPDATE accounts_receivable SET due_date = $1 WHERE id = $2`,
-            [newAccountDate.toISOString().split('T')[0], account[0].id]
-          );
-        }
-      } catch (err) {
-        // Não bloquear a edição se a atualização de parcelas falhar
-        console.warn('Erro ao atualizar parcelas:', err.message);
+        const firstPending = await queryRunner.query(`SELECT due_date FROM installments WHERE sale_id=$1 AND status IN ('pendente','vencido') ORDER BY number LIMIT 1`, [id]);
+        if (firstPending[0]) await queryRunner.query(`UPDATE accounts_receivable SET due_date=$1 WHERE sale_id=$2 AND status IN ('pendente','parcial')`, [firstPending[0].due_date, id]);
       }
+      await queryRunner.manager.getRepository(Sale).save(sale);
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
     const updated = await this.findOne(id);
-    await this.auditService.safeCreate({
-      userId,
-      action: 'sale.updated',
-      entity: 'sale',
-      entityId: id,
-      oldData,
-      newData: safeDto,
-    });
+    await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, oldData, newData: safeDto });
     return updated;
   }
 

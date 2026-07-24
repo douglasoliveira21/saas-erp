@@ -118,7 +118,7 @@ export class ProductsService {
 
   async remove(id: string): Promise<void> {
     const product = await this.findOne(id);
-    await this.productsRepository.remove(product);
+    await this.productsRepository.softRemove(product);
   }
 
   async findLowStock(): Promise<Product[]> {

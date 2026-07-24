@@ -40,7 +40,7 @@ export class ContractsService {
 
   async remove(id: string): Promise<void> {
     const contract = await this.findOne(id);
-    await this.contractsRepository.remove(contract);
+    await this.contractsRepository.softRemove(contract);
   }
 
   async findByCustomer(customerId: string): Promise<Contract[]> {

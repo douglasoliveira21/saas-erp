@@ -256,12 +256,11 @@ export function Fiscal() {
   }
 
   function downloadXml(id: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     const inv = invoices.find(i => i.id === id) || viewInvoice
     // NF-e usa endpoint proprio, NFS-e usa API Cidade360
     if (inv?.type === 'nfe') {
       fetch(`/api/fiscal/nfe/download-xml/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       }).then(r => {
         if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar XML'); throw new Error() })
         return r.blob()
@@ -275,7 +274,7 @@ export function Fiscal() {
       }).catch(() => {})
     } else if (inv?.status === 'autorizada' && inv?.accessKey) {
       fetch(`/api/fiscal/nfse/xml-oficial/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       }).then(r => {
         if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar XML'); throw new Error() })
         return r.blob()
@@ -289,7 +288,7 @@ export function Fiscal() {
       }).catch(() => {})
     } else {
       fetch(`/api/fiscal/invoices/${id}/download-xml`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       }).then(r => r.blob()).then(blob => {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
@@ -302,7 +301,6 @@ export function Fiscal() {
   }
 
   function downloadPdf(id: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     const inv = invoices.find(i => i.id === id) || viewInvoice
     setError('')
     if (inv?.type === 'nfe') {
@@ -311,7 +309,7 @@ export function Fiscal() {
     } else {
       // NFS-e: baixar PDF oficial da Cidade360
       fetch(`/api/fiscal/nfse/pdf/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       }).then(r => {
         if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar PDF'); throw new Error() })
         return r.blob()
@@ -327,14 +325,13 @@ export function Fiscal() {
   }
 
   function viewPdf(id: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     const inv = invoices.find(i => i.id === id) || viewInvoice
     setError('')
     if (inv?.type === 'nfe') {
       viewDanfeNfe(id)
     } else {
       fetch(`/api/fiscal/nfse/pdf/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       }).then(r => {
         if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao carregar PDF'); throw new Error() })
         return r.blob()
@@ -346,9 +343,8 @@ export function Fiscal() {
   }
 
   function viewDanfeNfe(id: string) {
-    const token = localStorage.getItem('@GestaoTI:token')
     fetch(`/api/fiscal/nfe/danfe/${id}`, {
-      headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
     }).then(r => r.json()).then(data => {
       const inv = data.invoice
       const cfg = data.config
