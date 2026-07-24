@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { api } from '../services/api'
+import { api, setSessionToken } from '../services/api'
 
 interface User {
   id: string
@@ -33,12 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const response = await api.post('/auth/login', { email, password })
-    const { user: userData } = response.data
+    const { access_token, user: userData } = response.data
+    setSessionToken(access_token || null)
     setUser(userData)
   }
 
   async function logout() {
-    try { await api.post('/auth/logout') } finally { setUser(null) }
+    try { await api.post('/auth/logout') } finally { setSessionToken(null); setUser(null) }
   }
 
   const isAdmin = user?.role === 'admin'

@@ -13,7 +13,7 @@ export class AuthController {
   async login(@Body() loginDto: LoginDto, @Response({ passthrough: true }) response: ExpressResponse) {
     const result = await this.authService.login(loginDto);
     response.cookie('access_token', result.access_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000, path: '/' });
-    return { user: result.user };
+    return { access_token: result.access_token, user: result.user };
   }
 
   @Post('logout')
