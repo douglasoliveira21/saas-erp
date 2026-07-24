@@ -25,8 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/auth/me')
-      .then(({ data }) => setUser(data))
+    api.get('/auth/session')
+      .then(({ data }) => setUser(data.user || null))
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
   }, [])
