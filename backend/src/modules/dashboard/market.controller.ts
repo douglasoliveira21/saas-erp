@@ -46,7 +46,7 @@ export class MarketController {
 
     // Buscar índices via brapi.dev (server-side não tem CORS)
     try {
-      const brapi = await this.httpGet('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d');
+      const brapi = await this.httpGet('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d', this.brapiHeaders());
       const brapiData = JSON.parse(brapi);
       if (brapiData?.results) {
         for (const r of brapiData.results) {
@@ -61,7 +61,7 @@ export class MarketController {
 
     // Tentar IFIX
     try {
-      const ifix = await this.httpGet('https://brapi.dev/api/quote/IFIX?range=1d&interval=1d');
+      const ifix = await this.httpGet('https://brapi.dev/api/quote/IFIX?range=1d&interval=1d', this.brapiHeaders());
       const ifixData = JSON.parse(ifix);
       if (ifixData?.results?.[0]) {
         quotes.IFIX = { value: ifixData.results[0].regularMarketPrice, change: ifixData.results[0].regularMarketChangePercent || 0 };
@@ -73,14 +73,19 @@ export class MarketController {
     return quotes;
   }
 
-  private httpGet(url: string): Promise<string> {
+  private brapiHeaders(): Record<string, string> {
+    const token = process.env.BRAPI_TOKEN || process.env.BRAPI_API_TOKEN;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  private httpGet(url: string, extraHeaders: Record<string, string> = {}): Promise<string> {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
       const options = {
         hostname: parsedUrl.hostname,
         path: parsedUrl.pathname + parsedUrl.search,
         method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', ...extraHeaders },
         timeout: 8000,
       };
 

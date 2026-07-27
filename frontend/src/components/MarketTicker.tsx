@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { api } from '../services/api'
 
 interface TickerItem {
   label: string
@@ -25,133 +26,37 @@ export function MarketTicker() {
 
   async function fetchMarketData() {
     try {
-      const [currencyRes, selicRes, ipcaRes, igpmRes] = await Promise.all([
-        fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL,ETH-BRL').then(r => r.json()).catch(() => null),
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.4189/dados/ultimos/1?formato=json').then(r => r.json()).catch(() => null),
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados/ultimos/1?formato=json').then(r => r.json()).catch(() => null),
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.189/dados/ultimos/1?formato=json').then(r => r.json()).catch(() => null),
-      ])
-
-      const n: TickerItem[] = []
-
-      // Dólar
-      if (currencyRes?.USDBRL) {
-        const d = currencyRes.USDBRL
-        n.push({ label: 'Dólar', value: `R$ ${Number(d.bid).toFixed(2)}`, change: `${Number(d.pctChange) >= 0 ? '+' : ''}${Number(d.pctChange).toFixed(2)}%`, positive: Number(d.pctChange) >= 0, icon: '🇺🇸' })
+      const { data: quotes } = await api.get('/market/quotes')
+      const next: TickerItem[] = []
+      const add = (key: string, label: string, icon: string, format: (value: number | string) => string) => {
+        const quote = quotes?.[key]
+        if (!quote || quote.value === undefined || quote.value === null) return
+        const change = quote.change === undefined ? undefined : Number(quote.change)
+        const hasChange = typeof change === 'number' && Number.isFinite(change)
+        next.push({
+          label,
+          icon,
+          value: format(quote.value),
+          change: hasChange ? `${change! >= 0 ? '+' : ''}${change!.toFixed(2)}%` : undefined,
+          positive: hasChange ? change! >= 0 : undefined,
+        })
       }
 
-      // Euro
-      if (currencyRes?.EURBRL) {
-        const e = currencyRes.EURBRL
-        n.push({ label: 'Euro', value: `R$ ${Number(e.bid).toFixed(2)}`, change: `${Number(e.pctChange) >= 0 ? '+' : ''}${Number(e.pctChange).toFixed(2)}%`, positive: Number(e.pctChange) >= 0, icon: '🇪🇺' })
-      }
-
-      // Ibovespa (usar fallback estático se não disponível via API gratuita)
-      n.push({ label: 'Ibovespa', value: '---', icon: '📊' })
-
-      // S&P 500
-      n.push({ label: 'S&P 500', value: '---', icon: '🇺🇸' })
-
-      // Nasdaq
-      n.push({ label: 'Nasdaq', value: '---', icon: '💻' })
-      // Selic
-      if (selicRes?.[0]) {
-        n.push({ label: 'Selic', value: `${Number(selicRes[0].valor).toFixed(2)}% a.a.`, icon: '🏦', positive: true })
-      }
-
-      // CDI (mesmo valor da Selic na prática)
-      if (selicRes?.[0]) {
-        n.push({ label: 'CDI', value: `${Number(selicRes[0].valor).toFixed(2)}% a.a.`, icon: '💰', positive: true })
-      }
-
-      // IPCA
-      if (ipcaRes?.[0]) {
-        n.push({ label: 'IPCA', value: `${ipcaRes[0].valor}%`, icon: '📈' })
-      }
-
-      // IFIX
-      n.push({ label: 'IFIX', value: '---', icon: '🏢' })
-
-      // Bitcoin
-      if (currencyRes?.BTCBRL) {
-        const b = currencyRes.BTCBRL
-        n.push({ label: 'Bitcoin', value: `R$ ${(Number(b.bid) / 1000).toFixed(1)}k`, change: `${Number(b.pctChange) >= 0 ? '+' : ''}${Number(b.pctChange).toFixed(2)}%`, positive: Number(b.pctChange) >= 0, icon: '₿' })
-      }
-
-      // Ouro
-      n.push({ label: 'Ouro', value: '---', icon: '🥇' })
-
-      // Petróleo Brent
-      n.push({ label: 'Petróleo Brent', value: '---', icon: '🛢️' })
-
-      // Minério de Ferro
-      n.push({ label: 'Minério de Ferro', value: '---', icon: '⛏️' })
-
-      // VIX
-      n.push({ label: 'VIX', value: '---', icon: '😨' })
-
-      // Treasury 10Y
-      n.push({ label: 'Treasury 10Y', value: '---', icon: '🇺🇸' })
-
-      // IGP-M
-      if (igpmRes?.[0]) {
-        const v = Number(igpmRes[0].valor)
-        n.push({ label: 'IGP-M', value: `${igpmRes[0].valor}%`, icon: '📉', positive: v <= 0 })
-      }
-
-      // Libra
-      if (currencyRes?.GBPBRL) {
-        const g = currencyRes.GBPBRL
-        n.push({ label: 'Libra', value: `R$ ${Number(g.bid).toFixed(2)}`, change: `${Number(g.pctChange) >= 0 ? '+' : ''}${Number(g.pctChange).toFixed(2)}%`, positive: Number(g.pctChange) >= 0, icon: '🇬🇧' })
-      }
-
-      // Agora tentar buscar Ibovespa, S&P 500, Nasdaq via APIs alternativas
-      try {
-        // Tentar brapi sem token (funciona como demo)
-        const brapiRes = await fetch('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d')
-        if (brapiRes.ok) {
-          const brapi = await brapiRes.json()
-          if (brapi?.results) {
-            for (const r of brapi.results) {
-              const pct = r.regularMarketChangePercent || 0
-              const price = r.regularMarketPrice || 0
-              if (r.symbol === '^BVSP' || r.symbol === '%5EBVSP') {
-                const idx = n.findIndex(i => i.label === 'Ibovespa')
-                if (idx >= 0) n[idx] = { label: 'Ibovespa', value: `${(price / 1000).toFixed(1)}k`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '📊' }
-              }
-              if (r.symbol === '^GSPC' || r.symbol === '%5EGSPC') {
-                const idx = n.findIndex(i => i.label === 'S&P 500')
-                if (idx >= 0) n[idx] = { label: 'S&P 500', value: `${price.toFixed(0)}`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '🇺🇸' }
-              }
-              if (r.symbol === '^IXIC' || r.symbol === '%5EIXIC') {
-                const idx = n.findIndex(i => i.label === 'Nasdaq')
-                if (idx >= 0) n[idx] = { label: 'Nasdaq', value: `${price.toFixed(0)}`, change: `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`, positive: pct >= 0, icon: '💻' }
-              }
-            }
-          }
-        }
-      } catch {}
-
-      // Filtrar items que não têm valor real (remover "---")
-      setItems(n.filter(i => i.value !== '---'))
+      add('USD', 'Dólar', '🇺🇸', value => `R$ ${Number(value).toFixed(2)}`)
+      add('EUR', 'Euro', '🇪🇺', value => `R$ ${Number(value).toFixed(2)}`)
+      add('IBOV', 'Ibovespa', '📊', value => `${(Number(value) / 1000).toFixed(1)}k`)
+      add('SP500', 'S&P 500', '🇺🇸', value => Number(value).toFixed(0))
+      add('NASDAQ', 'Nasdaq', '💻', value => Number(value).toFixed(0))
+      add('SELIC', 'Selic', '🏦', value => `${Number(value).toFixed(2)}% a.a.`)
+      add('SELIC', 'CDI', '💰', value => `${Number(value).toFixed(2)}% a.a.`)
+      add('IPCA', 'IPCA', '📈', value => `${value}%`)
+      add('IFIX', 'IFIX', '🏢', value => Number(value).toFixed(0))
+      add('BTC', 'Bitcoin', '₿', value => `R$ ${(Number(value) / 1000).toFixed(1)}k`)
+      add('IGPM', 'IGP-M', '📉', value => `${value}%`)
+      add('GBP', 'Libra', '🇬🇧', value => `R$ ${Number(value).toFixed(2)}`)
+      setItems(next)
     } catch {
-      setItems([
-        { label: 'Dólar', value: 'R$ 5.65', change: '+0.12%', positive: true, icon: '🇺🇸' },
-        { label: 'Euro', value: 'R$ 6,32', change: '+0.60%', positive: true, icon: '🇪🇺' },
-        { label: 'Ibovespa', value: '131.2k', change: '+0.45%', positive: true, icon: '📊' },
-        { label: 'S&P 500', value: '5,456', change: '+0.32%', positive: true, icon: '🇺🇸' },
-        { label: 'Nasdaq', value: '17,234', change: '+0.67%', positive: true, icon: '💻' },
-        { label: 'Selic', value: '14.75% a.a.', icon: '🏦', positive: true },
-        { label: 'CDI', value: '14.65% a.a.', icon: '💰', positive: true },
-        { label: 'IPCA', value: '0.58%', icon: '📈' },
-        { label: 'IFIX', value: '3,245', icon: '🏢' },
-        { label: 'Bitcoin', value: 'R$ 550k', change: '-2.35%', positive: false, icon: '₿' },
-        { label: 'Ouro', value: 'US$ 2,340', change: '+0.18%', positive: true, icon: '🥇' },
-        { label: 'Petróleo', value: 'US$ 82.4', change: '-0.52%', positive: false, icon: '🛢️' },
-        { label: 'Minério', value: 'US$ 108', change: '+1.2%', positive: true, icon: '⛏️' },
-        { label: 'VIX', value: '14.2', change: '-3.1%', positive: true, icon: '😨' },
-        { label: 'Treasury 10Y', value: '4.28%', icon: '🇺🇸' },
-      ])
+      setItems([])
     }
   }
 
