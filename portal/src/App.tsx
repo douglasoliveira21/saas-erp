@@ -5,7 +5,7 @@ type User={id:string;name:string;email:string;role:string;status:string;customer
 const roleLabel:any={admin:'Administrador',manager:'Gestor',finance:'Financeiro',user:'Usuário'}
 const statusLabel:any={1:'Novo',2:'Em atendimento',3:'Planejado',4:'Pendente',5:'Solucionado',6:'Fechado'}
 
-function Brand(){return <div className="brand"><div className="mark">V</div><div><h1>Portal do Cliente</h1><p>VGON Tecnologia</p></div></div>}
+function Brand(){return <div className="brand"><img className="brand-logo" src="/vgon-logo.png" alt="VGON"/><div><h1>Portal do Cliente</h1><p>VGON Tecnologia</p></div></div>}
 
 function Auth({onLogin}:{onLogin:(u:User)=>void}){
  const [mode,setMode]=useState<'login'|'register'>('login'),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState('')
