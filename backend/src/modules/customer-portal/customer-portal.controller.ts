@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Request, Response, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Request, Response, Res, UseGuards } from '@nestjs/common';
 import { Response as ExpressResponse } from 'express';
 import { CustomerPortalService } from './customer-portal.service';
 import { PortalAuthGuard } from './portal-auth.guard';
@@ -28,6 +28,21 @@ export class CustomerPortalController {
   @Get('tickets') @UseGuards(PortalAuthGuard) tickets(@Request() req) { return this.service.listTickets(req.portalUser); }
   @Post('tickets') @UseGuards(PortalAuthGuard) createTicket(@Request() req, @Body() body: any) { return this.service.createTicket(req.portalUser, body); }
   @Get('documents') @UseGuards(PortalAuthGuard) documents(@Request() req) { return this.service.documents(req.portalUser); }
+  @Get('documents/boletos/:id/pdf') @UseGuards(PortalAuthGuard)
+  async boletoPdf(@Request() req, @Param('id') id: string, @Res() res: ExpressResponse) {
+    const pdf = await this.service.boletoPdf(req.portalUser, id);
+    res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `inline; filename="boleto-${id}.pdf"`); res.send(pdf);
+  }
+  @Get('documents/invoices/:id') @UseGuards(PortalAuthGuard)
+  invoiceDocument(@Request() req, @Param('id') id: string) { return this.service.invoiceDocument(req.portalUser, id); }
+  @Get('documents/invoices/:id/xml') @UseGuards(PortalAuthGuard)
+  async invoiceXml(@Request() req, @Param('id') id: string, @Res() res: ExpressResponse) {
+    const file = await this.service.invoiceXml(req.portalUser, id); res.setHeader('Content-Type', 'application/xml'); res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`); res.send(file.content);
+  }
+  @Get('documents/invoices/:id/pdf') @UseGuards(PortalAuthGuard)
+  async invoicePdf(@Request() req, @Param('id') id: string, @Res() res: ExpressResponse) {
+    const file = await this.service.invoicePdf(req.portalUser, id); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `inline; filename="${file.filename}"`); res.send(file.content);
+  }
   @Get('users') @UseGuards(PortalAuthGuard) users(@Request() req) { return this.service.listUsers(req.portalUser); }
   @Post('users') @UseGuards(PortalAuthGuard) createUser(@Request() req, @Body() body: any) { return this.service.createUser(body, req.portalUser.sub, req.portalUser); }
   @Patch('users/:id') @UseGuards(PortalAuthGuard) updateUser(@Request() req, @Param('id') id: string, @Body() body: any) { return this.service.updateUser(id, body, req.portalUser.sub, req.portalUser); }

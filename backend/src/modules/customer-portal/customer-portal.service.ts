@@ -9,6 +9,8 @@ import { Contract } from '../contracts/entities/contract.entity';
 import { GlpiTicket } from '../glpi/entities/glpi-ticket.entity';
 import { GlpiService } from '../glpi/glpi.service';
 import { MailService } from '../mail/mail.service';
+import { InterService } from '../inter/inter.service';
+import { NfseService } from '../fiscal/services/nfse.service';
 import { PortalUser } from './entities/portal-user.entity';
 import { PortalTicketForm } from './entities/portal-form.entity';
 import { PortalTicket } from './entities/portal-ticket.entity';
@@ -22,7 +24,7 @@ export class CustomerPortalService {
     @InjectRepository(Customer) private customers: Repository<Customer>,
     @InjectRepository(Contract) private contracts: Repository<Contract>,
     @InjectRepository(GlpiTicket) private glpiTickets: Repository<GlpiTicket>,
-    private glpi: GlpiService, private jwt: JwtService, private dataSource: DataSource, private mail: MailService,
+    private glpi: GlpiService, private jwt: JwtService, private dataSource: DataSource, private mail: MailService, private inter: InterService, private nfse: NfseService,
   ) {}
 
   private digits(value = '') { return value.replace(/\D/g, ''); }
@@ -181,9 +183,42 @@ export class CustomerPortalService {
 
   async documents(actor: any) {
     if (!['admin','finance'].includes(actor.role)) throw new ForbiddenException();
-    const receivables = await this.dataSource.query(`SELECT ar.id,ar.description,ar.total_value "totalValue",ar.pending_value "pendingValue",ar.status,ar.due_date "dueDate",p.type,p.codigo_solicitacao "code" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id WHERE ar.customer_id=$1 ORDER BY ar.due_date DESC LIMIT 100`, [actor.customerId]);
+    const receivables = await this.dataSource.query(`SELECT ar.id,ar.description,ar.total_value "totalValue",ar.pending_value "pendingValue",ar.status,ar.due_date "dueDate",p.id "paymentId",p.type,p.codigo_solicitacao "code" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id WHERE ar.customer_id=$1 ORDER BY ar.due_date DESC LIMIT 100`, [actor.customerId]);
     const invoices = await this.dataSource.query(`SELECT i.id,i.type,i.number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
     const contracts = await this.contracts.find({ where: { customerId: actor.customerId }, order: { createdAt: 'DESC' } });
     return { receivables, invoices, contracts };
+  }
+  private requireFinancial(actor: any) {
+    if (!['admin','finance'].includes(actor.role)) throw new ForbiddenException();
+  }
+
+  async boletoPdf(actor: any, paymentId: string) {
+    this.requireFinancial(actor);
+    const rows = await this.dataSource.query(`SELECT p.codigo_solicitacao code,p.type FROM payments p JOIN sales s ON s.id=p.sale_id WHERE p.id=$1 AND s.customer_id=$2 LIMIT 1`, [paymentId, actor.customerId]);
+    const payment = rows[0];
+    if (!payment) throw new NotFoundException('Boleto não encontrado para esta empresa');
+    if (payment.type !== 'boleto' || !payment.code) throw new BadRequestException('Esta cobrança não possui PDF de boleto');
+    return this.inter.getBoletoPdf(payment.code);
+  }
+
+  async invoiceDocument(actor: any, invoiceId: string) {
+    this.requireFinancial(actor);
+    const rows = await this.dataSource.query(`SELECT i.*,s.total_amount sale_total,c.name customer_name,c.cpf_cnpj customer_document FROM invoices i JOIN sales s ON s.id=i.sale_id JOIN customers c ON c.id=s.customer_id WHERE i.id=$1 AND s.customer_id=$2 LIMIT 1`, [invoiceId, actor.customerId]);
+    if (!rows[0]) throw new NotFoundException('Nota fiscal não encontrada para esta empresa');
+    return rows[0];
+  }
+
+  async invoiceXml(actor: any, invoiceId: string) {
+    const invoice = await this.invoiceDocument(actor, invoiceId);
+    const xml = invoice.xml_authorized || invoice.xml_sent;
+    if (!xml) throw new NotFoundException('XML ainda não disponível');
+    return { content: String(xml), filename: `${String(invoice.type || 'nota').toUpperCase()}_${invoice.number || 'nota'}.xml` };
+  }
+
+  async invoicePdf(actor: any, invoiceId: string) {
+    const invoice = await this.invoiceDocument(actor, invoiceId);
+    if (String(invoice.type).toLowerCase() !== 'nfse') throw new BadRequestException('A NF-e é disponibilizada para visualização e download do XML');
+    if (!invoice.access_key || !invoice.certificate_id) throw new BadRequestException('NFS-e sem chave ou certificado vinculado');
+    return { content: await this.nfse.downloadPdf(invoice.access_key, invoice.certificate_id), filename: `NFSe_${invoice.number || 'nota'}.pdf` };
   }
 }
