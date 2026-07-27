@@ -13,14 +13,30 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Interceptor para tratar erros de autenticação
+// Um 401 de integração externa não significa necessariamente sessão expirada.
+let sessionCheck: Promise<boolean> | null = null
+
+async function hasActiveSession(): Promise<boolean> {
+  if (!sessionCheck) {
+    sessionCheck = axios.get('/api/auth/session', {
+      withCredentials: true,
+      headers: memoryToken ? { Authorization: 'Bearer ' + memoryToken } : undefined,
+    }).then(response => Boolean(response.data?.user)).catch(() => true).finally(() => { sessionCheck = null })
+  }
+  return sessionCheck
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      if (!window.location.pathname.startsWith('/login')) window.location.href = '/login'
+  async (error) => {
+    const requestUrl = String(error.config?.url || '')
+    if (error.response?.status === 401 && !requestUrl.startsWith('/auth/')) {
+      const authenticated = await hasActiveSession()
+      if (!authenticated && !window.location.pathname.startsWith('/login')) {
+        setSessionToken(null)
+        window.location.href = '/login'
+      }
     }
-    
     return Promise.reject(error)
   }
 )

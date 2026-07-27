@@ -255,97 +255,50 @@ export function Fiscal() {
     finally { setViewLoading(false) }
   }
 
-  function downloadXml(id: string) {
-    const inv = invoices.find(i => i.id === id) || viewInvoice
-    // NF-e usa endpoint proprio, NFS-e usa API Cidade360
-    if (inv?.type === 'nfe') {
-      fetch(`/api/fiscal/nfe/download-xml/${id}`, {
-        credentials: 'include',
-      }).then(r => {
-        if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar XML'); throw new Error() })
-        return r.blob()
-      }).then(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `NFe_${inv?.number || 'nota'}_serie${inv?.series || 1}.xml`
-        a.click()
-        URL.revokeObjectURL(url)
-      }).catch(() => {})
-    } else if (inv?.status === 'autorizada' && inv?.accessKey) {
-      fetch(`/api/fiscal/nfse/xml-oficial/${id}`, {
-        credentials: 'include',
-      }).then(r => {
-        if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar XML'); throw new Error() })
-        return r.blob()
-      }).then(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `NFSe_${inv?.number || 'nota'}_serie${inv?.series || 1}_oficial.xml`
-        a.click()
-        URL.revokeObjectURL(url)
-      }).catch(() => {})
-    } else {
-      fetch(`/api/fiscal/invoices/${id}/download-xml`, {
-        credentials: 'include',
-      }).then(r => r.blob()).then(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${inv?.type || 'nota'}_${inv?.number || 'rascunho'}_serie${inv?.series || 1}.xml`
-        a.click()
-        URL.revokeObjectURL(url)
-      })
-    }
+  async function getFiscalBlob(path: string): Promise<Blob> {
+    const response = await api.get(path, { responseType: 'blob' })
+    return response.data
   }
 
-  function downloadPdf(id: string) {
-    const inv = invoices.find(i => i.id === id) || viewInvoice
-    setError('')
-    if (inv?.type === 'nfe') {
-      // NF-e: gerar DANFE via impressao
-      viewDanfeNfe(id)
-    } else {
-      // NFS-e: baixar PDF oficial da Cidade360
-      fetch(`/api/fiscal/nfse/pdf/${id}`, {
-        credentials: 'include',
-      }).then(r => {
-        if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao baixar PDF'); throw new Error() })
-        return r.blob()
-      }).then(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `NFSe_${inv?.number || 'nota'}_serie${inv?.series || 1}.pdf`
-        a.click()
-        URL.revokeObjectURL(url)
-      }).catch(() => {})
-    }
+  function saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  function viewPdf(id: string) {
+  async function downloadXml(id: string) {
+    const inv = invoices.find(i => i.id === id) || viewInvoice
+    const path = inv?.type === 'nfe' ? '/fiscal/nfe/download-xml/' + id : inv?.status === 'autorizada' && inv?.accessKey ? '/fiscal/nfse/xml-oficial/' + id : '/fiscal/invoices/' + id + '/download-xml'
+    const filename = inv?.type === 'nfe' ? 'NFe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.xml' : 'NFSe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + (inv?.status === 'autorizada' ? '_oficial' : '') + '.xml'
+    try { saveBlob(await getFiscalBlob(path), filename) }
+    catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar XML') }
+  }
+
+  async function downloadPdf(id: string) {
     const inv = invoices.find(i => i.id === id) || viewInvoice
     setError('')
-    if (inv?.type === 'nfe') {
-      viewDanfeNfe(id)
-    } else {
-      fetch(`/api/fiscal/nfse/pdf/${id}`, {
-        credentials: 'include',
-      }).then(r => {
-        if (!r.ok) return r.json().then(d => { setError(d.message || 'Erro ao carregar PDF'); throw new Error() })
-        return r.blob()
-      }).then(blob => {
-        const url = URL.createObjectURL(blob)
-        window.open(url, '_blank')
-      }).catch(() => {})
-    }
+    if (inv?.type === 'nfe') { viewDanfeNfe(id); return }
+    try { saveBlob(await getFiscalBlob('/fiscal/nfse/pdf/' + id), 'NFSe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.pdf') }
+    catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar PDF') }
+  }
+
+  async function viewPdf(id: string) {
+    const inv = invoices.find(i => i.id === id) || viewInvoice
+    setError('')
+    if (inv?.type === 'nfe') { viewDanfeNfe(id); return }
+    try {
+      const url = URL.createObjectURL(await getFiscalBlob('/fiscal/nfse/pdf/' + id))
+      const opened = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!opened) setError('O navegador bloqueou a nova aba. Permita pop-ups para visualizar a nota.')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar PDF') }
   }
 
   function viewDanfeNfe(id: string) {
-    fetch(`/api/fiscal/nfe/danfe/${id}`, {
-        credentials: 'include',
-    }).then(r => r.json()).then(data => {
+    api.get('/fiscal/nfe/danfe/' + id).then(r => r.data).then(data => {
       const inv = data.invoice
       const cfg = data.config
       const items = inv.sale?.items || []
