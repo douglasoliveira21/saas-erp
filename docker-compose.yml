@@ -63,5 +63,18 @@ services:
     depends_on:
       - backend
 
+  portal:
+    build:
+      context: ./portal
+      dockerfile: Dockerfile
+    container_name: saas-erp-portal
+    restart: always
+    ports:
+      - "5002:80"
+    environment:
+      BACKEND_URL: http://saas-erp-backend:5000
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:

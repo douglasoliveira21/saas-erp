@@ -63,6 +63,7 @@ export const navigationSections: NavSection[] = [
   { id: 'administracao', title: 'Administração', icon: UserCog, expandable: true, items: [
     { name: 'Controles do ERP', href: '/controles-erp', icon: ShieldCheck, roles: office },
     { name: 'Usuários e acessos', href: '/users', icon: UserCog, roles: ['admin'] },
+    { name: 'Portal do cliente', href: '/customer-portal', icon: ShieldCheck, roles: ['admin'] },
     { name: 'Configuração de e-mail', href: '/email-settings', icon: Mail, roles: ['admin'] },
   ]},
 ]

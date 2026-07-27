@@ -102,6 +102,30 @@ export class GlpiService implements OnModuleInit {
     return res.json();
   }
 
+  private async glpiWrite(path: string, sessionToken: string, config: GlpiConfig, input: any): Promise<any> {
+    const res = await fetch(config.apiUrl + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'App-Token': config.appToken, 'Session-Token': sessionToken },
+      body: JSON.stringify({ input }),
+    });
+    if (!res.ok) throw new Error('Erro GLPI ' + path + ': ' + await res.text());
+    return res.json();
+  }
+
+  async createPortalTicket(input: { entityId: number; glpiUserId?: number | null; requesterName: string; requesterEmail: string; title: string; description: string; type: number; urgency: number }): Promise<{ id: number }> {
+    const config = await this.getConfig();
+    const session = await this.initSession(config);
+    const payload: any = {
+      name: input.title,
+      content: `${input.description}\n\nSolicitante do portal: ${input.requesterName} <${input.requesterEmail}>`,
+      entities_id: input.entityId, type: input.type, urgency: input.urgency, status: 1,
+    };
+    if (input.glpiUserId) payload._users_id_requester = input.glpiUserId;
+    const result = await this.glpiWrite('/Ticket', session, config, payload);
+    const id = Number(result?.id);
+    if (!id) throw new Error('GLPI não retornou o identificador do chamado');
+    return { id };
+  }
   async getEntities(): Promise<any[]> {
     const config = await this.getConfig();
     const session = await this.initSession(config);

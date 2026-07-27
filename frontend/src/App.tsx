@@ -45,6 +45,7 @@ const PurchasesAdvanced = lazy(() => import('./pages/PurchasesAdvanced').then(mo
 const Operations = lazy(() => import('./pages/Operations').then(module => ({ default: module.Operations })))
 const Crm = lazy(() => import('./pages/Crm').then(module => ({ default: module.Crm })))
 const Tutorial = lazy(() => import('./pages/Tutorial').then(module => ({ default: module.Tutorial })))
+const CustomerPortalAdmin = lazy(() => import('./pages/CustomerPortalAdmin').then(module => ({ default: module.CustomerPortalAdmin })))
 
 function PageLoader() {
   return (
@@ -104,6 +105,7 @@ function App() {
               <Route path="/compras-avancado" element={<PurchasesAdvanced />} />
               <Route path="/controles-erp" element={<Operations />} />
               <Route path="/tutorial" element={<Tutorial />} />
+              <Route path="/customer-portal" element={<CustomerPortalAdmin />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
