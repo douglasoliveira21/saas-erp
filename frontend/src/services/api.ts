@@ -16,12 +16,25 @@ api.interceptors.request.use((config) => {
 // Um 401 de integração externa não significa necessariamente sessão expirada.
 let sessionCheck: Promise<boolean> | null = null
 
+export async function getSessionUser() {
+  const options = {
+    withCredentials: true,
+    headers: memoryToken ? { Authorization: 'Bearer ' + memoryToken } : undefined,
+  }
+
+  try {
+    const response = await axios.get('/api/auth/session', options)
+    return response.data?.user || null
+  } catch (error) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 404) throw error
+    const response = await axios.get('/api/auth/me', options)
+    return response.data || null
+  }
+}
+
 async function hasActiveSession(): Promise<boolean> {
   if (!sessionCheck) {
-    sessionCheck = axios.get('/api/auth/session', {
-      withCredentials: true,
-      headers: memoryToken ? { Authorization: 'Bearer ' + memoryToken } : undefined,
-    }).then(response => Boolean(response.data?.user)).catch(() => true).finally(() => { sessionCheck = null })
+    sessionCheck = getSessionUser().then(Boolean).catch(() => true).finally(() => { sessionCheck = null })
   }
   return sessionCheck
 }

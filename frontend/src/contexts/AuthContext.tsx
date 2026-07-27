@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { api, setSessionToken } from '../services/api'
+import { api, getSessionUser, setSessionToken } from '../services/api'
 
 interface User {
   id: string
@@ -25,8 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/auth/session')
-      .then(({ data }) => setUser(data.user || null))
+    getSessionUser()
+      .then(setUser)
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
   }, [])
