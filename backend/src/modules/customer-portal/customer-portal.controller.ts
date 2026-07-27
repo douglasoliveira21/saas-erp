@@ -6,10 +6,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { PortalNotificationsService } from './portal-notifications.service';
 
 @Controller('portal')
 export class CustomerPortalController {
-  constructor(private service: CustomerPortalService) {}
+  constructor(private service: CustomerPortalService, private notifications: PortalNotificationsService) {}
   @Post('public/company') company(@Body() body: any) { return this.service.findCompany(body.cnpj); }
   @Post('public/register') register(@Body() body: any) { return this.service.selfRegister(body); }
   @Post('public/verify-email') verifyEmail(@Body() body: any) { return this.service.verifyEmail(body.email, body.code); }
@@ -23,6 +24,10 @@ export class CustomerPortalController {
     return { success: true };
   }
   @Get('me') @UseGuards(PortalAuthGuard) me(@Request() req) { return this.service.me(req.portalUser.sub); }
+  @Get('notifications/public-key') @UseGuards(PortalAuthGuard) pushKey() { return this.notifications.getPublicKey(); }
+  @Post('notifications/subscribe') @UseGuards(PortalAuthGuard) subscribe(@Request() req, @Body() body: any) { return this.notifications.subscribe(req.portalUser.sub, body); }
+  @Get('notifications') @UseGuards(PortalAuthGuard) notificationsList(@Request() req) { return this.notifications.list(req.portalUser.sub); }
+  @Patch('notifications/:id/read') @UseGuards(PortalAuthGuard) notificationRead(@Request() req, @Param('id') id: string) { return this.notifications.read(req.portalUser.sub, id); }
   @Get('dashboard') @UseGuards(PortalAuthGuard) dashboard(@Request() req) { return this.service.dashboard(req.portalUser); }
   @Get('form') @UseGuards(PortalAuthGuard) form(@Request() req) { return this.service.getForm(req.portalUser.customerId); }
   @Get('tickets') @UseGuards(PortalAuthGuard) tickets(@Request() req) { return this.service.listTickets(req.portalUser); }

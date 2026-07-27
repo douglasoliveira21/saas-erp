@@ -13,10 +13,11 @@ import { PortalTicket } from './entities/portal-ticket.entity';
 import { CustomerPortalController } from './customer-portal.controller';
 import { CustomerPortalService } from './customer-portal.service';
 import { PortalAuthGuard } from './portal-auth.guard';
+import { PortalNotificationsService } from './portal-notifications.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([PortalUser, PortalTicketForm, PortalTicket, Customer, Contract, GlpiTicket]), AuthModule, GlpiModule, InterModule, FiscalModule],
   controllers: [CustomerPortalController],
-  providers: [CustomerPortalService, PortalAuthGuard],
+  providers: [CustomerPortalService, PortalAuthGuard, PortalNotificationsService],
 })
 export class CustomerPortalModule {}
