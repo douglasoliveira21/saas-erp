@@ -460,11 +460,22 @@ export class InterService implements OnModuleInit {
     return this.saleRepo.manager.transaction(async (manager) => {
       const previous = await manager.query(`SELECT sale_id, type, status FROM payments WHERE codigo_solicitacao=$1 FOR UPDATE`, [codigoSolicitacao]);
       if (!previous[0]) throw new HttpException('Cobrança local não encontrada', HttpStatus.NOT_FOUND);
-      const updated = await manager.query(`UPDATE payments SET status=$1, linha_digitavel=COALESCE($2,linha_digitavel), pix_copia_e_cola=COALESCE($3,pix_copia_e_cola), nosso_numero=COALESCE($4,nosso_numero), paid_at=CASE WHEN $1='pago' THEN COALESCE(paid_at,NOW()) ELSE paid_at END, updated_at=NOW() WHERE codigo_solicitacao=$5 RETURNING sale_id,type`, [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao]);
+      const updated = await manager.query(
+        `UPDATE payments
+         SET status = $1::varchar,
+             linha_digitavel = COALESCE($2::text, linha_digitavel),
+             pix_copia_e_cola = COALESCE($3::text, pix_copia_e_cola),
+             nosso_numero = COALESCE($4::varchar, nosso_numero),
+             paid_at = CASE WHEN $1::varchar = 'pago' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
+             updated_at = NOW()
+         WHERE codigo_solicitacao = $5::varchar
+         RETURNING sale_id, type`,
+        [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao],
+      );
       const saleId = updated[0]?.sale_id; const type = updated[0]?.type;
       if (saleId) {
         const billingStatus = localStatus === 'pago' ? 'pago' : localStatus === 'vencido' ? 'vencido' : localStatus === 'cancelado' ? 'cancelado' : 'emitido';
-        await manager.query(`UPDATE sales SET billing_status=$2, status=CASE WHEN status IN ('pendente','nf_emitida') AND $2='emitido' THEN 'boleto_emitido' ELSE status END, updated_at=NOW() WHERE id=$1`, [saleId, billingStatus]);
+        await manager.query(`UPDATE sales SET billing_status=$2::varchar, status=CASE WHEN status IN ('pendente','nf_emitida') AND $2::varchar='emitido' THEN 'boleto_emitido' ELSE status END, updated_at=NOW() WHERE id=$1::uuid`, [saleId, billingStatus]);
         if (localStatus !== 'cancelado') await manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Cobrança emitida via Banco Inter') WHERE sale_id=$1 AND type='emissao_boleto' AND status='pendente'`, [saleId]);
       }
       if (localStatus === 'pago' && saleId) {
