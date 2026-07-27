@@ -131,13 +131,22 @@ export class GlpiService implements OnModuleInit {
     const session = await this.initSession(config);
     const ticket = await this.glpiRequest(`/Ticket/${ticketId}`, session, config);
     if (Number(ticket?.entities_id) !== Number(expectedEntityId)) throw new Error('Chamado não pertence à entidade informada');
-    let followups: any[] = [];
+    let followups: any[] = [], requester: any = null;
     try {
       const payload = await this.glpiRequest(`/Ticket/${ticketId}/ITILFollowup`, session, config, 'range=0-200&order=ASC');
-      const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-      followups = rows.filter((item: any) => !Boolean(Number(item.is_private))).map((item: any) => ({ id: item.id, content: item.content || '', date: item.date || item.date_creation, userId: item.users_id, source: item.sourceitems_id || null }));
+      const rows = (Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : []).filter((item: any) => !Boolean(Number(item.is_private)));
+      const userIds = [...new Set(rows.map((item: any) => Number(item.users_id)).filter(Boolean))] as number[];
+      const names = new Map<number, string>();
+      await Promise.all(userIds.map(async userId => { try { const user = await this.glpiRequest(`/User/${userId}`, session, config); names.set(userId, [user.firstname, user.realname].filter(Boolean).join(' ') || user.name || `Usuário ${userId}`); } catch { names.set(userId, `Usuário ${userId}`); } }));
+      followups = rows.map((item: any) => ({ id: item.id, content: item.content || '', date: item.date || item.date_creation, userId: Number(item.users_id) || null, authorName: names.get(Number(item.users_id)) || 'Equipe técnica' }));
     } catch (error) { this.logger.warn(`Não foi possível carregar acompanhamentos do chamado ${ticketId}: ${error.message}`); }
-    return { id: Number(ticket.id), title: ticket.name || ticket.title, content: ticket.content || '', status: Number(ticket.status), urgency: Number(ticket.urgency || 0), priority: Number(ticket.priority || 0), openedAt: ticket.date || ticket.date_creation, solvedAt: ticket.solvedate || null, closedAt: ticket.closedate || null, followups };
+    try {
+      const actorsPayload = await this.glpiRequest(`/Ticket/${ticketId}/Ticket_User`, session, config, 'range=0-100');
+      const actors = Array.isArray(actorsPayload) ? actorsPayload : Array.isArray(actorsPayload?.data) ? actorsPayload.data : [];
+      const actor = actors.find((item: any) => Number(item.type) === 1);
+      if (actor?.users_id) { const user = await this.glpiRequest(`/User/${actor.users_id}`, session, config); requester = { name: [user.firstname, user.realname].filter(Boolean).join(' ') || user.name || 'Solicitante', email: user.email || null, phone: user.phone || user.mobile || null }; }
+    } catch { /* Chamados do portal podem não possuir usuário GLPI individual. */ }
+    return { id: Number(ticket.id), title: ticket.name || ticket.title, content: ticket.content || '', status: Number(ticket.status), urgency: Number(ticket.urgency || 0), priority: Number(ticket.priority || 0), openedAt: ticket.date || ticket.date_creation, solvedAt: ticket.solvedate || null, closedAt: ticket.closedate || null, requester, followups };
   }
   async getEntities(): Promise<any[]> {
     const config = await this.getConfig();

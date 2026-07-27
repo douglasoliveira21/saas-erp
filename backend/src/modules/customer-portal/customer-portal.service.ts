@@ -182,17 +182,23 @@ export class CustomerPortalService {
 
   async ticketDetails(actor: any, glpiTicketId: number) {
     let entityId: number | null = null;
+    let localTicket: PortalTicket | null = null;
     if (actor.role === 'user') {
-      const own = await this.tickets.findOne({ where: { customerId: actor.customerId, portalUserId: actor.sub, glpiTicketId } });
-      if (!own) throw new ForbiddenException('Você não possui acesso a este chamado');
-      entityId = own.glpiEntityId;
+      localTicket = await this.tickets.findOne({ where: { customerId: actor.customerId, portalUserId: actor.sub, glpiTicketId }, relations: ['requester'] });
+      if (!localTicket) throw new ForbiddenException('Você não possui acesso a este chamado');
+      entityId = localTicket.glpiEntityId;
     } else {
       const synced = await this.glpiTickets.findOne({ where: { customerId: actor.customerId, glpiTicketId } });
-      const local = synced ? null : await this.tickets.findOne({ where: { customerId: actor.customerId, glpiTicketId } });
-      entityId = synced?.glpiEntityId || local?.glpiEntityId || null;
+      localTicket = await this.tickets.findOne({ where: { customerId: actor.customerId, glpiTicketId }, relations: ['requester'] });
+      entityId = synced?.glpiEntityId || localTicket?.glpiEntityId || null;
       if (!entityId) throw new NotFoundException('Chamado não encontrado para esta empresa');
     }
-    return this.glpi.getPortalTicketDetails(glpiTicketId, entityId);
+    const [details, customer] = await Promise.all([this.glpi.getPortalTicketDetails(glpiTicketId, entityId), this.customers.findOne({ where: { id: actor.customerId } })]);
+    return {
+      ...details,
+      company: customer ? { id: customer.id, name: customer.name, document: customer.cpfCnpj } : null,
+      requester: localTicket?.requester ? { name: localTicket.requester.name, email: localTicket.requester.email, phone: localTicket.requester.phone, department: localTicket.requester.department } : details.requester,
+    };
   }
   async dashboard(actor: any) {
     const tickets = await this.listTickets(actor), month = new Date().toISOString().slice(0, 7);
