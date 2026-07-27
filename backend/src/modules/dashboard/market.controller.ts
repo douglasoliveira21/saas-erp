@@ -17,12 +17,13 @@ export class MarketController {
 
     // Buscar cotações de moedas via AwesomeAPI
     try {
-      const currencies = await this.httpGet('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL');
+      const currencies = await this.httpGet('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL,ETH-BRL');
       const parsed = JSON.parse(currencies);
       if (parsed.USDBRL) quotes.USD = { value: Number(parsed.USDBRL.bid).toFixed(2), change: Number(parsed.USDBRL.pctChange) };
       if (parsed.EURBRL) quotes.EUR = { value: Number(parsed.EURBRL.bid).toFixed(2), change: Number(parsed.EURBRL.pctChange) };
       if (parsed.BTCBRL) quotes.BTC = { value: Number(parsed.BTCBRL.bid), change: Number(parsed.BTCBRL.pctChange) };
       if (parsed.GBPBRL) quotes.GBP = { value: Number(parsed.GBPBRL.bid).toFixed(2), change: Number(parsed.GBPBRL.pctChange) };
+      if (parsed.ETHBRL) quotes.ETH = { value: Number(parsed.ETHBRL.bid), change: Number(parsed.ETHBRL.pctChange) };
     } catch {}
 
     // Buscar Selic, IPCA, IGP-M via BCB
@@ -44,6 +45,28 @@ export class MarketController {
       if (igpmData?.[0]) quotes.IGPM = { value: igpmData[0].valor };
     } catch {}
 
+    try {
+      const ipca12 = JSON.parse(await this.httpGet('https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json'));
+      if (ipca12?.[0]) quotes.IPCA12 = { value: ipca12[0].valor };
+    } catch {}
+
+    try {
+      const inpc = JSON.parse(await this.httpGet('https://api.bcb.gov.br/dados/serie/bcdata.sgs.188/dados/ultimos/1?formato=json'));
+      if (inpc?.[0]) quotes.INPC = { value: inpc[0].valor };
+    } catch {}
+
+    try {
+      const ipca15 = JSON.parse(await this.httpGet('https://api.bcb.gov.br/dados/serie/bcdata.sgs.7478/dados/ultimos/1?formato=json'));
+      if (ipca15?.[0]) quotes.IPCA15 = { value: ipca15[0].valor };
+    } catch {}
+
+    try {
+      const igpmMonths = JSON.parse(await this.httpGet('https://api.bcb.gov.br/dados/serie/bcdata.sgs.189/dados/ultimos/12?formato=json'));
+      if (Array.isArray(igpmMonths) && igpmMonths.length === 12) {
+        const accumulated = (igpmMonths.reduce((factor: number, item: any) => factor * (1 + Number(item.valor) / 100), 1) - 1) * 100;
+        quotes.IGPM12 = { value: accumulated.toFixed(2) };
+      }
+    } catch {}
     // Buscar índices via brapi.dev (server-side não tem CORS)
     try {
       const brapi = await this.httpGet('https://brapi.dev/api/quote/%5EBVSP,%5EGSPC,%5EIXIC?range=1d&interval=1d', this.brapiHeaders());
@@ -68,6 +91,7 @@ export class MarketController {
       }
     } catch {}
 
+    quotes.updatedAt = new Date().toISOString();
     this.cache = quotes;
     this.cacheTime = Date.now();
     return quotes;

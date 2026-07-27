@@ -12,6 +12,7 @@ interface TickerItem {
 
 export function MarketTicker() {
   const [items, setItems] = useState<TickerItem[]>([])
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,15 +29,16 @@ export function MarketTicker() {
     try {
       const { data: serverQuotes } = await api.get('/market/quotes')
       const quotes = { ...(serverQuotes || {}) }
-      if (!quotes.USD || !quotes.EUR || !quotes.BTC || !quotes.GBP) {
+      if (!quotes.USD || !quotes.EUR || !quotes.BTC || !quotes.GBP || !quotes.ETH) {
         try {
-          const response = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL')
+          const response = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL,ETH-BRL')
           if (response.ok) {
             const currencies = await response.json()
             if (!quotes.USD && currencies?.USDBRL) quotes.USD = { value: currencies.USDBRL.bid, change: currencies.USDBRL.pctChange }
             if (!quotes.EUR && currencies?.EURBRL) quotes.EUR = { value: currencies.EURBRL.bid, change: currencies.EURBRL.pctChange }
             if (!quotes.BTC && currencies?.BTCBRL) quotes.BTC = { value: currencies.BTCBRL.bid, change: currencies.BTCBRL.pctChange }
             if (!quotes.GBP && currencies?.GBPBRL) quotes.GBP = { value: currencies.GBPBRL.bid, change: currencies.GBPBRL.pctChange }
+            if (!quotes.ETH && currencies?.ETHBRL) quotes.ETH = { value: currencies.ETHBRL.bid, change: currencies.ETHBRL.pctChange }
           }
         } catch {}
       }
@@ -62,14 +64,21 @@ export function MarketTicker() {
       add('NASDAQ', 'Nasdaq', '💻', value => Number(value).toFixed(0))
       add('SELIC', 'Selic', '🏦', value => `${Number(value).toFixed(2)}% a.a.`)
       add('SELIC', 'CDI', '💰', value => `${Number(value).toFixed(2)}% a.a.`)
-      add('IPCA', 'IPCA', '📈', value => `${value}%`)
+      add('IPCA', 'IPCA mensal', '📈', value => `${value}%`)
+      add('IPCA12', 'IPCA 12 meses', '📊', value => `${value}%`)
+      add('INPC', 'INPC', '🧾', value => `${value}%`)
+      add('IPCA15', 'IPCA-15', '📅', value => `${value}%`)
       add('IFIX', 'IFIX', '🏢', value => Number(value).toFixed(0))
       add('BTC', 'Bitcoin', '₿', value => `R$ ${(Number(value) / 1000).toFixed(1)}k`)
-      add('IGPM', 'IGP-M', '📉', value => `${value}%`)
+      add('ETH', 'Ethereum', '◆', value => `R$ ${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`)
+      add('IGPM', 'IGP-M mensal', '📉', value => `${value}%`)
+      add('IGPM12', 'IGP-M 12 meses', '📋', value => `${value}%`)
       add('GBP', 'Libra', '🇬🇧', value => `R$ ${Number(value).toFixed(2)}`)
       setItems(next)
+      setLastUpdated(quotes.updatedAt || new Date().toISOString())
     } catch {
       setItems([])
+      setLastUpdated(null)
     }
   }
 
@@ -78,6 +87,7 @@ export function MarketTicker() {
   return (
     <div className="relative mb-8 group">
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-3xl px-2 py-3 shadow-elevated">
+        {lastUpdated && <div className="px-10 pb-2 text-right text-[10px] text-slate-400">Atualizado em {new Date(lastUpdated).toLocaleString('pt-BR')}</div>}
         <div className="flex items-center">
           <button onClick={() => scroll(-1)} className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/15 text-white/60 hover:text-white transition-all">
             <ChevronLeft className="w-4 h-4" />
