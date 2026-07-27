@@ -162,14 +162,38 @@ export class CustomerPortalService {
   }
 
   async listTickets(actor: any) {
-    const where: any = { customerId: actor.customerId };
-    if (actor.role === 'user') where.portalUserId = actor.sub;
-    const local = await this.tickets.find({ where, relations: ['requester'], order: { createdAt: 'DESC' } });
-    const synced = await this.glpiTickets.find({ where: { customerId: actor.customerId } });
+    const localWhere: any = { customerId: actor.customerId };
+    if (actor.role === 'user') localWhere.portalUserId = actor.sub;
+    const local = await this.tickets.find({ where: localWhere, relations: ['requester'], order: { createdAt: 'DESC' } });
+    const synced = await this.glpiTickets.find({ where: { customerId: actor.customerId }, order: { dateOpened: 'DESC' } });
     const states = new Map(synced.map(ticket => [ticket.glpiTicketId, ticket]));
-    return local.map(ticket => ({ ...ticket, requester: this.safe(ticket.requester), status: states.get(ticket.glpiTicketId)?.status || ticket.status }));
+    const result: any[] = local.map(ticket => ({ ...ticket, requester: this.safe(ticket.requester), status: states.get(ticket.glpiTicketId)?.status || ticket.status, dateOpened: states.get(ticket.glpiTicketId)?.dateOpened || ticket.createdAt }));
+    if (actor.role !== 'user') {
+      const localIds = new Set(local.map(ticket => ticket.glpiTicketId));
+      for (const ticket of synced) if (!localIds.has(ticket.glpiTicketId)) result.push({
+        id: `glpi-${ticket.glpiTicketId}`, glpiTicketId: ticket.glpiTicketId, customerId: ticket.customerId,
+        title: ticket.title, status: ticket.status, urgency: ticket.priority, dateOpened: ticket.dateOpened,
+        createdAt: ticket.dateOpened, requester: null, source: 'glpi',
+      });
+      result.sort((a, b) => new Date(b.dateOpened || b.createdAt).getTime() - new Date(a.dateOpened || a.createdAt).getTime());
+    }
+    return result;
   }
 
+  async ticketDetails(actor: any, glpiTicketId: number) {
+    let entityId: number | null = null;
+    if (actor.role === 'user') {
+      const own = await this.tickets.findOne({ where: { customerId: actor.customerId, portalUserId: actor.sub, glpiTicketId } });
+      if (!own) throw new ForbiddenException('Você não possui acesso a este chamado');
+      entityId = own.glpiEntityId;
+    } else {
+      const synced = await this.glpiTickets.findOne({ where: { customerId: actor.customerId, glpiTicketId } });
+      const local = synced ? null : await this.tickets.findOne({ where: { customerId: actor.customerId, glpiTicketId } });
+      entityId = synced?.glpiEntityId || local?.glpiEntityId || null;
+      if (!entityId) throw new NotFoundException('Chamado não encontrado para esta empresa');
+    }
+    return this.glpi.getPortalTicketDetails(glpiTicketId, entityId);
+  }
   async dashboard(actor: any) {
     const tickets = await this.listTickets(actor), month = new Date().toISOString().slice(0, 7);
     const contracts = await this.contracts.find({ where: { customerId: actor.customerId, status: 'ativo' } });
@@ -183,8 +207,8 @@ export class CustomerPortalService {
 
   async documents(actor: any) {
     if (!['admin','finance'].includes(actor.role)) throw new ForbiddenException();
-    const receivables = await this.dataSource.query(`SELECT ar.id,ar.description,ar.total_value "totalValue",ar.pending_value "pendingValue",ar.status,ar.due_date "dueDate",p.id "paymentId",p.type,p.codigo_solicitacao "code" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id WHERE ar.customer_id=$1 ORDER BY ar.due_date DESC LIMIT 100`, [actor.customerId]);
-    const invoices = await this.dataSource.query(`SELECT i.id,i.type,i.number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
+    const receivables = await this.dataSource.query(`SELECT ar.id,ar.description,ar.total_value "totalValue",ar.pending_value "pendingValue",ar.status,ar.due_date "dueDate",p.id "paymentId",p.type,p.codigo_solicitacao "code",p.status "paymentStatus" FROM accounts_receivable ar LEFT JOIN LATERAL (SELECT px.id,px.type,px.codigo_solicitacao,px.status FROM payments px WHERE px.sale_id=ar.sale_id AND COALESCE(LOWER(px.status),'') NOT IN ('rejeitado','rejeitada','cancelado','cancelada','erro','falha') ORDER BY px.created_at DESC LIMIT 1) p ON true WHERE ar.customer_id=$1 AND COALESCE(LOWER(ar.status),'') NOT IN ('cancelado','cancelada','rejeitado','rejeitada','erro') ORDER BY ar.due_date DESC LIMIT 100`, [actor.customerId]);
+    const invoices = await this.dataSource.query(`SELECT i.id,i.type,i.number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 AND COALESCE(LOWER(i.status),'') NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
     const contracts = await this.contracts.find({ where: { customerId: actor.customerId }, order: { createdAt: 'DESC' } });
     return { receivables, invoices, contracts };
   }

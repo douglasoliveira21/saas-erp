@@ -126,6 +126,19 @@ export class GlpiService implements OnModuleInit {
     if (!id) throw new Error('GLPI não retornou o identificador do chamado');
     return { id };
   }
+  async getPortalTicketDetails(ticketId: number, expectedEntityId: number): Promise<any> {
+    const config = await this.getConfig();
+    const session = await this.initSession(config);
+    const ticket = await this.glpiRequest(`/Ticket/${ticketId}`, session, config);
+    if (Number(ticket?.entities_id) !== Number(expectedEntityId)) throw new Error('Chamado não pertence à entidade informada');
+    let followups: any[] = [];
+    try {
+      const payload = await this.glpiRequest(`/Ticket/${ticketId}/ITILFollowup`, session, config, 'range=0-200&order=ASC');
+      const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      followups = rows.filter((item: any) => !Boolean(Number(item.is_private))).map((item: any) => ({ id: item.id, content: item.content || '', date: item.date || item.date_creation, userId: item.users_id, source: item.sourceitems_id || null }));
+    } catch (error) { this.logger.warn(`Não foi possível carregar acompanhamentos do chamado ${ticketId}: ${error.message}`); }
+    return { id: Number(ticket.id), title: ticket.name || ticket.title, content: ticket.content || '', status: Number(ticket.status), urgency: Number(ticket.urgency || 0), priority: Number(ticket.priority || 0), openedAt: ticket.date || ticket.date_creation, solvedAt: ticket.solvedate || null, closedAt: ticket.closedate || null, followups };
+  }
   async getEntities(): Promise<any[]> {
     const config = await this.getConfig();
     const session = await this.initSession(config);
