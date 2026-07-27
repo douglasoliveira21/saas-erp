@@ -10,13 +10,32 @@ export class SalesBillingFiscalIntegrity1786000000000 implements MigrationInterf
     await queryRunner.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_status varchar(30) NOT NULL DEFAULT 'pendente'`);
     await queryRunner.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS archived_at timestamp`);
     await queryRunner.query(`UPDATE sales s SET operational_status = CASE WHEN s.status='cancelado' THEN 'cancelada' WHEN s.status='finalizado' THEN 'finalizada' ELSE 'aberta' END, fiscal_status = CASE WHEN EXISTS(SELECT 1 FROM invoices i WHERE i.sale_id=s.id AND i.status='autorizada') THEN 'autorizada' ELSE 'pendente' END, billing_status = CASE WHEN EXISTS(SELECT 1 FROM payments p WHERE p.sale_id=s.id AND p.status='pago') THEN 'pago' WHEN EXISTS(SELECT 1 FROM payments p WHERE p.sale_id=s.id AND p.status IN ('pendente','a_receber','vencido')) THEN 'emitido' ELSE 'nao_emitido' END, payment_status = CASE WHEN EXISTS(SELECT 1 FROM accounts_receivable a WHERE a.sale_id=s.id AND a.status='pago') THEN 'pago' WHEN EXISTS(SELECT 1 FROM accounts_receivable a WHERE a.sale_id=s.id AND a.status='parcial') THEN 'parcial' ELSE 'pendente' END`);
-    await queryRunner.query(`DO $$ BEGIN IF EXISTS(SELECT 1 FROM payments WHERE status IN ('pendente','a_receber','vencido') GROUP BY sale_id,type HAVING COUNT(*)>1) THEN RAISE EXCEPTION 'Existem cobrancas ativas duplicadas por venda/tipo; concilie antes da migration'; END IF; IF EXISTS(SELECT 1 FROM invoices WHERE sale_id IS NOT NULL AND status NOT IN ('cancelada','rejeitada','erro') GROUP BY sale_id,type HAVING COUNT(*)>1) THEN RAISE EXCEPTION 'Existem notas ativas duplicadas por venda/tipo; concilie antes da migration'; END IF; END $$;`);    await queryRunner.query(`ALTER TABLE installment_payments ADD COLUMN IF NOT EXISTS idempotency_key varchar(100)`);
+    // Preserva notas autorizadas históricas. Somente tentativas concorrentes em aberto
+    // precisam ser únicas; tentativas antigas duplicadas permanecem auditáveis como erro.
+    await queryRunner.query(`
+      WITH ranked_attempts AS (
+        SELECT id, ROW_NUMBER() OVER (
+          PARTITION BY sale_id, type
+          ORDER BY created_at DESC, id DESC
+        ) AS position
+        FROM invoices
+        WHERE sale_id IS NOT NULL AND status IN ('pendente', 'processando')
+      )
+      UPDATE invoices invoice
+      SET status = 'erro',
+          rejection_reason = CONCAT_WS('; ', NULLIF(invoice.rejection_reason, ''), 'Tentativa duplicada anterior à proteção de concorrência'),
+          updated_at = NOW()
+      FROM ranked_attempts ranked
+      WHERE invoice.id = ranked.id AND ranked.position > 1
+    `);
+    await queryRunner.query(`DO $$ BEGIN IF EXISTS(SELECT 1 FROM payments WHERE status IN ('pendente','a_receber','vencido') GROUP BY sale_id,type HAVING COUNT(*)>1) THEN RAISE EXCEPTION 'Existem cobrancas ativas duplicadas por venda/tipo; concilie antes da migration'; END IF; END $$;`);
+    await queryRunner.query(`ALTER TABLE installment_payments ADD COLUMN IF NOT EXISTS idempotency_key varchar(100)`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_installment_payments_idempotency ON installment_payments(idempotency_key) WHERE idempotency_key IS NOT NULL`);
     await queryRunner.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS paid_at timestamp`);
     await queryRunner.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS idempotency_key varchar(100)`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotency_key) WHERE idempotency_key IS NOT NULL`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_active_sale_type ON payments(sale_id,type) WHERE status IN ('pendente','a_receber','vencido')`);
-    await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_active_sale_type ON invoices(sale_id,type) WHERE sale_id IS NOT NULL AND status NOT IN ('cancelada','rejeitada','erro')`);
+    await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_active_sale_type ON invoices(sale_id,type) WHERE sale_id IS NOT NULL AND status IN ('pendente','processando')`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_movement_single_reversal ON financial_movements(reference_id) WHERE reference_type='financial_movement_reversal'`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_statement_transaction ON bank_statements(bank_account,transaction_id) WHERE transaction_id IS NOT NULL`);
     await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_statement_movement ON bank_statements(matched_movement_id) WHERE matched_movement_id IS NOT NULL`);
