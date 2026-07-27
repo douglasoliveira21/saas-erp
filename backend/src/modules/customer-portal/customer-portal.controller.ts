@@ -12,6 +12,7 @@ export class CustomerPortalController {
   constructor(private service: CustomerPortalService) {}
   @Post('public/company') company(@Body() body: any) { return this.service.findCompany(body.cnpj); }
   @Post('public/register') register(@Body() body: any) { return this.service.selfRegister(body); }
+  @Post('public/verify-email') verifyEmail(@Body() body: any) { return this.service.verifyEmail(body.email, body.code); }
   @Post('public/login') async login(@Body() body: any, @Response({ passthrough: true }) response: ExpressResponse) {
     const result = await this.service.login(body.email, body.password);
     response.cookie('portal_token', result.accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 604800000, path: '/api/portal' });

@@ -16,6 +16,8 @@ export class PortalUser {
   @Column({ name: 'approved_at', type: 'timestamp', nullable: true }) approvedAt: Date | null;
   @Column({ name: 'approved_by', type: 'uuid', nullable: true }) approvedBy: string | null;
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true }) lastLoginAt: Date | null;
+  @Column({ name: 'verification_code_hash', length: 64, nullable: true }) verificationCodeHash: string | null;
+  @Column({ name: 'verification_expires_at', type: 'timestamp', nullable: true }) verificationExpiresAt: Date | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt: Date;
   @ManyToOne(() => Customer) @JoinColumn({ name: 'customer_id' }) customer: Customer;

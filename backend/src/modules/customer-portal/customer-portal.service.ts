@@ -3,10 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { Customer } from '../customers/entities/customer.entity';
 import { Contract } from '../contracts/entities/contract.entity';
 import { GlpiTicket } from '../glpi/entities/glpi-ticket.entity';
 import { GlpiService } from '../glpi/glpi.service';
+import { MailService } from '../mail/mail.service';
 import { PortalUser } from './entities/portal-user.entity';
 import { PortalTicketForm } from './entities/portal-form.entity';
 import { PortalTicket } from './entities/portal-ticket.entity';
@@ -20,7 +22,7 @@ export class CustomerPortalService {
     @InjectRepository(Customer) private customers: Repository<Customer>,
     @InjectRepository(Contract) private contracts: Repository<Contract>,
     @InjectRepository(GlpiTicket) private glpiTickets: Repository<GlpiTicket>,
-    private glpi: GlpiService, private jwt: JwtService, private dataSource: DataSource,
+    private glpi: GlpiService, private jwt: JwtService, private dataSource: DataSource, private mail: MailService,
   ) {}
 
   private digits(value = '') { return value.replace(/\D/g, ''); }
@@ -41,14 +43,34 @@ export class CustomerPortalService {
     const email = String(body.email || '').trim().toLowerCase();
     if (!String(body.name || '').trim() || !email || String(body.password || '').length < 8)
       throw new BadRequestException('Nome, e-mail e senha com pelo menos 8 caracteres são obrigatórios');
-    if (await this.users.findOne({ where: { email } })) throw new BadRequestException('E-mail já cadastrado');
-    const user = await this.users.save(this.users.create({
+    const existing = await this.users.findOne({ where: { email } });
+    if (existing?.status === 'active') throw new BadRequestException('E-mail já cadastrado');
+    if (existing && existing.customerId !== company.id) throw new BadRequestException('E-mail já vinculado a outra empresa');
+    const code = String(crypto.randomInt(100000, 1000000));
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    const data: Partial<PortalUser> = {
       customerId: company.id, name: String(body.name).trim(), email, phone: body.phone,
       department: body.department, password: await bcrypt.hash(body.password, 12), role: 'user', status: 'pending',
-    }));
-    return { message: 'Cadastro enviado para aprovação do administrador da empresa', user: this.safe(user) };
+      verificationCodeHash: codeHash, verificationExpiresAt: new Date(Date.now() + 15 * 60000),
+    };
+    const user = existing ? await this.users.save(Object.assign(existing, data)) : await this.users.save(this.users.create(data));
+    const sent = await this.mail.sendMail(email, 'Código de confirmação - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para confirmar o cadastro no Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos.</p>`);
+    if (!sent) throw new BadRequestException('Não foi possível enviar o código. Confira o e-mail ou tente novamente.');
+    return { message: 'Enviamos um código de confirmação para o seu e-mail.', verificationRequired: true, email };
   }
 
+  async verifyEmail(emailValue: string, codeValue: string) {
+    const email = String(emailValue || '').trim().toLowerCase();
+    const codeHash = crypto.createHash('sha256').update(String(codeValue || '').trim()).digest('hex');
+    const user = await this.users.findOne({ where: { email } });
+    if (!user || user.status !== 'pending' || !user.verificationCodeHash || user.verificationCodeHash !== codeHash)
+      throw new BadRequestException('Código inválido');
+    if (!user.verificationExpiresAt || user.verificationExpiresAt < new Date())
+      throw new BadRequestException('Código expirado. Faça o cadastro novamente para receber outro.');
+    user.status = 'active'; user.approvedAt = new Date(); user.verificationCodeHash = null; user.verificationExpiresAt = null;
+    await this.users.save(user);
+    return { message: 'E-mail confirmado. Seu acesso ao portal está liberado.' };
+  }
   async login(email: string, password: string) {
     const user = await this.users.findOne({ where: { email: String(email || '').trim().toLowerCase() }, relations: ['customer'] });
     if (!user || !await bcrypt.compare(password || '', user.password)) throw new UnauthorizedException('Credenciais inválidas');
