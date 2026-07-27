@@ -76,7 +76,7 @@ export class CustomerPortalService {
     const customerId = actor?.customerId || body.customerId;
     if (actor && actor.role !== 'admin') throw new ForbiddenException();
     const customer = await this.customers.findOne({ where: { id: customerId } });
-    if (!customer?.glpiEntityId) throw new BadRequestException('Cliente sem entidade GLPI vinculada');
+    if (!customer) throw new NotFoundException('Cliente não encontrado');
     const email = String(body.email || '').trim().toLowerCase();
     if (await this.users.findOne({ where: { email } })) throw new BadRequestException('E-mail já cadastrado');
     const password = String(body.password || '');
