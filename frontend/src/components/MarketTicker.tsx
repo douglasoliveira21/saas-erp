@@ -26,7 +26,20 @@ export function MarketTicker() {
 
   async function fetchMarketData() {
     try {
-      const { data: quotes } = await api.get('/market/quotes')
+      const { data: serverQuotes } = await api.get('/market/quotes')
+      const quotes = { ...(serverQuotes || {}) }
+      if (!quotes.USD || !quotes.EUR || !quotes.BTC || !quotes.GBP) {
+        try {
+          const response = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL,EUR-BRL,BTC-BRL,GBP-BRL')
+          if (response.ok) {
+            const currencies = await response.json()
+            if (!quotes.USD && currencies?.USDBRL) quotes.USD = { value: currencies.USDBRL.bid, change: currencies.USDBRL.pctChange }
+            if (!quotes.EUR && currencies?.EURBRL) quotes.EUR = { value: currencies.EURBRL.bid, change: currencies.EURBRL.pctChange }
+            if (!quotes.BTC && currencies?.BTCBRL) quotes.BTC = { value: currencies.BTCBRL.bid, change: currencies.BTCBRL.pctChange }
+            if (!quotes.GBP && currencies?.GBPBRL) quotes.GBP = { value: currencies.GBPBRL.bid, change: currencies.GBPBRL.pctChange }
+          }
+        } catch {}
+      }
       const next: TickerItem[] = []
       const add = (key: string, label: string, icon: string, format: (value: number | string) => string) => {
         const quote = quotes?.[key]
