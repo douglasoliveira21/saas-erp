@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
-import JsBarcode from 'jsbarcode'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
 interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
@@ -161,6 +160,28 @@ export function Fiscal() {
 
   async function openFiscalPreview() {
     if (!selectedSaleId || !recipientName || !totalValue) { setError('Selecione uma venda para visualizar'); return }
+    if (emitType === 'nfe') {
+      const previewWindow = window.open('', '_blank')
+      try {
+        const sale: any = sales.find(item => item.id === selectedSaleId)
+        const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' }
+        const saleData = {
+          recipientCnpj, recipientName, totalValue: parseFloat(totalValue), modelo: nfeModelo, tpNF: nfeTpNF, tPag: nfeTpPag,
+          paymentMethodLabel: paymentLabels[sale?.paymentMethod] || sale?.paymentMethod || '-',
+          installments: Number(sale?.installments || 1), recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientPhone, recipientIE,
+          items: (window as any).__nfeImportedItems || (sale?.items || []).map((item: any) => ({ name: item.name, quantity: item.quantity, unitPrice: item.unitPrice || item.unit_price, code: item.productId || item.code || '1', ncm: item.ncm || '', cfop: item.cfop || '', unit: item.unit || 'UN', cest: item.cest || '' })),
+        }
+        const response = await api.post('/fiscal/nfe/preview-pdf', { saleId: selectedSaleId, saleData }, { responseType: 'blob' })
+        const url = URL.createObjectURL(response.data)
+        if (previewWindow) previewWindow.location.href = url
+        else setError('O navegador bloqueou a nova aba. Permita pop-ups para visualizar a prévia.')
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+      } catch (e: any) {
+        previewWindow?.close()
+        setError(e.response?.data?.message || 'Erro ao gerar pré-visualização do DANFE')
+      }
+      return
+    }
     try {
       const response = await api.get('/financial/accounts/by-sale/' + selectedSaleId)
       setPreviewInstallments(response.data?.installmentsList || [])
@@ -309,235 +330,17 @@ export function Fiscal() {
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar PDF') }
   }
 
-  function viewDanfeNfe(id: string) {
-    api.get('/fiscal/nfe/danfe/' + id).then(r => r.data).then(data => {
-      const inv = data.invoice
-      const cfg = data.config
-      const items = inv.sale?.items || []
-      const chave = inv.accessKey || ''
-      const chaveFormatada = chave.replace(/(.{4})/g, '$1 ').trim()
-      let codigoBarras = ''
-      if (/^\d{44}$/.test(chave)) {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-        JsBarcode(svg, chave, {
-          format: 'CODE128',
-          displayValue: false,
-          height: 42,
-          margin: 0,
-          width: 1.35,
-        })
-        codigoBarras = svg.outerHTML
-      }
-      const tpNF = chave.length >= 23 ? (chave[22] === '0' ? '0' : '1') : '1'
-      const vTotalProd = items.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0)
-
-      const printWindow = window.open('', '_blank')
-      if (!printWindow) return
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DANFE - ${inv.number}</title><style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:'Courier New',monospace;margin:8mm;font-size:8pt;color:#000;line-height:1.2}
-        .page{width:190mm;margin:0 auto;border:2px solid #000;padding:0}
-        .section{border-bottom:2px solid #000}
-        .section:last-child{border-bottom:none}
-        .row{display:flex}
-        .col{border-right:1px solid #000;padding:2px 4px;min-height:18px}
-        .col:last-child{border-right:none}
-        .col label{display:block;font-size:5.5pt;color:#333;text-transform:uppercase;margin-bottom:1px}
-        .col span,.col p{font-size:7.5pt}
-        .col .big{font-size:10pt;font-weight:bold}
-        .header-row{display:flex;border-bottom:1px solid #000}
-        .header-left{width:35%;border-right:1px solid #000;padding:4px;text-align:center;display:flex;flex-direction:column;justify-content:center}
-        .header-center{width:30%;border-right:1px solid #000;padding:4px;text-align:center}
-        .header-right{width:35%;padding:4px}
-        .danfe-title{font-size:14pt;font-weight:bold;letter-spacing:2px}
-        .danfe-sub{font-size:6pt;margin-top:2px}
-        .tipo-box{display:inline-block;width:12px;height:12px;border:1px solid #000;text-align:center;font-size:8pt;line-height:12px;margin:0 2px}
-        .tipo-box.active{background:#000;color:#fff}
-        .barcode{height:12mm;margin:2px auto 3px;overflow:hidden;text-align:center}
-        .barcode svg{display:block;width:100%;height:100%}
-        .chave-box{font-family:'Courier New',monospace;font-size:7pt;word-break:break-all;letter-spacing:0.5px;margin-top:4px}
-        .section-title{background:#ddd;border-bottom:1px solid #000;padding:2px 4px;font-size:6.5pt;font-weight:bold;text-transform:uppercase}
-        table{width:100%;border-collapse:collapse}
-        table th{background:#eee;border:1px solid #000;padding:2px 3px;font-size:6pt;text-transform:uppercase;text-align:center}
-        table td{border:1px solid #000;padding:2px 3px;font-size:7pt}
-        .text-right{text-align:right}
-        .text-center{text-align:center}
-        .bold{font-weight:bold}
-        .total-row{display:flex;border-top:1px solid #000}
-        .total-cell{flex:1;border-right:1px solid #000;padding:2px 4px}
-        .total-cell:last-child{border-right:none}
-        .total-cell label{display:block;font-size:5.5pt;color:#333}
-        .total-cell span{font-size:8pt;font-weight:bold}
-        .info-box{padding:4px;min-height:40px;font-size:7pt;line-height:1.4}
-        .protocol{font-size:7pt;margin-top:3px}
-        .nf-number{font-size:11pt;font-weight:bold;margin-top:4px}
-        .serie{font-size:8pt;margin-top:2px}
-        @media print{body{margin:0},.page{border:none}}
-      </style></head><body>
-        <div class="page">
-          <!-- HEADER -->
-          <div class="section">
-            <div class="header-row">
-              <div class="header-left">
-                ${cfg?.companyLogo ? `<img src="${cfg.companyLogo}" style="max-height:30px;max-width:80px;margin:0 auto 4px" />` : ''}
-                <div style="font-size:10pt;font-weight:bold">${cfg?.companyName || ''}</div>
-                <div style="font-size:7pt;margin-top:4px">${cfg?.emitAddress || ''}, ${cfg?.emitNumber || ''}</div>
-                <div style="font-size:7pt">${cfg?.emitNeighborhood || ''} - CEP: ${cfg?.emitCep || ''}</div>
-                <div style="font-size:7pt;margin-top:2px">CNPJ: ${cfg?.cnpj || ''}</div>
-                <div style="font-size:7pt">IE: ${cfg?.stateRegistration || ''}</div>
-              </div>
-              <div class="header-center">
-                <div class="danfe-title">DANFE</div>
-                <div class="danfe-sub">DOCUMENTO AUXILIAR DA<br>NOTA FISCAL ELETRÔNICA</div>
-                <div style="margin-top:6px;font-size:7pt">
-                  <span class="tipo-box ${tpNF === '0' ? 'active' : ''}">0</span> ENTRADA
-                  &nbsp;&nbsp;
-                  <span class="tipo-box ${tpNF === '1' ? 'active' : ''}">1</span> SAÍDA
-                </div>
-                <div class="nf-number">Nº ${String(inv.number || 0).padStart(9, '0')}</div>
-                <div class="serie">SÉRIE ${inv.series || 1}</div>
-              </div>
-              <div class="header-right">
-                <div style="font-size:6pt;text-align:center;font-weight:bold;border:1px solid #000;padding:2px;margin-bottom:4px">CHAVE DE ACESSO</div>
-                ${codigoBarras ? `<div class="barcode" aria-label="Código de barras da chave de acesso">${codigoBarras}</div>` : ''}
-                <div class="chave-box">${chaveFormatada}</div>
-                <div style="font-size:6pt;text-align:center;margin-top:6px;border:1px solid #000;padding:2px">
-                  Consulta de autenticidade no portal nacional da NF-e<br>
-                  www.nfe.fazenda.gov.br/portal
-                </div>
-                <div class="protocol">
-                  <strong>PROTOCOLO DE AUTORIZAÇÃO:</strong><br>
-                  ${inv.protocolNumber || '-'} ${inv.issuedAt ? '- ' + new Date(inv.issuedAt).toLocaleString('pt-BR') : ''}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- NATUREZA / INSCRIÇÃO -->
-          <div class="section">
-            <div class="row" style="border-bottom:1px solid #000">
-              <div class="col" style="flex:3"><label>NATUREZA DA OPERAÇÃO</label><span>${tpNF === '0' ? 'COMPRA' : 'VENDA'}</span></div>
-              <div class="col" style="flex:2"><label>INSCRIÇÃO ESTADUAL</label><span>${cfg?.stateRegistration || ''}</span></div>
-              <div class="col" style="flex:2"><label>INSCRIÇÃO MUNICIPAL</label><span>${cfg?.cityRegistration || ''}</span></div>
-            </div>
-          </div>
-
-          <!-- DESTINATÁRIO -->
-          <div class="section">
-            <div class="section-title">DESTINATÁRIO / REMETENTE</div>
-            <div class="row" style="border-bottom:1px solid #000">
-              <div class="col" style="flex:4"><label>NOME / RAZÃO SOCIAL</label><span>${inv.recipientName || '-'}</span></div>
-              <div class="col" style="flex:2"><label>CNPJ / CPF</label><span>${inv.recipientCnpj || '-'}</span></div>
-              <div class="col" style="flex:2"><label>DATA DE EMISSÃO</label><span>${inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString('pt-BR') : '-'}</span></div>
-            </div>
-            <div class="row">
-              <div class="col" style="flex:4"><label>ENDEREÇO</label><span>${inv.sale?.customer?.address || '-'}</span></div>
-              <div class="col" style="flex:2"><label>BAIRRO</label><span>${inv.sale?.customer?.neighborhood || '-'}</span></div>
-              <div class="col" style="flex:1"><label>CEP</label><span>${inv.sale?.customer?.cep || '-'}</span></div>
-              <div class="col" style="flex:1"><label>UF</label><span>${inv.sale?.customer?.uf || 'MG'}</span></div>
-            </div>
-          </div>
-
-          <!-- PRODUTOS -->
-          <div class="section">
-            <div class="section-title">DADOS DOS PRODUTOS / SERVIÇOS</div>
-            <table>
-              <thead>
-                <tr>
-                  <th style="width:8%">CÓDIGO</th>
-                  <th style="width:32%">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
-                  <th style="width:8%">NCM/SH</th>
-                  <th style="width:6%">CST</th>
-                  <th style="width:6%">CFOP</th>
-                  <th style="width:5%">UN</th>
-                  <th style="width:8%">QTD</th>
-                  <th style="width:10%">V. UNIT</th>
-                  <th style="width:10%">V. TOTAL</th>
-                  <th style="width:7%">V. IPI</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map((it: any) => `<tr>
-                  <td class="text-center">${(it.productId || it.serviceId || '').substring(0,8)}</td>
-                  <td>${it.name || '-'}</td>
-                  <td class="text-center">${it.ncm || '-'}</td>
-                  <td class="text-center">102</td>
-                  <td class="text-center">${it.cfop || '5102'}</td>
-                  <td class="text-center">${it.unit || 'UN'}</td>
-                  <td class="text-right">${Number(it.quantity).toFixed(4)}</td>
-                  <td class="text-right">${Number(it.unitPrice).toFixed(2)}</td>
-                  <td class="text-right">${Number(it.totalPrice).toFixed(2)}</td>
-                  <td class="text-right">0,00</td>
-                </tr>`).join('')}
-                ${items.length < 5 ? Array(5 - items.length).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('') : ''}
-              </tbody>
-            </table>
-          </div>
-
-          <!-- CÁLCULO DO IMPOSTO -->
-          <div class="section">
-            <div class="section-title">CÁLCULO DO IMPOSTO</div>
-            <div class="total-row">
-              <div class="total-cell"><label>BASE CÁLC. ICMS</label><span>0,00</span></div>
-              <div class="total-cell"><label>VALOR ICMS</label><span>0,00</span></div>
-              <div class="total-cell"><label>BASE CÁLC. ICMS ST</label><span>0,00</span></div>
-              <div class="total-cell"><label>VALOR ICMS ST</label><span>0,00</span></div>
-              <div class="total-cell"><label>V. TOTAL PRODUTOS</label><span>${vTotalProd.toFixed(2)}</span></div>
-            </div>
-            <div class="total-row">
-              <div class="total-cell"><label>VALOR FRETE</label><span>0,00</span></div>
-              <div class="total-cell"><label>VALOR SEGURO</label><span>0,00</span></div>
-              <div class="total-cell"><label>DESCONTO</label><span>0,00</span></div>
-              <div class="total-cell"><label>OUTRAS DESP.</label><span>0,00</span></div>
-              <div class="total-cell"><label>VALOR IPI</label><span>0,00</span></div>
-              <div class="total-cell"><label>VALOR TOTAL DA NOTA</label><span class="big">${Number(inv.totalValue || 0).toFixed(2)}</span></div>
-            </div>
-          </div>
-
-          <!-- TRANSPORTADOR -->
-          <div class="section">
-            <div class="section-title">TRANSPORTADOR / VOLUMES TRANSPORTADOS</div>
-            <div class="row">
-              <div class="col" style="flex:3"><label>RAZÃO SOCIAL</label><span>-</span></div>
-              <div class="col" style="flex:1"><label>FRETE POR CONTA</label><span>9-Sem Frete</span></div>
-              <div class="col" style="flex:2"><label>CNPJ / CPF</label><span>-</span></div>
-              <div class="col" style="flex:1"><label>UF</label><span>-</span></div>
-            </div>
-          </div>
-
-          <!-- FATURA / DUPLICATAS -->
-          <div class="section">
-            <div class="section-title">FATURA / DUPLICATAS</div>
-            <div class="row">
-              <div class="col"><label>NÚMERO</label><span>${String(inv.number || 0).padStart(6,'0')}</span></div>
-              <div class="col"><label>VALOR ORIGINAL</label><span>${Number(inv.totalValue || 0).toFixed(2)}</span></div>
-              <div class="col"><label>VALOR DESCONTO</label><span>0,00</span></div>
-              <div class="col"><label>VALOR LÍQUIDO</label><span>${Number(inv.totalValue || 0).toFixed(2)}</span></div>
-            </div>
-          </div>
-
-          <!-- DADOS ADICIONAIS -->
-          <div class="section">
-            <div class="section-title">DADOS ADICIONAIS</div>
-            <div class="row">
-              <div class="col info-box" style="flex:3">
-                <label>INFORMAÇÕES COMPLEMENTARES</label>
-                <p>Documento emitido por ME ou EPP optante pelo Simples Nacional.</p>
-                <p>Não gera direito a crédito fiscal de IPI.</p>
-                ${inv.observations ? '<p>' + inv.observations + '</p>' : ''}
-              </div>
-              <div class="col info-box" style="flex:1">
-                <label>RESERVADO AO FISCO</label>
-                <p>&nbsp;</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </body></html>`
-      printWindow.document.write(html)
-      printWindow.document.close()
-      printWindow.onload = () => { printWindow.print() }
-    }).catch(() => setError('Erro ao gerar DANFE'))
+  async function viewDanfeNfe(id: string) {
+    const opened = window.open('', '_blank')
+    try {
+      const url = URL.createObjectURL(await getFiscalBlob('/fiscal/nfe/danfe-pdf/' + id))
+      if (opened) opened.location.href = url
+      else setError('O navegador bloqueou a nova aba. Permita pop-ups para visualizar o DANFE.')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (e: any) {
+      opened?.close()
+      setError(e.response?.data?.message || 'Erro ao gerar DANFE')
+    }
   }
 
   const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100

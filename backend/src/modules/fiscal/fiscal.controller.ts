@@ -309,6 +309,24 @@ export class FiscalController {
     return { invoice: inv, config };
   }
 
+  @Get('nfe/danfe-pdf/:id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async getDanfePdf(@Param('id') id: string, @Res() res: Response) {
+    const pdf = await this.danfePdfService.generate(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="DANFE_${id}.pdf"`);
+    res.send(pdf);
+  }
+
+  @Post('nfe/preview-pdf')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async previewDanfePdf(@Body() body: { saleId: string; saleData?: any }, @Res() res: Response) {
+    if (!body.saleId) throw new BadRequestException('Venda obrigatória para pré-visualização');
+    const pdf = await this.danfePdfService.generatePreview(body.saleId, body.saleData || {});
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="DANFE_PREVIA_SEM_VALOR_FISCAL.pdf"');
+    res.send(pdf);
+  }
   // === NFS-e ===
   @Post('nfse/emit')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
