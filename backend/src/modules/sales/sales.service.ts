@@ -81,13 +81,15 @@ export class SalesService {
         return { ...item, unitPrice, totalPrice };
       });
       const subtotal = moneySum(normalizedItems.map((item: any) => item.totalPrice));
-      const discountAmount = money(saleData.discountAmount || 0);
-      const taxAmount = money(saleData.taxAmount || 0);
+      const discountAmount = money(saleData.discountAmount ?? saleData.discountValue ?? 0);
+      const taxAmount = moneySum(normalizedItems.map((item: any) => moneyMultiply(item.totalPrice, Number(item.taxPercentage || 0) / 100)));
       saleData.subtotal = subtotal;
       saleData.discountAmount = discountAmount;
       saleData.taxAmount = taxAmount;
-      saleData.totalAmount = money(subtotal - discountAmount + taxAmount);
+      saleData.totalAmount = money(subtotal - discountAmount);
       saleData.commissionAmount = moneyMultiply(saleData.totalAmount, Number(saleData.commissionPercentage || 0) / 100);
+      const totalCost = moneySum(normalizedItems.map((item: any) => moneyMultiply(Number(item.costPrice || 0), Number(item.quantity || 0))));
+      saleData.netProfit = money(saleData.totalAmount - totalCost - taxAmount - saleData.commissionAmount);
 
       // Criar venda e itens dentro da mesma transação do estoque.
       const sale = queryRunner.manager.create(Sale, saleData);
@@ -488,25 +490,22 @@ export class SalesService {
     }
 
     const payments = await this.dataSource.query(
-      `SELECT codigo_solicitacao
-       FROM payments
-       WHERE sale_id = $1 AND type = 'boleto' AND status != 'cancelado'
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [id],
-    );
-
-    if (payments[0]?.codigo_solicitacao) {
+      `SELECT codigo_solicitacao, value, due_date FROM payments
+       WHERE sale_id=$1 AND type='boleto' AND status!='cancelado'
+       ORDER BY due_date, created_at`, [id]);
+    for (let index = 0; index < payments.length; index++) {
+      const payment = payments[index];
+      if (!payment.codigo_solicitacao) continue;
       try {
-        const pdf = await this.interService.getBoletoPdf(payments[0].codigo_solicitacao);
-        const filename = `boleto-${payments[0].codigo_solicitacao.substring(0, 8)}.pdf`;
+        const pdf = await this.interService.getBoletoPdf(payment.codigo_solicitacao);
+        const label = payments.length > 1 ? `-parcela-${index + 1}-de-${payments.length}` : '';
+        const filename = `boleto${label}-${payment.codigo_solicitacao.substring(0, 8)}.pdf`;
         attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
         attachmentNames.push(filename);
       } catch (error: any) {
-        throw new BadRequestException('Não foi possível obter o PDF do boleto: ' + (error?.message || 'erro desconhecido'));
+        throw new BadRequestException(`Não foi possível obter o PDF do boleto ${index + 1}/${payments.length}: ` + (error?.message || 'erro desconhecido'));
       }
     }
-
     if (attachments.length === 0) {
       throw new BadRequestException('Nenhum boleto ou nota fiscal autorizada encontrada para envio');
     }
@@ -585,6 +584,15 @@ export class SalesService {
       oldData = { ...sale };
       const { technician, customer, items, approver, ...allowedDto } = updateSaleDto;
       safeDto = allowedDto;
+      if (Array.isArray(items) && items.length) {
+        const subtotal = moneySum(items.map((item: any) => moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0))));
+        const discountAmount = money(safeDto.discountAmount ?? safeDto.discountValue ?? 0);
+        const taxAmount = moneySum(items.map((item: any) => moneyMultiply(moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0)), Number(item.taxPercentage || 0) / 100)));
+        const totalAmount = money(subtotal - discountAmount);
+        const commissionAmount = moneyMultiply(totalAmount, Number(safeDto.commissionPercentage ?? sale.commissionPercentage ?? 0) / 100);
+        const totalCost = moneySum(items.map((item: any) => moneyMultiply(Number(item.costPrice || 0), Number(item.quantity || 0))));
+        Object.assign(safeDto, { subtotal, discountAmount, taxAmount, totalAmount, commissionAmount, netProfit: money(totalAmount - totalCost - taxAmount - commissionAmount) });
+      }
       const dueDayChanged = safeDto.dueDay !== undefined && Number(safeDto.dueDay) !== Number(sale.dueDay);
       Object.assign(sale, safeDto);
       if (dueDayChanged && safeDto.dueDay) {

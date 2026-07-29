@@ -58,7 +58,7 @@ export function Pdv() {
   const subtotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
   const taxAmount = cart.reduce((s, i) => s + (i.unitPrice * i.quantity * i.taxPercentage / 100), 0)
   const discountValue = subtotal * discount / 100
-  const totalAmount = subtotal + taxAmount - discountValue
+  const totalAmount = subtotal - discountValue
 
   async function finalizeSale() {
     if (cart.length === 0) { setError('Adicione itens ao carrinho'); return }
@@ -76,7 +76,8 @@ export function Pdv() {
         totalAmount,
         discount,
         discountValue,
-        netProfit: cart.reduce((s, i) => s + ((i.unitPrice - i.costPrice) * i.quantity), 0),
+        discountAmount: discountValue,
+        netProfit: totalAmount - cart.reduce((s, i) => s + i.costPrice * i.quantity, 0) - taxAmount,
         commissionPercentage: 0,
         commissionAmount: 0,
         items: cart.map(i => ({
@@ -88,7 +89,7 @@ export function Pdv() {
           taxPercentage: i.taxPercentage,
           taxAmount: i.unitPrice * i.quantity * i.taxPercentage / 100,
           costPrice: i.costPrice,
-          netProfit: (i.unitPrice - i.costPrice) * i.quantity,
+          netProfit: (i.unitPrice - i.costPrice) * i.quantity - (i.unitPrice * i.quantity * i.taxPercentage / 100),
         }))
       }
       await api.post('/sales', payload)

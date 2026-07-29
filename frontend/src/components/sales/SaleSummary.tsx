@@ -25,11 +25,12 @@ export function SaleSummary({ subtotal, taxAmount, discountPct, discountValue, t
         <h2 className="font-semibold text-gray-900">Resumo</h2>
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between"><dt className="text-gray-600">Subtotal</dt><dd>R$ {subtotal.toFixed(2)}</dd></div>
-          <div className="flex justify-between"><dt className="text-gray-600">Impostos</dt><dd>R$ {taxAmount.toFixed(2)}</dd></div>
+          <div className="flex justify-between text-gray-500"><dt>Impostos (custo interno)</dt><dd>-R$ {taxAmount.toFixed(2)}</dd></div>
           {discountPct > 0 && <div className="flex justify-between text-red-600"><dt>Desconto ({discountPct}%)</dt><dd>-R$ {discountValue.toFixed(2)}</dd></div>}
-          <div className="flex justify-between border-t pt-3 text-base font-bold"><dt>Total</dt><dd className="text-green-600">R$ {totalAmount.toFixed(2)}</dd></div>
-          <div className="flex justify-between border-t pt-2 text-gray-500"><dt>Lucro líquido</dt><dd>R$ {netProfit.toFixed(2)}</dd></div>
-          <div className="flex items-center justify-between text-gray-500"><dt>Comissão ({commissionPct}%)</dt><dd>R$ {commissionAmount.toFixed(2)}</dd></div>
+          <div className="flex justify-between border-t pt-3 text-base font-bold"><dt>Valor a faturar</dt><dd className="text-green-600">R$ {totalAmount.toFixed(2)}</dd></div>
+
+          <div className="flex items-center justify-between text-gray-500"><dt>Comissão ({commissionPct}%)</dt><dd>-R$ {commissionAmount.toFixed(2)}</dd></div>
+          <div className="flex justify-between border-t pt-2 font-medium text-gray-700"><dt>Lucro líquido</dt><dd>R$ {netProfit.toFixed(2)}</dd></div>
         </dl>
         {canEditCommission && (
           <div>

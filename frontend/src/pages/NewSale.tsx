@@ -118,9 +118,10 @@ export function NewSale() {
   const subtotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
   const taxAmount = items.reduce((s, i) => s + (i.unitPrice * i.quantity * i.taxPercentage / 100), 0)
   const discountValue = subtotal * discountPct / 100
-  const totalAmount = subtotal + taxAmount - discountValue
-  const netProfit = items.reduce((s, i) => s + ((i.unitPrice - i.costPrice) * i.quantity), 0)
+  const totalAmount = subtotal - discountValue
   const commissionAmount = totalAmount * commissionPct / 100
+  const totalCost = items.reduce((s, i) => s + i.costPrice * i.quantity, 0)
+  const netProfit = totalAmount - totalCost - taxAmount - commissionAmount
 
   async function submit() {
     if (!customerId) { setError('Selecione um cliente'); return }
@@ -161,6 +162,7 @@ export function NewSale() {
         totalAmount,
         discount: discountPct,
         discountValue,
+        discountAmount: discountValue,
         netProfit,
         commissionPercentage: commissionPct,
         commissionAmount,
@@ -173,7 +175,7 @@ export function NewSale() {
           taxPercentage: i.taxPercentage,
           taxAmount: i.unitPrice * i.quantity * i.taxPercentage / 100,
           costPrice: i.costPrice,
-          netProfit: (i.unitPrice - i.costPrice) * i.quantity,
+          netProfit: (i.unitPrice - i.costPrice) * i.quantity - (i.unitPrice * i.quantity * i.taxPercentage / 100),
         }))
       }
       if (editingSaleId) {
