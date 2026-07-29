@@ -197,9 +197,9 @@ export class NfeService {
       const response = await this.soapRequest(endpoints.NFeAutorizacao4, envelope, agent);
       this.logger.log('Resposta SEFAZ completa: ' + response);
 
-      // Salvar resposta completa para debug
-      invoice.xmlAuthorized = response;
-      await this.invoiceRepository.save(invoice);
+      // A resposta SOAP nao e um XML autorizado. O XML assinado enviado ja esta
+      // preservado em xmlSent e xmlAuthorized so deve ser preenchido depois que
+      // a SEFAZ retornar protocolo de autorizacao (cStat 100).
       this.logger.log('Resposta SEFAZ (500 chars): ' + response.substring(0, 500));
 
       // Processar resposta

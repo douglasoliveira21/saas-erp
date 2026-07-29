@@ -202,7 +202,9 @@ export class FiscalController {
   async downloadXml(@Param('id') id: string, @Res() res: Response) {
     const inv = await this.invoiceRepo.findOne({ where: { id } });
     if (!inv) { res.status(404).json({ message: 'Nota nao encontrada' }); return; }
-    const xml = inv.xmlAuthorized || inv.xmlSent || '';
+    const xml = inv.status === 'autorizada'
+      ? (inv.xmlAuthorized || inv.xmlSent || '')
+      : (inv.xmlSent || inv.xmlAuthorized || '');
     const filename = `${inv.type}_${inv.number || 'rascunho'}_serie${inv.series}.xml`;
     res.setHeader('Content-Type', 'application/xml');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -293,7 +295,9 @@ export class FiscalController {
   async downloadNfeXml(@Param('id') id: string, @Res() res: Response) {
     const inv = await this.invoiceRepo.findOne({ where: { id } });
     if (!inv) { res.status(404).json({ message: 'Nota nao encontrada' }); return; }
-    const xml = inv.xmlAuthorized || inv.xmlSent || '';
+    const xml = inv.status === 'autorizada'
+      ? (inv.xmlAuthorized || inv.xmlSent || '')
+      : (inv.xmlSent || inv.xmlAuthorized || '');
     const filename = `NFe_${inv.number || 'rascunho'}_serie${inv.series}.xml`;
     res.setHeader('Content-Type', 'application/xml');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
