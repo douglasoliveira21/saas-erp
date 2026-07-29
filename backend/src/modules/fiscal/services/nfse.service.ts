@@ -23,6 +23,18 @@ export class NfseService {
     private auditService: AuditService,
   ) {}
 
+  private async reserveNfseNumber(configId: string): Promise<number> {
+    return this.configRepository.manager.transaction(async manager => {
+      const rows = await manager.query(`SELECT nfse_next_number FROM fiscal_config WHERE id=$1 FOR UPDATE`, [configId]);
+      if (!rows[0]) throw new BadRequestException('Configuração fiscal não encontrada durante a reserva da numeração');
+      const current = Number(rows[0].nfse_next_number);
+      if (!Number.isSafeInteger(current) || current <= 0) {
+        throw new BadRequestException(`Próximo número da NFS-e inválido na configuração: ${rows[0].nfse_next_number ?? 'vazio'}`);
+      }
+      await manager.query(`UPDATE fiscal_config SET nfse_next_number=$2, updated_at=NOW() WHERE id=$1`, [configId, current + 1]);
+      return current;
+    });
+  }
   async emit(invoiceId: string, serviceData: any, certId: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
@@ -39,9 +51,7 @@ export class NfseService {
 
     try {
       invoice.status = 'processando';
-const numberRows = await this.configRepository.query(`UPDATE fiscal_config SET nfse_next_number = nfse_next_number + 1 WHERE id=$1 RETURNING nfse_next_number - 1 AS number`, [config.id]);
-      const reservedNumber = Number(numberRows[0]?.number);
-      if (!Number.isInteger(reservedNumber) || reservedNumber <= 0) throw new BadRequestException('Não foi possível reservar a numeração da NFS-e');
+const reservedNumber = await this.reserveNfseNumber(config.id);
       config.nfseNextNumber = reservedNumber;
       invoice.number = reservedNumber;
       invoice.series = config.nfseSeries;
