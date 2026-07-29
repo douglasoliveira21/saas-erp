@@ -55,6 +55,28 @@ export class InterService implements OnModuleInit {
     }
   }
 
+  private formatInterDueDate(value: any, fieldName = 'Data de vencimento'): string {
+    const raw = String(value || '').trim();
+    const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+    if (isoDate) {
+      const year = Number(isoDate[1]);
+      const month = Number(isoDate[2]);
+      const day = Number(isoDate[3]);
+      const check = new Date(Date.UTC(year, month - 1, day));
+      if (check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day) {
+        return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+      }
+    }
+
+    const parsed = value instanceof Date ? value : new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new HttpException(`${fieldName} inválida. Informe a data no formato AAAA-MM-DD.`, HttpStatus.BAD_REQUEST);
+    }
+
+    const pad = (part: number) => String(part).padStart(2, '0');
+    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+  }
   private httpRequest(method: string, urlPath: string, body?: any, headers?: Record<string, string>): Promise<any> {
     return new Promise((resolve, reject) => {
       const url = new URL(this.baseUrl + urlPath);
@@ -653,7 +675,7 @@ export class InterService implements OnModuleInit {
     for (const installment of installments) {
       const key = `charge:${sale.id}:boleto:${installment.number}`;
       if (existingKeys.has(key)) continue;
-      const dueDate = String(installment.due_date).substring(0,10);
+      const dueDate = this.formatInterDueDate(installment.due_date, `Vencimento da parcela ${installment.number}`);
       if (dueDate < today) throw new HttpException(`A parcela ${installment.number} está vencida. Atualize o vencimento antes de emitir.`, HttpStatus.BAD_REQUEST);
       const data: any = {
         seuNumero: `${sale.id.replace(/-/g,'').substring(0,11)}${String(installment.number).padStart(2,'0')}`,
@@ -696,7 +718,7 @@ export class InterService implements OnModuleInit {
       // Usar data de vencimento da venda ou calcular +7 dias
       let dataVencimento: string;
       if ((sale as any).dueDate) {
-        dataVencimento = (sale as any).dueDate;
+        dataVencimento = this.formatInterDueDate((sale as any).dueDate);
       } else {
         const vencimento = new Date();
         const dueDay = (sale as any).dueDay;
