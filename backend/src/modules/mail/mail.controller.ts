@@ -22,6 +22,17 @@ export class MailController {
     return this.mailService.updateConfig(body, req.user.id);
   }
 
+  @Post('test')
+  @Roles(UserRole.ADMIN)
+  test(@Body() body: { email: string }, @Request() req: any) {
+    return this.mailService.sendTestEmail(body.email, req.user.id);
+  }
+
+  @Get('logs')
+  @Roles(UserRole.ADMIN)
+  getLogs(@Query('page') page?: string, @Query('limit') limit?: string, @Query('status') status?: string, @Query('search') search?: string) {
+    return this.mailService.getDeliveryLogs({ page: Number(page || 1), limit: Number(limit || 20), status, search });
+  }
   @Get('microsoft/auth-url')
   @Roles(UserRole.ADMIN)
   getMicrosoftAuthUrl(@Query('redirectUri') redirectUri?: string) {

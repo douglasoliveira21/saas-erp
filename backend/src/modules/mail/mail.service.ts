@@ -1,10 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import * as https from 'https';
 import * as nodemailer from 'nodemailer';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { EmailConfig } from './entities/email-config.entity';
+import { EmailDeliveryLog } from './entities/email-delivery-log.entity';
 import { AuditService } from '../audit/audit.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
@@ -18,6 +19,8 @@ export class MailService implements OnModuleInit {
   constructor(
     @InjectRepository(EmailConfig)
     private readonly configRepository: Repository<EmailConfig>,
+    @InjectRepository(EmailDeliveryLog)
+    private readonly deliveryLogRepository: Repository<EmailDeliveryLog>,
     private readonly auditService: AuditService,
   ) {
     this.transporter = this.createTransporter(this.getEnvConfig());
@@ -25,11 +28,23 @@ export class MailService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureConfigTable();
+    await this.ensureDeliveryLogTable();
     const config = await this.getConfig();
     this.transporter = this.createTransporter(config);
     this.logger.log(`Mail configurado: ${config.authUser || config.fromEmail}@${config.host}:${config.port}`);
   }
 
+  private async ensureDeliveryLogTable(): Promise<void> {
+    await this.configRepository.query(`
+      CREATE TABLE IF NOT EXISTS email_delivery_logs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), recipient varchar(500) NOT NULL,
+        subject varchar(500) NOT NULL, provider varchar(30) NOT NULL DEFAULT 'smtp',
+        status varchar(20) NOT NULL, error_message text, attachment_count integer NOT NULL DEFAULT 0,
+        is_test boolean NOT NULL DEFAULT false, user_id uuid, created_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await this.configRepository.query('CREATE INDEX IF NOT EXISTS idx_email_delivery_logs_created_at ON email_delivery_logs (created_at DESC)');
+  }
   private async ensureConfigTable(): Promise<void> {
     try {
       await this.configRepository.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
@@ -189,33 +204,65 @@ export class MailService implements OnModuleInit {
     return this.sendMailWithAttachment(to, subject, html, []);
   }
 
-  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = []): Promise<boolean> {
+  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = [], options: { isTest?: boolean; userId?: string; throwOnError?: boolean } = {}): Promise<boolean> {
+    let provider = 'smtp';
     try {
       const config = await this.getConfig();
-      if ((config.provider || 'smtp') === 'microsoft365') {
+      provider = config.provider || 'smtp';
+      if (provider === 'microsoft365') {
         await this.sendMicrosoftMail(config, to, subject, html, attachments);
-        this.logger.log('Email Microsoft 365 enviado para ' + to);
-        return true;
+      } else {
+        const fromName = config.fromName || 'VGON';
+        const fromEmail = config.fromEmail || config.authUser;
+        await this.transporter.sendMail({ from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail, to, cc: config.copyEnabled && config.copyEmail ? config.copyEmail : undefined, subject, html, attachments });
       }
-
-      const fromName = config.fromName || 'VGON';
-      const fromEmail = config.fromEmail || config.authUser;
-      await this.transporter.sendMail({
-        from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
-        to,
-        cc: config.copyEnabled && config.copyEmail ? config.copyEmail : undefined,
-        subject,
-        html,
-        attachments,
-      });
-      this.logger.log('Email enviado para ' + to);
+      this.logger.log(`Email ${provider} enviado para ${to}`);
+      await this.saveDeliveryLog(to, subject, provider, 'sent', null, attachments.length, options);
       return true;
-    } catch (e) {
-      this.logger.error('Erro ao enviar email para ' + to + ': ' + e.message);
+    } catch (error) {
+      const message = this.formatMailError(error);
+      this.logger.error(`Erro ao enviar email para ${to}: ${message}`);
+      await this.saveDeliveryLog(to, subject, provider, 'failed', message, attachments.length, options);
+      if (options.throwOnError) throw new BadRequestException('Falha no envio: ' + message);
       return false;
     }
   }
 
+  async sendTestEmail(email: string, userId?: string): Promise<any> {
+    const recipient = String(email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) throw new BadRequestException('Informe um e-mail de destino válido.');
+    const config = await this.getConfig();
+    if ((config.provider || 'smtp') === 'smtp') {
+      try { await this.transporter.verify(); } catch (error) {
+        const message = this.formatMailError(error);
+        await this.saveDeliveryLog(recipient, 'Teste de configuração de e-mail - VGON', 'smtp', 'failed', 'Falha na conexão/autenticação SMTP: ' + message, 0, { isTest: true, userId });
+        throw new BadRequestException('Não foi possível conectar ao servidor SMTP: ' + message);
+      }
+    }
+    await this.sendMailWithAttachment(recipient, 'Teste de configuração de e-mail - VGON', `<div style="font-family:Arial,sans-serif"><h2>Configuração de e-mail funcionando</h2><p>Este e-mail confirma que o ERP conseguiu autenticar e enviar uma mensagem.</p><p>Enviado em ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.</p></div>`, [], { isTest: true, userId, throwOnError: true });
+    return { success: true, recipient, provider: config.provider || 'smtp', message: 'E-mail aceito pelo servidor. Verifique também a caixa de spam.' };
+  }
+
+  async getDeliveryLogs(filters: { page?: number; limit?: number; status?: string; search?: string }): Promise<any> {
+    await this.ensureDeliveryLogTable();
+    const page = Math.max(1, Number(filters.page || 1)); const limit = Math.min(100, Math.max(1, Number(filters.limit || 20))); const where: any = {};
+    if (filters.status === 'sent' || filters.status === 'failed') where.status = filters.status;
+    if (filters.search) where.recipient = ILike(`%${filters.search.trim()}%`);
+    const [items, total] = await this.deliveryLogRepository.findAndCount({ where, order: { createdAt: 'DESC' }, skip: (page - 1) * limit, take: limit });
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
+  private async saveDeliveryLog(recipient: string, subject: string, provider: string, status: 'sent' | 'failed', errorMessage: string | null, attachmentCount: number, options: { isTest?: boolean; userId?: string }): Promise<void> {
+    try {
+      await this.ensureDeliveryLogTable();
+      await this.deliveryLogRepository.save(this.deliveryLogRepository.create({ recipient: String(recipient || '').slice(0, 500), subject: String(subject || '').slice(0, 500), provider, status, errorMessage, attachmentCount, isTest: Boolean(options.isTest), userId: options.userId || null }));
+    } catch (error) { this.logger.error('Não foi possível gravar o log de e-mail: ' + this.formatMailError(error)); }
+  }
+
+  private formatMailError(error: any): string {
+    const response = error?.response?.data?.error_description || error?.response?.data?.error?.message || error?.response?.data?.message;
+    return String(response || error?.message || error?.code || 'Erro desconhecido').slice(0, 2000);
+  }
   async getMicrosoftAuthUrl(redirectUri?: string): Promise<{ url: string; state: string }> {
     const config = await this.getConfig();
     const tenant = config.microsoftTenantId || 'common';

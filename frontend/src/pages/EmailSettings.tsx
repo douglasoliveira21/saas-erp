@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Mail, Save, ShieldCheck, Cloud, Plug, Unplug } from 'lucide-react'
+import { Mail, Save, ShieldCheck, Cloud, Plug, Unplug, Send, RefreshCw } from 'lucide-react'
 import { api } from '../services/api'
 
 export function EmailSettings() {
@@ -8,6 +8,10 @@ export function EmailSettings() {
   const [connecting, setConnecting] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [testEmail, setTestEmail] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [logs, setLogs] = useState<any[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -33,6 +37,22 @@ export function EmailSettings() {
         setError('Erro ao carregar configuracao de email')
       })
   }, [])
+
+  useEffect(() => { loadLogs() }, [])
+
+  async function loadLogs() {
+    setLoadingLogs(true)
+    try { const res = await api.get('/mail/logs', { params: { limit: 30 } }); setLogs(res.data.items || []) } catch { /* erro principal já aparece nos testes */ } finally { setLoadingLogs(false) }
+  }
+
+  async function testDelivery() {
+    setTesting(true); setMessage(''); setError('')
+    try {
+      const res = await api.post('/mail/test', { email: testEmail })
+      setMessage(res.data.message || 'E-mail de teste enviado com sucesso.')
+    } catch (e: any) { setError(e.response?.data?.message || 'Falha ao enviar e-mail de teste.') }
+    finally { setTesting(false); loadLogs() }
+  }
 
   async function save() {
     setSaving(true)
@@ -212,6 +232,44 @@ export function EmailSettings() {
           )}
         </div>
 
+        <div className="border-t border-gray-200 pt-6 space-y-4">
+          <div>
+            <h2 className="font-semibold text-gray-900 dark:text-white">Testar entrega</h2>
+            <p className="text-sm text-gray-500 mt-1">Salve a configuração antes do teste. O sistema verifica a conexão e envia uma mensagem real.</p>
+          </div>
+          <div className="flex flex-col md:flex-row gap-2">
+            <input className="input flex-1" type="email" value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="email@destino.com.br" />
+            <button onClick={testDelivery} disabled={testing || !testEmail} className="btn btn-primary flex items-center justify-center gap-2">
+              <Send className="w-4 h-4" /> {testing ? 'Testando...' : 'Enviar teste'}
+            </button>
+          </div>
+        </div>
+
+        <div className="border-t border-gray-200 pt-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-gray-900 dark:text-white">Histórico de envios</h2>
+              <p className="text-sm text-gray-500 mt-1">Inclui testes, boletos, notas fiscais e demais e-mails enviados pelo ERP.</p>
+            </div>
+            <button onClick={loadLogs} disabled={loadingLogs} className="btn btn-secondary flex items-center gap-2"><RefreshCw className={'w-4 h-4 ' + (loadingLogs ? 'animate-spin' : '')} /> Atualizar</button>
+          </div>
+          <div className="overflow-x-auto border border-gray-200 rounded-lg">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600"><tr><th className="text-left p-3">Data</th><th className="text-left p-3">Destinatário</th><th className="text-left p-3">Assunto</th><th className="text-left p-3">Provedor</th><th className="text-left p-3">Resultado</th></tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {!logs.length && <tr><td colSpan={5} className="p-6 text-center text-gray-500">Nenhuma tentativa registrada.</td></tr>}
+                {logs.map(log => <tr key={log.id} className="align-top">
+                  <td className="p-3 whitespace-nowrap">{new Date(log.createdAt).toLocaleString('pt-BR')}</td>
+                  <td className="p-3">{log.recipient}</td>
+                  <td className="p-3"><div>{log.subject}</div>{log.isTest && <span className="text-xs text-blue-600">Teste</span>}</td>
+                  <td className="p-3">{log.provider === 'microsoft365' ? 'Microsoft 365' : 'SMTP'}</td>
+                  <td className="p-3"><span className={log.status === 'sent' ? 'text-green-700 font-medium' : 'text-red-700 font-medium'}>{log.status === 'sent' ? 'Enviado' : 'Falhou'}</span>{log.errorMessage && <div className="mt-1 max-w-md text-xs text-red-600 break-words">{log.errorMessage}</div>}</td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500">“Enviado” significa que o servidor aceitou a mensagem. A entrega final ainda pode depender de antispam, SPF, DKIM e DMARC.</p>
+        </div>
         <div className="flex justify-end">
           <button onClick={save} disabled={saving} className="btn btn-primary flex items-center gap-2">
             <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Salvar'}
