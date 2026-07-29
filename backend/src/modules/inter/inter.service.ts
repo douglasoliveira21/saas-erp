@@ -733,7 +733,7 @@ export class InterService implements OnModuleInit {
       await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente
-      if (false && customer.email) {
+      if (customer.email) {
         try {
           // Buscar PDF do boleto
           const pdfBuffer = await this.getBoletoPdf(result.codigoSolicitacao);
@@ -766,10 +766,7 @@ export class InterService implements OnModuleInit {
           this.logger.log('Email com PDF do boleto enviado para: ' + customer.email);
         } catch (e) {
           this.logger.error('Erro ao enviar email do boleto: ' + e.message);
-          // Tentar enviar sem anexo como fallback
-          try {
-            await this.sendBoletoEmail(customer.email, customer.name, result, sale);
-          } catch {}
+          // Não enviar mensagem sem o boleto: a falha permanece disponível no histórico de e-mails.
         }
       } else {
         this.logger.warn('Cliente sem email cadastrado');

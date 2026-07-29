@@ -106,7 +106,7 @@ export function Sales() {
   function openEmailModal(id: string) {
     const sale = sales.find(s => s.id === id)
     setEmailSaleId(id)
-    setEmailBody(`Olá ${sale?.customer?.name || ''},\n\nSegue em anexo os documentos referentes ao atendimento realizado.\n\nQualquer dúvida estamos à disposição.\n\nAtenciosamente,\nEquipe VGON`)
+    setEmailBody(`Olá ${sale?.customer?.name || ''},\n\nSeguem em anexo a nota fiscal e o boleto referentes ao atendimento realizado.\n\nQualquer dúvida estamos à disposição.\n\nAtenciosamente,\nEquipe VGON`)
     setShowEmailModal(true)
   }
 
@@ -276,7 +276,7 @@ export function Sales() {
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Enviar Documentos por Email</h2>
-                <p className="text-sm text-gray-500 mt-0.5">NF e boleto serão enviados como anexo automaticamente</p>
+                <p className="text-sm text-gray-500 mt-0.5">A nota fiscal e o boleto serão enviados como anexos, sem depender do portal</p>
               </div>
               <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-600">
                 <XCircle className="w-5 h-5" />

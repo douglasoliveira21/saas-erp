@@ -15,6 +15,7 @@ import { User } from '../users/entities/user.entity';
 import { InterService } from '../inter/inter.service';
 import { NfeService } from '../fiscal/services/nfe.service';
 import { NfseService } from '../fiscal/services/nfse.service';
+import { DanfePdfService } from '../fiscal/services/danfe-pdf.service';
 import { AuditService } from '../audit/audit.service';
 import { SaleEvent } from './entities/sale-event.entity';
 import { SaleAttachment } from './entities/sale-attachment.entity';
@@ -45,6 +46,7 @@ export class SalesService {
     private interService: InterService,
     private nfeService: NfeService,
     private nfseService: NfseService,
+    private danfePdfService: DanfePdfService,
     private auditService: AuditService,
   ) {}
 
@@ -444,13 +446,25 @@ export class SalesService {
         attachmentNames.push(filename);
       }
 
+      if (invoice.type === 'nfe') {
+        try {
+          const pdf = await this.danfePdfService.generate(invoice.id);
+          const filename = `DANFE_${number}_serie${invoice.series || 1}.pdf`;
+          attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
+          attachmentNames.push(filename);
+        } catch (error: any) {
+          throw new BadRequestException('Não foi possível gerar o DANFE da NF-e ' + number + ': ' + (error?.message || 'erro desconhecido'));
+        }
+      }
       if (invoice.type === 'nfse' && invoice.access_key && invoice.certificate_id) {
         try {
           const pdf = await this.nfseService.downloadPdf(invoice.access_key, invoice.certificate_id);
           const filename = `NFSe_${number}_serie${invoice.series || 1}.pdf`;
           attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
           attachmentNames.push(filename);
-        } catch {}
+        } catch (error: any) {
+          throw new BadRequestException('Não foi possível obter o PDF da NFS-e ' + number + ': ' + (error?.message || 'erro desconhecido'));
+        }
       }
     }
 
@@ -469,7 +483,9 @@ export class SalesService {
         const filename = `boleto-${payments[0].codigo_solicitacao.substring(0, 8)}.pdf`;
         attachments.push({ filename, content: pdf, contentType: 'application/pdf' });
         attachmentNames.push(filename);
-      } catch {}
+      } catch (error: any) {
+        throw new BadRequestException('Não foi possível obter o PDF do boleto: ' + (error?.message || 'erro desconhecido'));
+      }
     }
 
     if (attachments.length === 0) {

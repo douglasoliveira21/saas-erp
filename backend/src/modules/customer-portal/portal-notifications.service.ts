@@ -37,7 +37,7 @@ export class PortalNotificationsService implements OnModuleInit, OnModuleDestroy
         try { await webpush.sendNotification({ endpoint:sub.endpoint, keys:{p256dh:sub.p256dh,auth:sub.auth} } as any, JSON.stringify({ title, body, url, tag:key }), { TTL:86400 }); }
         catch (error: any) { if ([404,410].includes(error?.statusCode)) await this.db.query(`DELETE FROM portal_push_subscriptions WHERE endpoint=$1`,[sub.endpoint]); }
       }
-      await this.mail.sendMail(user.email, title, `<p>Olá, ${user.name}.</p><p>${body}</p><p><a href="${process.env.PORTAL_URL || 'https://portal.vgon.com.br'}${url}">Acessar o Portal do Cliente</a></p>`);
+      if (!['invoice', 'boleto'].includes(type)) await this.mail.sendMail(user.email, title, `<p>Olá, ${user.name}.</p><p>${body}</p><p><a href="${process.env.PORTAL_URL || 'https://portal.vgon.com.br'}${url}">Acessar o Portal do Cliente</a></p>`);
     }
   }
 

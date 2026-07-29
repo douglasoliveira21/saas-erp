@@ -10,6 +10,7 @@ import { UserRole } from '../../common/enums/user-role.enum';
 import { CertificateService } from './services/certificate.service';
 import { NfeService } from './services/nfe.service';
 import { NfseService } from './services/nfse.service';
+import { DanfePdfService } from './services/danfe-pdf.service';
 import { Invoice } from './entities/invoice.entity';
 import { FiscalConfig } from './entities/fiscal-config.entity';
 import { FinancialTask } from '../financial-tasks/entities/financial-task.entity';
@@ -28,6 +29,7 @@ export class FiscalController {
     private certificateService: CertificateService,
     private nfeService: NfeService,
     private nfseService: NfseService,
+    private danfePdfService: DanfePdfService,
     @InjectRepository(Invoice) private invoiceRepo: Repository<Invoice>,
     @InjectRepository(FiscalConfig) private configRepo: Repository<FiscalConfig>,
     @InjectRepository(FiscalEvent) private eventRepo: Repository<FiscalEvent>,
@@ -230,6 +232,7 @@ export class FiscalController {
     }));
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
+      await this.sendAuthorizedNfeEmail(saved.id, body.saleId);
     }
 
     // Se for NF-e de entrada (compra), registrar despesa no fluxo de caixa
@@ -322,7 +325,7 @@ export class FiscalController {
     if (result.status === 'autorizada' && body.saleId) {
       await this.completeNfTask(body.saleId);
       // Enviar NFS-e por email ao cliente
-      if (false) try {
+      try {
         const customerEmail = body.serviceData?.recipientEmail;
         if (customerEmail && result.accessKey) {
           const pdfBuffer = await this.nfseService.downloadPdf(result.accessKey, body.certId);
@@ -352,6 +355,28 @@ export class FiscalController {
     return result;
   }
 
+  private async sendAuthorizedNfeEmail(invoiceId: string, saleId: string): Promise<void> {
+    try {
+      const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer'] });
+      const invoice = await this.invoiceRepo.findOne({ where: { id: invoiceId } });
+      const email = sale?.customer?.email;
+      if (!email || !invoice) return;
+      const xml = invoice.xmlAuthorized || invoice.xmlSent;
+      if (!xml) return;
+      const number = invoice.number || 'nota';
+      await this.mailService.sendMailWithAttachment(
+        email,
+        `Nota Fiscal Eletrônica ${number} - VGON`,
+        `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px"><h1 style="font-size:22px">Nota Fiscal Eletrônica</h1><p>Olá ${sale.customer.name || ''},</p><p>Segue em anexo a NF-e emitida referente à sua compra.</p><p><strong>Número:</strong> ${number}<br><strong>Valor:</strong> R$ ${Number(invoice.totalValue || sale.totalAmount).toFixed(2)}</p><p style="font-size:12px;color:#64748b">VGON Soluções em Informática</p></div>`,
+        [
+          { filename: `DANFE_${number}_serie${invoice.series || 1}.pdf`, content: await this.danfePdfService.generate(invoice.id), contentType: 'application/pdf' },
+          { filename: `NFe_${number}_serie${invoice.series || 1}.xml`, content: Buffer.from(xml, 'utf-8'), contentType: 'application/xml' },
+        ],
+      );
+    } catch (error: any) {
+      // O documento fiscal permanece autorizado; a falha de entrega fica no histórico de e-mails.
+    }
+  }
   private calculateNfseTaxes(serviceData: any): Record<string, any> {
     const money = (value: any) => {
       const scaled = Number(value || 0) * 100;
