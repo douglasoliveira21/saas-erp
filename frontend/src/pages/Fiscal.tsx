@@ -131,6 +131,8 @@ export function Fiscal() {
       setRecipientCep(sale.customer?.cep || '')
       setRecipientPhone((sale.customer as any)?.phone || '')
       setRecipientIE((sale.customer as any)?.stateRegistration || '')
+      const paymentCodes: Record<string, string> = { dinheiro: '01', cheque: '02', cartao_credito: '03', cartao_debito: '04', boleto: '15', pix: '17', transferencia: '18' }
+      setNfeTpPag(paymentCodes[sale.paymentMethod] || '99')
 
       // Auto-detectar tipo de nota
       const items = sale.items || []
@@ -767,8 +769,8 @@ export function Fiscal() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Forma Pagamento</label>
-                      <select className="input" value={nfeTpPag} onChange={e => setNfeTpPag(e.target.value)}>
+                      <label className="block text-xs text-gray-500 mb-1">Forma de pagamento da venda</label>
+                      <select className="input bg-gray-100" value={nfeTpPag} disabled>
                         <option value="01">Dinheiro</option>
                         <option value="02">Cheque</option>
                         <option value="03">Cartao Credito</option>
@@ -776,6 +778,7 @@ export function Fiscal() {
                         <option value="05">Credito Loja</option>
                         <option value="15">Boleto</option>
                         <option value="17">Pix</option>
+                        <option value="18">Transferência bancária</option>
                         <option value="99">Outros</option>
                       </select>
                     </div>

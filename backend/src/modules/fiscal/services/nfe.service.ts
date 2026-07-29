@@ -512,47 +512,41 @@ const numberRows = await this.configRepository.query(isNfce ? `UPDATE fiscal_con
     });
 
     // TOTAL
-    const vNF = vProd.toFixed(2);
-    let total = `<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${vNF}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${vNF}</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total>`;
+    const invoiceValue = Number(invoice.totalValue || vProd);
+    const discountValue = Math.max(0, vProd - invoiceValue);
+    const vNF = invoiceValue.toFixed(2);
+    let total = `<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${vProd.toFixed(2)}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>${discountValue.toFixed(2)}</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${vNF}</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total>`;
 
     // TRANSP
     const transp = '<transp><modFrete>9</modFrete></transp>';
 
-    // COBR (cobrança - fatura e duplicatas/parcelas)
+    // COBR: usa as parcelas financeiras reais da venda.
     let cobr = '';
-    const numParcelas = Number(saleData?.installments || saleData?.parcelas) || 1;
-    if (numParcelas > 0) {
-      const vOrigFat = vProd > 0 ? vProd.toFixed(2) : '0.00';
-      let fatBlock = `<fat><nFat>${String(invoice.number).padStart(6, '0')}</nFat><vOrig>${vOrigFat}</vOrig><vDesc>0.00</vDesc><vLiq>${vOrigFat}</vLiq></fat>`;
-      
-      let dupBlocks = '';
-      const valorParcela = Math.floor((vProd / numParcelas) * 100) / 100;
-      let totalDistribuido = 0;
-
-      for (let i = 1; i <= numParcelas; i++) {
-        // Calcular data de vencimento (parcela i = i meses a partir de hoje)
-        const brNow = new Date(new Date().getTime() - 3 * 60 * 60 * 1000);
-        const vencDate = new Date(brNow);
-        vencDate.setUTCMonth(vencDate.getUTCMonth() + i);
-        // Garantir que o dia não passe do último dia do mês
-        const lastDay = new Date(vencDate.getUTCFullYear(), vencDate.getUTCMonth() + 1, 0).getDate();
-        if (vencDate.getUTCDate() > lastDay) vencDate.setUTCDate(lastDay);
-        
-        const dVenc = `${vencDate.getUTCFullYear()}-${String(vencDate.getUTCMonth()+1).padStart(2,'0')}-${String(vencDate.getUTCDate()).padStart(2,'0')}`;
-        
-        // Última parcela recebe o restante (evita centavos sobrando)
-        const vDup = i === numParcelas ? (vProd - totalDistribuido).toFixed(2) : valorParcela.toFixed(2);
-        totalDistribuido += Number(vDup);
-        
-        dupBlocks += `<dup><nDup>${String(i).padStart(3, '0')}</nDup><dVenc>${dVenc}</dVenc><vDup>${vDup}</vDup></dup>`;
+    const paymentInstallments = Array.isArray(saleData?.paymentInstallments) ? saleData.paymentInstallments : [];
+    const numParcelas = Math.max(1, Number(saleData?.installments || paymentInstallments.length || 1));
+    const fatBlock = `<fat><nFat>${String(invoice.number).padStart(6, '0')}</nFat><vOrig>${vProd.toFixed(2)}</vOrig><vDesc>${discountValue.toFixed(2)}</vDesc><vLiq>${invoiceValue.toFixed(2)}</vLiq></fat>`;
+    let dupBlocks = '';
+    if (paymentInstallments.length) {
+      for (const installment of paymentInstallments) {
+        const number = Number(installment.number || 1);
+        const dueDate = String(installment.dueDate || '').substring(0, 10);
+        dupBlocks += `<dup><nDup>${String(number).padStart(3, '0')}</nDup><dVenc>${dueDate}</dVenc><vDup>${Number(installment.value || 0).toFixed(2)}</vDup></dup>`;
       }
-      
-      cobr = `<cobr>${fatBlock}${dupBlocks}</cobr>`;
+    } else {
+      const value = Math.floor((invoiceValue / numParcelas) * 100) / 100;
+      let distributed = 0;
+      for (let i = 1; i <= numParcelas; i++) {
+        const installmentValue = i === numParcelas ? invoiceValue - distributed : value;
+        distributed += installmentValue;
+        const due = new Date(); due.setMonth(due.getMonth() + i);
+        const dueDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+        dupBlocks += `<dup><nDup>${String(i).padStart(3, '0')}</nDup><dVenc>${dueDate}</dVenc><vDup>${installmentValue.toFixed(2)}</vDup></dup>`;
+      }
     }
-
+    cobr = `<cobr>${fatBlock}${dupBlocks}</cobr>`;
     // PAG
     const tPag = saleData?.tPag || '01'; // 01=Dinheiro
-    const vPagVal = vProd > 0 ? vProd.toFixed(2) : vNF;
+    const vPagVal = vNF;
     let pagContent = `<tPag>${tPag}</tPag><vPag>${vPagVal}</vPag>`;
     // Para cartão crédito/débito/pix e outros eletrônicos, informar grupo card
     if (tPag === '03' || tPag === '04' || tPag === '05' || tPag === '15' || tPag === '17' || tPag === '99') {

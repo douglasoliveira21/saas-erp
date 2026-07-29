@@ -53,7 +53,18 @@ export class FiscalController {
     if (duplicate && !['cancelada', 'rejeitada', 'erro'].includes(duplicate.status)) throw new BadRequestException(`Já existe ${type.toUpperCase()} ativa para esta venda`);
     if (!sale.customer) throw new BadRequestException('Venda sem cliente');
     const items = sale.items.map((item, index) => ({ ...(submitted?.items?.[index] || {}), productId: item.productId, serviceId: item.serviceId, name: item.name, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice) }));
-    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, totalValue: Number(sale.totalAmount), items };
+    const paymentCodes: Record<string, string> = { dinheiro: '01', cheque: '02', cartao_credito: '03', cartao_debito: '04', boleto: '15', pix: '17', transferencia: '18' };
+    const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' };
+    const paymentInstallments = await this.invoiceRepo.manager.query(
+      `SELECT number, value, due_date AS "dueDate" FROM installments WHERE sale_id=$1 AND status!='cancelado' ORDER BY number`, [saleId]);
+    const installments = Math.max(1, Number(sale.installments || paymentInstallments.length || 1));
+    const paymentMethodLabel = paymentLabels[String(sale.paymentMethod)] || String(sale.paymentMethod || 'Outros');
+    let discriminacao = submitted?.discriminacao;
+    if (type === 'nfse') {
+      const schedule = paymentInstallments.map((item: any) => `${item.number}ª: R$ ${Number(item.value).toFixed(2)} venc. ${String(item.dueDate).substring(0, 10).split('-').reverse().join('/')}`).join('; ');
+      discriminacao = `${discriminacao || 'Serviços prestados'} | Pagamento: ${paymentMethodLabel}${installments > 1 ? ` em ${installments} parcelas (${schedule})` : ''}`;
+    }
+    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, totalValue: Number(sale.totalAmount), items, paymentMethod: sale.paymentMethod, paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99', installments, paymentInstallments, discriminacao };
   }
   private async completeNfTask(saleId: string) {
     if (!saleId) return;
