@@ -593,18 +593,15 @@ export class SalesService {
         const totalCost = moneySum(items.map((item: any) => moneyMultiply(Number(item.costPrice || 0), Number(item.quantity || 0))));
         Object.assign(safeDto, { subtotal, discountAmount, taxAmount, totalAmount, commissionAmount, netProfit: money(totalAmount - totalCost - taxAmount - commissionAmount) });
       }
-      const dueDayChanged = safeDto.dueDay !== undefined && Number(safeDto.dueDay) !== Number(sale.dueDay);
+      const billingScheduleProvided = (safeDto.paymentMethod || sale.paymentMethod) === 'boleto' && safeDto.dueDay !== undefined;
       Object.assign(sale, safeDto);
-      if (dueDayChanged && safeDto.dueDay) {
+      if (billingScheduleProvided && safeDto.dueDay) {
         const newDueDay = Number(safeDto.dueDay);
         if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) throw new BadRequestException('Dia de vencimento inválido');
-        const pending = await queryRunner.query(`SELECT id, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente','vencido') FOR UPDATE`, [id]);
+        const pending = await queryRunner.query(`SELECT id, number, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente','vencido') FOR UPDATE`, [id]);
         for (const installment of pending) {
-          const oldDate = new Date(installment.due_date + 'T12:00:00');
-          const lastDay = new Date(oldDate.getFullYear(), oldDate.getMonth() + 1, 0).getDate();
-          const changed = new Date(oldDate.getFullYear(), oldDate.getMonth(), Math.min(newDueDay, lastDay), 12);
-          if (changed < new Date()) changed.setMonth(changed.getMonth() + 1);
-          const date = `${changed.getFullYear()}-${String(changed.getMonth()+1).padStart(2,'0')}-${String(changed.getDate()).padStart(2,'0')}`;
+          const scheduleSale = Object.assign(new Sale(), sale, { dueDay: newDueDay, dueDate: null });
+          const date = this.financialService.getBoletoDueDate(scheduleSale, new Date(), Number(installment.number || 1));
           await queryRunner.query(`UPDATE installments SET due_date=$1, status='pendente' WHERE id=$2`, [date, installment.id]);
         }
         const firstPending = await queryRunner.query(`SELECT due_date FROM installments WHERE sale_id=$1 AND status IN ('pendente','vencido') ORDER BY number LIMIT 1`, [id]);

@@ -923,13 +923,34 @@ export class FinancialService implements OnModuleInit {
   // ==================== Private Helpers ====================
 
   private calculateDueDate(sale: Sale, now: Date): string {
-    // A data de vencimento da conta é a data da venda (primeira parcela)
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    if (sale.paymentMethod === 'boleto') return this.getBoletoDueDate(sale, now, 1);
+    return this.formatLocalDate(now);
   }
 
+  getBoletoDueDate(sale: Sale, now: Date, installmentNumber = 1): string {
+    if (sale.dueDate) {
+      const [year, month, day] = String(sale.dueDate).split('-').map(Number);
+      const explicit = new Date(year, month - 1, day, 12);
+      explicit.setMonth(explicit.getMonth() + installmentNumber - 1, 1);
+      const lastDay = new Date(explicit.getFullYear(), explicit.getMonth() + 1, 0).getDate();
+      explicit.setDate(Math.min(day, lastDay));
+      return this.formatLocalDate(explicit);
+    }
+    const dueDay = Math.min(31, Math.max(1, Number(sale.dueDay || now.getDate())));
+    const first = new Date(now.getFullYear(), now.getMonth(), 1, 12);
+    const currentMonthLastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    first.setDate(Math.min(dueDay, currentMonthLastDay));
+    const minimumDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5, 12);
+    if (first < minimumDate) first.setMonth(first.getMonth() + 1, 1);
+    first.setMonth(first.getMonth() + installmentNumber - 1, 1);
+    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    first.setDate(Math.min(dueDay, lastDay));
+    return this.formatLocalDate(first);
+  }
+
+  private formatLocalDate(value: Date): string {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
   private generateInstallments(
     sale: Sale,
     account: AccountReceivable,
@@ -984,15 +1005,7 @@ export class FinancialService implements OnModuleInit {
       return dueDate.toISOString().split('T')[0];
     }
 
-    // Boleto - primeira parcela no dia da venda, demais no mesmo dia dos meses seguintes
-    // installmentNumber começa em 1: parcela 1 = mês atual, parcela 2 = próximo mês, etc.
-    const saleDay = now.getDate();
-    dueDate.setMonth(dueDate.getMonth() + (installmentNumber - 1));
-    // Garantir que o dia não ultrapasse o último dia do mês
-    const lastDayOfMonth = new Date(dueDate.getFullYear(), dueDate.getMonth() + 1, 0).getDate();
-    dueDate.setDate(Math.min(saleDay, lastDayOfMonth));
-
-    return dueDate.toISOString().split('T')[0];
+    return this.getBoletoDueDate(sale, now, installmentNumber);
   }
 
   private async createMovementsFromSale(
