@@ -64,6 +64,30 @@ export class NfeService {
     private auditService: AuditService,
   ) {}
 
+  private async reserveFiscalNumber(configId: string, series: number, isNfce: boolean): Promise<number> {
+    const column = isNfce ? 'nfce_next_number' : 'nfe_next_number';
+    return this.configRepository.manager.transaction(async manager => {
+      const configRows = await manager.query(
+        `SELECT ${column} AS "nextNumber" FROM fiscal_config WHERE id=$1 FOR UPDATE`,
+        [configId],
+      );
+      if (!configRows[0]) throw new BadRequestException('Configuração fiscal não encontrada durante a reserva da numeração');
+
+      const historyRows = await manager.query(
+        `SELECT COALESCE(MAX(number), 0)::int AS "lastNumber" FROM invoices WHERE type='nfe' AND series=$1`,
+        [series],
+      );
+      const configured = Number(configRows[0].nextNumber);
+      const lastUsed = Number(historyRows[0]?.lastNumber || 0);
+      const reserved = Math.max(Number.isSafeInteger(configured) && configured > 0 ? configured : 1, lastUsed + 1);
+      if (!Number.isSafeInteger(reserved) || reserved <= 0) {
+        throw new BadRequestException(`Próximo número da ${isNfce ? 'NFC-e' : 'NF-e'} inválido`);
+      }
+
+      await manager.query(`UPDATE fiscal_config SET ${column}=$2, updated_at=NOW() WHERE id=$1`, [configId, reserved + 1]);
+      return reserved;
+    });
+  }
   private getEndpoints(config: FiscalConfig, modelo: string) {
     if (modelo === '65') return config.environment === 1 ? NFCE_MG_PROD : NFCE_MG_HOM;
     return config.environment === 1 ? SEFAZ_MG_PROD : SEFAZ_MG_HOM;
@@ -132,9 +156,7 @@ export class NfeService {
       // Determinar serie e numero
       const isNfce = modelo === '65';
       const series = isNfce ? (config.nfceSeries || 1) : config.nfeSeries;
-const numberRows = await this.configRepository.query(isNfce ? `UPDATE fiscal_config SET nfce_next_number = COALESCE(nfce_next_number,1) + 1 WHERE id=$1 RETURNING nfce_next_number - 1 AS number` : `UPDATE fiscal_config SET nfe_next_number = nfe_next_number + 1 WHERE id=$1 RETURNING nfe_next_number - 1 AS number`, [config.id]);
-      const number = Number(numberRows[0]?.number);
-      if (!Number.isInteger(number) || number <= 0) throw new BadRequestException('Não foi possível reservar a numeração fiscal');
+      const number = await this.reserveFiscalNumber(config.id, series, isNfce);
       invoice.number = number;
       invoice.series = series;
 
