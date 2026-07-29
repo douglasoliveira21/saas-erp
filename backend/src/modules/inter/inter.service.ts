@@ -439,8 +439,9 @@ export class InterService implements OnModuleInit {
   private async markBoletoAsIssued(saleId: string): Promise<void> {
     await this.saleRepo.manager.query(
       `UPDATE sales
-       SET status = 'boleto_emitido', billing_status = 'emitido', updated_at = NOW()
-       WHERE id = $1 AND status IN ('pendente', 'nf_emitida')`,
+       SET status = CASE WHEN status IN ('pendente', 'nf_emitida') THEN 'boleto_emitido' ELSE status END,
+           billing_status = 'emitido', updated_at = NOW()
+       WHERE id = $1`,
       [saleId],
     );
 

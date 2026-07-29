@@ -222,10 +222,29 @@ export class SalesService {
       .leftJoinAndSelect('sale.technician', 'technician').leftJoinAndSelect('sale.customer', 'customer')
       .leftJoinAndSelect('sale.items', 'items').leftJoinAndSelect('sale.events', 'events').leftJoinAndSelect('sale.attachments', 'attachments')
       .where('sale.archivedAt IS NULL').orderBy('sale.createdAt', 'DESC');
-    if (!page && !limit) return qb.take(500).getMany();
+    if (!page && !limit) {
+      const data = await qb.take(500).getMany();
+      await this.applyEffectiveBillingStatus(data);
+      return data;
+    }
     const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
     const [data, total] = await qb.skip((safePage - 1) * safeLimit).take(safeLimit).getManyAndCount();
+    await this.applyEffectiveBillingStatus(data);
     return { data, total, page: safePage, limit: safeLimit };
+  }
+  private async applyEffectiveBillingStatus(sales: Sale[]): Promise<void> {
+    const ids = sales.map(sale => sale.id);
+    if (!ids.length) return;
+    const rows = await this.dataSource.query(
+      `SELECT DISTINCT sale_id FROM payments
+       WHERE sale_id = ANY($1::uuid[]) AND type = 'boleto'
+         AND status NOT IN ('cancelado', 'cancelada', 'rejeitado')`,
+      [ids],
+    );
+    const withBoleto = new Set(rows.map((row: any) => row.sale_id));
+    for (const sale of sales) {
+      if (withBoleto.has(sale.id) && !['pago', 'vencido'].includes(sale.billingStatus)) sale.billingStatus = 'emitido';
+    }
   }
   async findOne(id: string): Promise<Sale> {
     const sale = await this.salesRepository.findOne({
