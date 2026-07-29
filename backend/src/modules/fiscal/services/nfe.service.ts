@@ -434,6 +434,20 @@ export class NfeService {
     return String(value || '').replace(/\D/g, '').slice(0, maxLength);
   }
 
+  private formatNfeDate(value: any, fieldName: string): string {
+    const raw = String(value || '').trim();
+    const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) return isoDate[0];
+
+    const parsed = value instanceof Date ? value : new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${fieldName} invalida. Informe a data no formato AAAA-MM-DD.`);
+    }
+
+    const pad = (part: number) => String(part).padStart(2, '0');
+    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+  }
+
   private buildNfeXml(config: FiscalConfig, invoice: Invoice, saleData: any, accessKey: string, modelo: string): string {
     const cnpj = (config.cnpj || '').replace(/\D/g, '').padStart(14, '0');
     const recipientDoc = (invoice.recipientCnpj || '').replace(/\D/g, '');
@@ -559,7 +573,7 @@ export class NfeService {
     if (paymentInstallments.length) {
       for (const installment of paymentInstallments) {
         const number = Number(installment.number || 1);
-        const dueDate = String(installment.dueDate || '').substring(0, 10);
+        const dueDate = this.formatNfeDate(installment.dueDate, `Vencimento da parcela ${number}`);
         dupBlocks += `<dup><nDup>${String(number).padStart(3, '0')}</nDup><dVenc>${dueDate}</dVenc><vDup>${Number(installment.value || 0).toFixed(2)}</vDup></dup>`;
       }
     } else {
