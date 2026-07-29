@@ -56,6 +56,8 @@ export function Fiscal() {
   const [ibsMunicipalRate, setIbsMunicipalRate] = useState('')
   const [cbsRate, setCbsRate] = useState('')
   const [emitting, setEmitting] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewInstallments, setPreviewInstallments] = useState<any[]>([])
   const [recipientEmail, setRecipientEmail] = useState('')
   const [recipientAddress, setRecipientAddress] = useState('')
   const [recipientCity, setRecipientCity] = useState('')
@@ -157,6 +159,14 @@ export function Fiscal() {
     }
   }
 
+  async function openFiscalPreview() {
+    if (!selectedSaleId || !recipientName || !totalValue) { setError('Selecione uma venda para visualizar'); return }
+    try {
+      const response = await api.get('/financial/accounts/by-sale/' + selectedSaleId)
+      setPreviewInstallments(response.data?.installmentsList || [])
+    } catch { setPreviewInstallments([]) }
+    setShowPreview(true)
+  }
   async function emitNote() {
     if (!activeCert) { setError('Nenhum certificado ativo'); return }
     if (!recipientName || !totalValue) { setError('Preencha destinatario e valor'); return }
@@ -910,6 +920,7 @@ export function Fiscal() {
               {/* Botao emitir */}
               <div className="flex justify-end gap-3">
                 <button onClick={() => setTab('invoices')} className="btn btn-secondary">Cancelar</button>
+                <button onClick={openFiscalPreview} disabled={!selectedSaleId || !recipientName || !totalValue} className="btn btn-secondary flex items-center gap-2 py-3 px-5"><Eye className="w-4 h-4" /> Pré-visualizar</button>
                 <button onClick={emitNote} disabled={emitting || !recipientName || !totalValue} className="btn btn-primary flex items-center gap-2 py-3 px-6">
                   {emitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Send className="w-4 h-4" />}
                   {emitting ? 'Emitindo...' : 'Emitir ' + (emitType === 'nfe' ? 'NF-e' : 'NFS-e')}
@@ -920,6 +931,41 @@ export function Fiscal() {
         </div>
       )}
 
+      {showPreview && (() => {
+        const sale: any = sales.find(item => item.id === selectedSaleId)
+        const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' }
+        const items = (window as any).__nfeImportedItems || sale?.items || []
+        return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-gray-100 shadow-2xl">
+            <div className="sticky top-0 z-20 flex items-center justify-between border-b bg-white px-6 py-4">
+              <div><h2 className="text-lg font-semibold">Pré-visualização da {emitType === 'nfe' ? 'NF-e' : 'NFS-e'}</h2><p className="text-xs text-gray-500">Nenhum número será reservado e nenhum documento será transmitido.</p></div>
+              <button onClick={() => setShowPreview(false)} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-4 md:p-8">
+              <div className="relative mx-auto min-h-[780px] max-w-4xl overflow-hidden border-2 border-gray-800 bg-white p-6 text-gray-900 shadow-sm">
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden"><div className="-rotate-45 whitespace-nowrap text-6xl font-black tracking-widest text-red-500/15 md:text-8xl">SEM VALOR FISCAL</div></div>
+                <div className="relative z-0">
+                  <div className="grid grid-cols-1 gap-4 border-b-2 border-gray-800 pb-4 md:grid-cols-3">
+                    <div><p className="text-lg font-bold">{activeCert?.companyName || 'VGON'}</p><p className="text-xs">CNPJ: {activeCert?.cnpj || '-'}</p></div>
+                    <div className="text-center"><p className="text-3xl font-black">{emitType === 'nfe' ? 'DANFE' : 'NFS-e'}</p><p className="text-xs">PRÉ-VISUALIZAÇÃO DO DOCUMENTO FISCAL</p><p className="mt-2 font-bold">Nº NÃO RESERVADO</p></div>
+                    <div className="text-right text-xs"><p>Ambiente: {nfeAmbiente === 1 ? 'Produção' : 'Homologação'}</p><p>Data prevista: {new Date().toLocaleDateString('pt-BR')}</p><p>Modelo: {emitType === 'nfe' ? nfeModelo : 'NFS-e Nacional'}</p></div>
+                  </div>
+                  <h3 className="mt-4 bg-gray-200 px-2 py-1 text-xs font-bold">DESTINATÁRIO / TOMADOR</h3>
+                  <div className="grid grid-cols-1 gap-2 border p-3 text-sm md:grid-cols-2"><p><b>Nome:</b> {recipientName}</p><p><b>CPF/CNPJ:</b> {recipientCnpj}</p><p><b>Endereço:</b> {recipientAddress || '-'}</p><p><b>Cidade/UF:</b> {recipientCity || '-'} / {recipientUf || '-'}</p></div>
+                  <h3 className="mt-4 bg-gray-200 px-2 py-1 text-xs font-bold">{emitType === 'nfe' ? 'PRODUTOS / SERVIÇOS' : 'SERVIÇO PRESTADO'}</h3>
+                  {emitType === 'nfse' ? <div className="border p-3 text-sm"><p>{discriminacao || '-'}</p><p className="mt-2"><b>Código tributário:</b> {itemLista} &nbsp; <b>Alíquota ISS:</b> {aliquota}%</p></div> : <div className="overflow-x-auto"><table className="w-full border-collapse text-xs"><thead><tr className="bg-gray-100"><th className="border p-2 text-left">Descrição</th><th className="border p-2">Qtd.</th><th className="border p-2 text-right">Unitário</th><th className="border p-2 text-right">Total</th></tr></thead><tbody>{items.map((item: any, index: number) => <tr key={index}><td className="border p-2">{item.name || '-'}</td><td className="border p-2 text-center">{Number(item.quantity || 0)}</td><td className="border p-2 text-right">R$ {Number(item.unitPrice || item.unit_price || 0).toFixed(2)}</td><td className="border p-2 text-right">R$ {(Number(item.unitPrice || item.unit_price || 0) * Number(item.quantity || 0)).toFixed(2)}</td></tr>)}</tbody></table></div>}
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="border p-3 text-sm"><p><b>Forma de pagamento:</b> {paymentLabels[sale?.paymentMethod] || sale?.paymentMethod || '-'}</p><p><b>Parcelamento:</b> {Number(sale?.installments || 1)}x</p></div>
+                    <div className="border p-3 text-right"><p className="text-xs text-gray-500">VALOR TOTAL DO DOCUMENTO</p><p className="text-2xl font-bold">R$ {Number(totalValue || 0).toFixed(2)}</p></div>
+                  </div>
+                  {previewInstallments.length > 0 && <><h3 className="mt-4 bg-gray-200 px-2 py-1 text-xs font-bold">FATURA / DUPLICATAS</h3><div className="grid grid-cols-1 gap-2 border p-3 text-xs md:grid-cols-2">{previewInstallments.map((item: any) => <div key={item.id} className="flex justify-between border-b pb-1"><span>{item.number}ª parcela — venc. {new Date(item.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span><b>R$ {Number(item.value).toFixed(2)}</b></div>)}</div></>}
+                  <div className="mt-8 border-2 border-dashed border-red-300 p-4 text-center text-sm font-bold text-red-600">DOCUMENTO SOMENTE PARA CONFERÊNCIA — SEM VALIDADE FISCAL</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      })()}
       {/* === NOTAS EMITIDAS === */}
       {tab === 'invoices' && (
         <div className="space-y-4">
