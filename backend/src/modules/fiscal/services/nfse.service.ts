@@ -5,6 +5,7 @@ import * as https from 'https';
 import * as zlib from 'zlib';
 import * as forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
+import { PDFDocument } from 'pdf-lib';
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { CertificateService } from './certificate.service';
@@ -156,11 +157,33 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const baseUrl = this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.pdfGZipB64) {
-      return zlib.gunzipSync(Buffer.from(response.pdfGZipB64, 'base64'));
+      const officialPdf = zlib.gunzipSync(Buffer.from(response.pdfGZipB64, 'base64'));
+      return this.applyCompanyLogo(officialPdf, config?.companyLogo);
     }
     throw new BadRequestException('PDF nao disponivel: ' + JSON.stringify(response));
   }
 
+  private async applyCompanyLogo(pdfBuffer: Buffer, companyLogo?: string): Promise<Buffer> {
+    if (!companyLogo) return pdfBuffer;
+    const match = companyLogo.match(/^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+    if (!match) return pdfBuffer;
+    try {
+      const pdf = await PDFDocument.load(pdfBuffer);
+      const imageBytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+      const image = match[1].toLowerCase() === 'png' ? await pdf.embedPng(imageBytes) : await pdf.embedJpg(imageBytes);
+      const page = pdf.getPages()[0];
+      if (!page) return pdfBuffer;
+      const original = image.scale(1);
+      const scale = Math.min(100 / original.width, 38 / original.height, 1);
+      const width = original.width * scale;
+      const height = original.height * scale;
+      page.drawImage(image, { x: 28, y: page.getHeight() - height - 22, width, height });
+      return Buffer.from(await pdf.save());
+    } catch (error: any) {
+      this.logger.warn(`Não foi possível aplicar a logo na NFS-e: ${error?.message || error}`);
+      return pdfBuffer;
+    }
+  }
   async downloadXmlFromApi(chave: string, certId: string): Promise<string> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);

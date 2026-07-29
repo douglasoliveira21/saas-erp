@@ -36,6 +36,12 @@ export class DanfePdfService {
   }
   private xv(xml: string, tag: string): string { const m = xml.match(new RegExp(`<(?:\\w+:)?${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'i')); return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : ''; }
   private xn(xml: string, tag: string): number { return Number(this.xv(xml, tag) || 0); }
+  private logoBuffer(value?: string): Buffer | null {
+    if (!value) return null;
+    const match = value.match(/^data:image\/(?:png|jpe?g);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+    if (!match) return null;
+    try { return Buffer.from(match[1].replace(/\s/g, ''), 'base64'); } catch { return null; }
+  }
   private xmlItems(xml: string): DanfeItem[] {
     return Array.from(xml.matchAll(/<(?:\w+:)?det\b[^>]*>([\s\S]*?)<\/(?:\w+:)?det>/gi)).map(m => { const b = m[1]; return { code: this.xv(b, 'cProd'), description: this.xv(b, 'xProd'), ncm: this.xv(b, 'NCM'), cst: this.xv(b, 'CSOSN') || this.xv(b, 'CST'), cfop: this.xv(b, 'CFOP'), unit: this.xv(b, 'uCom'), quantity: this.xn(b, 'qCom'), unitPrice: this.xn(b, 'vUnCom'), discount: this.xn(b, 'vDesc'), total: this.xn(b, 'vProd'), bcIcms: this.xn(b, 'vBC'), icms: this.xn(b, 'vICMS'), ipi: this.xn(b, 'vIPI'), icmsRate: this.xn(b, 'pICMS'), ipiRate: this.xn(b, 'pIPI') }; });
   }
@@ -65,7 +71,15 @@ export class DanfePdfService {
     box(L, y, 165, 24, 'Data do recebimento'); box(L + 165, y, 273, 24, 'Identificação e assinatura do recebedor'); box(L + 438, y, 121, 24); y += 29; doc.dash(3, { space: 2 }).moveTo(L, y).lineTo(L + W, y).stroke('#000').undash(); y += 5;
 
     const ih = 96, iw = 238, dw = 105, fw = W - iw - dw; box(L, y, iw, ih);
-    text(config?.companyName || 'VGON SOLUÇÕES EM INFORMÁTICA LTDA', L + 5, y + 10, iw - 10, 8.4, true, 'center'); text(`${config?.emitAddress || ''}, ${config?.emitNumber || ''}`, L + 8, y + 32, iw - 16, 6.3, false, 'center'); text(config?.emitNeighborhood || '', L + 8, y + 43, iw - 16, 6.3, false, 'center'); text(`CEP ${config?.emitCep || ''}  TELEFONE: ${config?.emitPhone || ''}`, L + 8, y + 54, iw - 16, 6.3, false, 'center'); text(`CNPJ: ${document(config?.cnpj)}  IE: ${config?.stateRegistration || ''}`, L + 8, y + 66, iw - 16, 6.3, false, 'center');
+    const logo = this.logoBuffer(config?.companyLogo);
+    if (logo) {
+      try { doc.image(logo, L + 7, y + 7, { fit: [55, 31], align: 'center', valign: 'center' }); } catch {}
+    }
+    text(config?.companyName || 'VGON SOLUÇÕES EM INFORMÁTICA LTDA', L + (logo ? 66 : 5), y + 10, iw - (logo ? 71 : 10), 8.4, true, 'center');
+    text(`${config?.emitAddress || ''}, ${config?.emitNumber || ''}`, L + 8, y + 43, iw - 16, 6.3, false, 'center');
+    text(config?.emitNeighborhood || '', L + 8, y + 54, iw - 16, 6.3, false, 'center');
+    text(`CEP ${config?.emitCep || ''}  TELEFONE: ${config?.emitPhone || ''}`, L + 8, y + 65, iw - 16, 6.3, false, 'center');
+    text(`CNPJ: ${document(config?.cnpj)}  IE: ${config?.stateRegistration || ''}`, L + 8, y + 77, iw - 16, 6.3, false, 'center');
     box(L + iw, y, dw, ih); text('DANFE', L + iw + 2, y + 5, dw - 4, 13, true, 'center'); text('DOCUMENTO AUXILIAR\nDA NOTA FISCAL\nELETRÔNICA', L + iw + 3, y + 22, dw - 6, 5.4, false, 'center'); text('0 - ENTRADA', L + iw + 8, y + 51, 70, 6.2); text('1 - SAÍDA', L + iw + 8, y + 62, 70, 6.2); box(L + iw + 78, y + 50, 16, 20, '', key[22] === '0' ? '0' : '1', { size: 10, bold: true, align: 'center' }); text(`Nº ${preview ? 'NÃO RESERVADO' : String(number || 0).padStart(9, '0')}`, L + iw + 2, y + 74, dw - 4, 7.2, true, 'center'); text(`SÉRIE ${String(series).padStart(3, '0')}  PÁGINA 1 de 1`, L + iw + 2, y + 86, dw - 4, 5.2, true, 'center');
     box(L + iw + dw, y, fw, ih); text('CONTROLE DO FISCO', L + iw + dw + 2, y + 2, fw - 4, 5.2, true, 'center');
     if (key.length === 44) { try { const barcode = await new Promise<Buffer>((resolve, reject) => bwipjs.toBuffer({ bcid: 'code128', text: key, scale: 1.35, height: 9, includetext: false }, (e, png) => e ? reject(e) : resolve(png))); doc.image(barcode, L + iw + dw + 8, y + 14, { fit: [fw - 16, 30] }); } catch {} }
