@@ -424,12 +424,14 @@ export class NfeService {
 
   // ==================== XML BUILDING ====================
 
-  private escXml(str: string): string {
-    // Remove acentos e caracteres especiais para compatibilidade com SEFAZ
-    let s = (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-    // Remover acentos
-    s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    return s;
+  private escXml(value: any, maxLength?: number): string {
+    let normalized = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    if (maxLength) normalized = normalized.slice(0, maxLength).trim();
+    return normalized.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+
+  private digitsField(value: any, maxLength: number): string {
+    return String(value || '').replace(/\D/g, '').slice(0, maxLength);
   }
 
   private buildNfeXml(config: FiscalConfig, invoice: Invoice, saleData: any, accessKey: string, modelo: string): string {
@@ -446,14 +448,14 @@ export class NfeService {
     const isNfce = modelo === '65';
 
     // IDE
-    let ide = `<ide><cUF>${config.ufCode}</cUF><cNF>${accessKey.slice(35, 43)}</cNF><natOp>${this.escXml(natOp)}</natOp><mod>${modelo}</mod><serie>${invoice.series}</serie><nNF>${invoice.number}</nNF><dhEmi>${dhEmi}</dhEmi>`;
+    let ide = `<ide><cUF>${config.ufCode}</cUF><cNF>${accessKey.slice(35, 43)}</cNF><natOp>${this.escXml(natOp, 60)}</natOp><mod>${modelo}</mod><serie>${invoice.series}</serie><nNF>${invoice.number}</nNF><dhEmi>${dhEmi}</dhEmi>`;
     if (!isNfce) ide += `<dhSaiEnt>${dhEmi}</dhSaiEnt>`;
     ide += `<tpNF>${tpNF}</tpNF><idDest>${saleData?.idDest || '1'}</idDest><cMunFG>${config.cityCode}</cMunFG><tpImp>${isNfce ? '4' : '1'}</tpImp><tpEmis>1</tpEmis><cDV>${accessKey.slice(43)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>${saleData?.finNFe || '1'}</finNFe><indFinal>1</indFinal><indPres>${isNfce ? '1' : (saleData?.indPres || '1')}</indPres><procEmi>0</procEmi><verProc>VGON-ERP-1.0</verProc></ide>`;
 
     // EMIT
     const emitCep = (config.emitCep || '').replace(/\D/g, '');
-    let emit = `<emit><CNPJ>${cnpj}</CNPJ><xNome>${this.escXml(config.companyName)}</xNome>`;
-    emit += `<enderEmit><xLgr>${this.escXml(config.emitAddress || 'Endereco')}</xLgr><nro>${this.escXml(config.emitNumber || 'SN')}</nro><xBairro>${this.escXml(config.emitNeighborhood || 'Centro')}</xBairro><cMun>${config.cityCode}</cMun><xMun>Contagem</xMun><UF>MG</UF><CEP>${emitCep || '32010000'}</CEP><cPais>1058</cPais><xPais>Brasil</xPais>${config.emitPhone ? '<fone>' + config.emitPhone.replace(/\D/g, '') + '</fone>' : ''}</enderEmit>`;
+    let emit = `<emit><CNPJ>${cnpj}</CNPJ><xNome>${this.escXml(config.companyName, 60)}</xNome>`;
+    emit += `<enderEmit><xLgr>${this.escXml(config.emitAddress || 'Endereco', 60)}</xLgr><nro>${this.escXml(config.emitNumber || 'SN', 60)}</nro><xBairro>${this.escXml(config.emitNeighborhood || 'Centro', 60)}</xBairro><cMun>${config.cityCode}</cMun><xMun>Contagem</xMun><UF>MG</UF><CEP>${emitCep || '32010000'}</CEP><cPais>1058</cPais><xPais>Brasil</xPais>${config.emitPhone ? '<fone>' + config.emitPhone.replace(/\D/g, '') + '</fone>' : ''}</enderEmit>`;
     emit += `<IE>${(config.stateRegistration || '').replace(/\D/g, '')}</IE><CRT>${config.taxRegime || 1}</CRT></emit>`;
 
     // DEST
@@ -469,7 +471,7 @@ export class NfeService {
       } else if (recipientDoc.length === 11) {
         dest += `<CPF>${recipientDoc}</CPF>`;
       }
-      dest += `<xNome>${this.escXml(invoice.recipientName || 'CONSUMIDOR')}</xNome>`;
+      dest += `<xNome>${this.escXml(invoice.recipientName || 'CONSUMIDOR', 60)}</xNome>`;
       dest += '<indIEDest>9</indIEDest>';
       dest += '</dest>';
     } else {
@@ -480,13 +482,15 @@ export class NfeService {
       } else if (recipientDoc.length === 11) {
         dest += `<CPF>${recipientDoc}</CPF>`;
       }
-      dest += `<xNome>${this.escXml(invoice.recipientName || 'CONSUMIDOR')}</xNome>`;
+      dest += `<xNome>${this.escXml(invoice.recipientName || 'CONSUMIDOR', 60)}</xNome>`;
       // Endereco do destinatario (obrigatorio para NF-e mod 55)
       const destCep = (saleData?.recipientCep || '').replace(/\D/g, '');
       const destCity = saleData?.recipientCity || 'Contagem';
-      const destUf = saleData?.recipientUf || 'MG';
-      const destCMun = saleData?.recipientCMun || config.cityCode;
-      dest += `<enderDest><xLgr>${this.escXml(saleData?.recipientAddress || 'Endereco')}</xLgr><nro>${this.escXml(saleData?.recipientNumber || 'SN')}</nro><xBairro>${this.escXml(saleData?.recipientNeighborhood || 'Centro')}</xBairro><cMun>${destCMun}</cMun><xMun>${this.escXml(destCity)}</xMun><UF>${destUf}</UF><CEP>${destCep || '32010000'}</CEP><cPais>1058</cPais><xPais>Brasil</xPais></enderDest>`;
+      const rawDestUf = String(saleData?.recipientUf || 'MG').toUpperCase().replace(/[^A-Z]/g, '');
+      const destUf = rawDestUf.length === 2 ? rawDestUf : 'MG';
+        const destCMunDigits = this.digitsField(saleData?.recipientCMun || config.cityCode, 7);
+      const destCMun = destCMunDigits.length === 7 ? destCMunDigits : this.digitsField(config.cityCode, 7);
+      dest += `<enderDest><xLgr>${this.escXml(saleData?.recipientAddress || 'Endereco', 60)}</xLgr><nro>${this.escXml(saleData?.recipientNumber || 'SN', 60)}</nro><xBairro>${this.escXml(saleData?.recipientNeighborhood || 'Centro', 60)}</xBairro><cMun>${destCMun}</cMun><xMun>${this.escXml(destCity, 60)}</xMun><UF>${destUf}</UF><CEP>${destCep || '32010000'}</CEP><cPais>1058</cPais><xPais>Brasil</xPais></enderDest>`;
       // indIEDest: 1=Contribuinte (tem IE), 2=Isento, 9=Nao contribuinte (CPF ou CNPJ sem IE)
       const destIE = saleData?.recipientIE || '';
       if (destIE) {
@@ -511,12 +515,16 @@ export class NfeService {
       const vProdItem = (Number(item.unitPrice || item.salePrice || 0) * qCom).toFixed(2);
       vProd += Number(vProdItem);
       const ncm = (item.ncm || '84713012').replace(/\D/g, '').slice(0, 8).padEnd(8, '0');
-      const cfop = item.cfop || (tpNF === '0' ? '1102' : '5102');
-      const cean = item.ean || 'SEM GTIN';
-      const unit = item.unit || 'UN';
+      const cfopDigits = this.digitsField(item.cfop, 4);
+      const cfop = cfopDigits.length === 4 ? cfopDigits : (tpNF === '0' ? '1102' : '5102');
+      const eanDigits = this.digitsField(item.ean, 14);
+      const cean = [8, 12, 13, 14].includes(eanDigits.length) ? eanDigits : 'SEM GTIN';
+      const unit = String(item.unit || 'UN').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'UN';
+      const cest = this.digitsField(item.cest, 7);
+      const productCode = this.escXml(item.code || item.productId || String(nItem), 60);
 
-      let det = `<det nItem="${nItem}"><prod><cProd>${item.code || item.productId || String(nItem)}</cProd><cEAN>${cean}</cEAN><xProd>${this.escXml(item.name || 'Produto')}</xProd><NCM>${ncm}</NCM>`;
-      if (item.cest) det += `<CEST>${item.cest}</CEST>`;
+      let det = `<det nItem="${nItem}"><prod><cProd>${productCode}</cProd><cEAN>${cean}</cEAN><xProd>${this.escXml(item.name || 'Produto', 120)}</xProd><NCM>${ncm}</NCM>`;
+      if (cest.length === 7) det += `<CEST>${cest}</CEST>`;
       det += `<CFOP>${cfop}</CFOP><uCom>${unit}</uCom><qCom>${qCom.toFixed(4)}</qCom><vUnCom>${vUnCom}</vUnCom><vProd>${vProdItem}</vProd><cEANTrib>${cean}</cEANTrib><uTrib>${unit}</uTrib><qTrib>${qCom.toFixed(4)}</qTrib><vUnTrib>${vUnCom}</vUnTrib><indTot>1</indTot></prod>`;
 
       // Imposto - Simples Nacional (CRT=1) usa CSOSN
@@ -567,17 +575,18 @@ export class NfeService {
     }
     cobr = `<cobr>${fatBlock}${dupBlocks}</cobr>`;
     // PAG
-    const tPag = saleData?.tPag || '01'; // 01=Dinheiro
+    const rawTPag = this.digitsField(saleData?.tPag, 2);
+    const tPag = rawTPag.length === 2 ? rawTPag : '01'; // 01=Dinheiro
     const vPagVal = vNF;
     let pagContent = `<tPag>${tPag}</tPag><vPag>${vPagVal}</vPag>`;
     // Para cartão crédito/débito/pix e outros eletrônicos, informar grupo card
-    if (tPag === '03' || tPag === '04' || tPag === '05' || tPag === '15' || tPag === '17' || tPag === '99') {
+    if (tPag === '03' || tPag === '04' || tPag === '05') {
       pagContent += '<card><tpIntegra>2</tpIntegra></card>';
     }
     const pag = `<pag><detPag>${pagContent}</detPag></pag>`;
 
     // INFADIC
-    const infAdic = saleData?.infCpl ? `<infAdic><infCpl>${saleData.infCpl}</infCpl></infAdic>` : '';
+    const infAdic = saleData?.infCpl ? `<infAdic><infCpl>${this.escXml(saleData.infCpl, 5000)}</infCpl></infAdic>` : '';
 
     // Montar NFe completa (ordem: ide, emit, dest, dets, total, transp, cobr, pag, infAdic)
     const infNFe = `<infNFe versao="4.00" Id="NFe${accessKey}">${ide}${emit}${dest}${dets}${total}${transp}${cobr}${pag}${infAdic}</infNFe>`;
