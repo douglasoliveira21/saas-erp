@@ -20,6 +20,7 @@ import { AuditService } from '../audit/audit.service';
 import { SaleEvent } from './entities/sale-event.entity';
 import { SaleAttachment } from './entities/sale-attachment.entity';
 import { money, moneySum, moneyMultiply } from '../../common/money';
+import { getCustomerEmailRecipients } from '../../common/customer-emails';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -453,7 +454,8 @@ export class SalesService {
     const sale = await this.findOne(id);
     const customer = sale.customer as any;
 
-    if (!customer?.email) {
+    const customerEmails = getCustomerEmailRecipients(customer);
+    if (!customerEmails) {
       throw new BadRequestException('Cliente sem email cadastrado');
     }
 
@@ -550,7 +552,7 @@ export class SalesService {
     `;
 
     const sent = await this.mailService.sendMailWithAttachment(
-      customer.email,
+      customerEmails,
       `Documentos da venda #${sale.id.substring(0, 8)} - VGON`,
       html,
       attachments,

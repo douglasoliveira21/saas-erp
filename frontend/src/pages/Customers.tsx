@@ -8,6 +8,7 @@ interface Customer {
   cpfCnpj: string
   phone: string
   email: string
+  additionalEmails: string[]
   address: string
   stateRegistration: string
   city: string
@@ -22,7 +23,7 @@ interface Customer {
 
 interface GlpiEntity { id: number; name: string }
 
-const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', observations: '', glpiEntityId: '' }
+const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', additionalEmails: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', observations: '', glpiEntityId: '' }
 
 export function Customers() {
   const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
@@ -110,7 +111,7 @@ export function Customers() {
 
   function openEdit(c: Customer) {
     setEditing(c)
-    setForm({ name: c.name, cpf_cnpj: c.cpfCnpj || '', phone: c.phone || '', email: c.email || '', address: c.address || '', stateRegistration: c.stateRegistration || '', city: c.city || '', uf: c.uf || '', neighborhood: c.neighborhood || '', cep: c.cep || '', observations: c.observations || '', glpiEntityId: c.glpiEntityId ? String(c.glpiEntityId) : '' })
+    setForm({ name: c.name, cpf_cnpj: c.cpfCnpj || '', phone: c.phone || '', email: c.email || '', additionalEmails: (c.additionalEmails || []).join('\n'), address: c.address || '', stateRegistration: c.stateRegistration || '', city: c.city || '', uf: c.uf || '', neighborhood: c.neighborhood || '', cep: c.cep || '', observations: c.observations || '', glpiEntityId: c.glpiEntityId ? String(c.glpiEntityId) : '' })
     setError('')
     setShowModal(true)
   }
@@ -124,6 +125,7 @@ export function Customers() {
         cpfCnpj: form.cpf_cnpj,
         phone: form.phone,
         email: form.email,
+        additionalEmails: form.additionalEmails.split(/[;,\n]/).map(email => email.trim()).filter(Boolean),
         address: form.address,
         stateRegistration: form.stateRegistration,
         city: form.city,
@@ -203,7 +205,7 @@ export function Customers() {
                   <td className="table-cell font-medium text-gray-900 dark:text-white">{c.name}</td>
                   <td className="table-cell text-gray-600 dark:text-gray-400">{c.cpfCnpj || '-'}</td>
                   <td className="table-cell text-gray-600 dark:text-gray-400">{c.phone || '-'}</td>
-                  <td className="table-cell text-gray-600 dark:text-gray-400">{c.email || '-'}</td>
+                  <td className="table-cell text-gray-600 dark:text-gray-400"><div>{c.email || '-'}</div>{c.additionalEmails?.length > 0 && <div className="mt-1 text-xs text-gray-400">+ {c.additionalEmails.length} adicional{c.additionalEmails.length > 1 ? 'is' : ''}</div>}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${c.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {c.active ? 'Ativo' : 'Inativo'}
@@ -264,8 +266,13 @@ export function Customers() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email principal</label>
                 <input className="input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Emails adicionais</label>
+                <textarea className="input" rows={3} value={form.additionalEmails} onChange={e => setForm({ ...form, additionalEmails: e.target.value })} placeholder={'financeiro@empresa.com.br\nfiscal@empresa.com.br'} />
+                <p className="mt-1 text-xs text-gray-400">Informe um email por linha. Boletos, notas fiscais, XML e demais documentos serão enviados para todos.</p>
               </div>
 
               {/* Inscricao Estadual - so aparece para CNPJ */}

@@ -21,6 +21,7 @@ import { FiscalEvent } from './entities/fiscal-event.entity';
 import { FiscalIntegrationService } from './services/fiscal-integration.service';
 import { FiscalJobsService } from './services/fiscal-jobs.service';
 import { Sale } from '../sales/entities/sale.entity';
+import { getCustomerEmailRecipients, getCustomerEmails } from '../../common/customer-emails';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -64,7 +65,7 @@ export class FiscalController {
       const schedule = paymentInstallments.map((item: any) => `${item.number}ª: R$ ${Number(item.value).toFixed(2)} venc. ${String(item.dueDate).substring(0, 10).split('-').reverse().join('/')}`).join('; ');
       discriminacao = `${discriminacao || 'Serviços prestados'} | Pagamento: ${paymentMethodLabel}${installments > 1 ? ` em ${installments} parcelas (${schedule})` : ''}`;
     }
-    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, totalValue: Number(sale.totalAmount), items, paymentMethod: sale.paymentMethod, paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99', installments, paymentInstallments, discriminacao };
+    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, recipientEmails: getCustomerEmails(sale.customer), totalValue: Number(sale.totalAmount), items, paymentMethod: sale.paymentMethod, paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99', installments, paymentInstallments, discriminacao };
   }
   private async completeNfTask(saleId: string) {
     if (!saleId) return;
@@ -359,7 +360,7 @@ export class FiscalController {
       await this.completeNfTask(body.saleId);
       // Enviar NFS-e por email ao cliente
       try {
-        const customerEmail = body.serviceData?.recipientEmail;
+        const customerEmail = (body.serviceData?.recipientEmails || [body.serviceData?.recipientEmail]).filter(Boolean).join(', ');
         if (customerEmail && result.accessKey) {
           const pdfBuffer = await this.nfseService.downloadPdf(result.accessKey, body.certId);
           const xmlContent = result.xmlAuthorized || result.xmlSent || '';
@@ -392,7 +393,7 @@ export class FiscalController {
     try {
       const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer'] });
       const invoice = await this.invoiceRepo.findOne({ where: { id: invoiceId } });
-      const email = sale?.customer?.email;
+      const email = getCustomerEmailRecipients(sale?.customer);
       if (!email || !invoice) return;
       const xml = invoice.xmlAuthorized || invoice.xmlSent;
       if (!xml) return;

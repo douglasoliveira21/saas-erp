@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
+import { getCustomerEmails } from '../../common/customer-emails';
 
 @Injectable()
 export class CustomersService {
@@ -12,6 +13,9 @@ export class CustomersService {
   ) {}
 
   async create(createCustomerDto: any): Promise<Customer> {
+    const email = String(createCustomerDto.email || '').trim().toLowerCase() || null;
+    createCustomerDto.email = email;
+    createCustomerDto.additionalEmails = getCustomerEmails({ email, additionalEmails: createCustomerDto.additionalEmails }).filter(item => item !== email);
     const customer = this.customersRepository.create(createCustomerDto);
     const saved = await this.customersRepository.save(customer);
     return Array.isArray(saved) ? saved[0] : saved;
@@ -52,6 +56,9 @@ export class CustomersService {
 
   async update(id: string, updateCustomerDto: any): Promise<Customer> {
     const customer = await this.findOne(id);
+    const email = String(updateCustomerDto.email ?? customer.email ?? '').trim().toLowerCase() || null;
+    updateCustomerDto.email = email;
+    updateCustomerDto.additionalEmails = getCustomerEmails({ email, additionalEmails: updateCustomerDto.additionalEmails ?? customer.additionalEmails }).filter(item => item !== email);
     Object.assign(customer, updateCustomerDto);
     return this.customersRepository.save(customer);
   }

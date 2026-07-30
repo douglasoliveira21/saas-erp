@@ -26,6 +26,9 @@ export class Customer {
   @Column({ length: 255, nullable: true })
   email: string;
 
+  @Column({ name: 'additional_emails', type: 'jsonb', default: () => "'[]'::jsonb" })
+  additionalEmails: string[];
+
   @Column({ type: 'text', nullable: true })
   address: string;
 

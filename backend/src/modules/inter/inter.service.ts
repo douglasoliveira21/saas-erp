@@ -10,6 +10,7 @@ import { FinancialService } from '../financial/financial.service';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
 import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
+import { getCustomerEmailRecipients } from '../../common/customer-emails';
 
 interface TokenCache {
   accessToken: string;
@@ -664,6 +665,7 @@ export class InterService implements OnModuleInit {
    */
   private async generateInstallmentBoletos(sale: Sale, document: string): Promise<any> {
     const customer = sale.customer;
+    const customerEmails = getCustomerEmailRecipients(customer);
     const installments = await this.saleRepo.manager.query(
       `SELECT i.id, i.number, i.value, i.due_date FROM installments i
        WHERE i.sale_id=$1 AND i.status IN ('pendente','vencido') ORDER BY i.number`, [sale.id]);
@@ -698,7 +700,7 @@ export class InterService implements OnModuleInit {
     }
     if (!results.length) throw new HttpException('Todos os boletos parcelados desta venda já foram emitidos',HttpStatus.CONFLICT);
     await this.markBoletoAsIssued(sale.id);
-    if (customer.email && attachments.length) await this.mailService.sendMailWithAttachment(customer.email,`Boletos parcelados da venda #${sale.id.substring(0,8)} - VGON`,`<div style="font-family:Arial,sans-serif"><h2>Boletos da venda</h2><p>Olá ${customer.name},</p><p>Seguem em anexo os ${attachments.length} boletos correspondentes às parcelas da sua compra.</p><p>Confira o vencimento indicado em cada boleto.</p></div>`,attachments);
+    if (customerEmails && attachments.length) await this.mailService.sendMailWithAttachment(customerEmails,`Boletos parcelados da venda #${sale.id.substring(0,8)} - VGON`,`<div style="font-family:Arial,sans-serif"><h2>Boletos da venda</h2><p>Olá ${customer.name},</p><p>Seguem em anexo os ${attachments.length} boletos correspondentes às parcelas da sua compra.</p><p>Confira o vencimento indicado em cada boleto.</p></div>`,attachments);
     return {parcelado:true,quantidade:results.length,boletos:results};
   }
   async generateForSale(
@@ -710,6 +712,7 @@ export class InterService implements OnModuleInit {
     if (!customer) {
       throw new HttpException('Venda sem cliente associado', HttpStatus.BAD_REQUEST);
     }
+    const customerEmails = getCustomerEmailRecipients(customer);
     if (sale.operationalStatus === 'cancelada' || ['cancelado', 'finalizado'].includes(sale.status as any)) throw new HttpException('Venda cancelada ou finalizada não pode gerar cobrança', HttpStatus.BAD_REQUEST);
     if (sale.paymentStatus === 'pago' || sale.status === 'pago' as any) throw new HttpException('Venda já está paga', HttpStatus.BAD_REQUEST);
     if (!Number.isFinite(Number(sale.totalAmount)) || Number(sale.totalAmount) <= 0) throw new HttpException('Valor da venda deve ser positivo', HttpStatus.BAD_REQUEST);
@@ -813,7 +816,7 @@ export class InterService implements OnModuleInit {
       await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente
-      if (customer.email) {
+      if (customerEmails) {
         try {
           // Buscar PDF do boleto
           const pdfBuffer = await this.getBoletoPdf(result.codigoSolicitacao);
@@ -838,12 +841,12 @@ export class InterService implements OnModuleInit {
               </div>
             </div>
           `;
-          await this.mailService.sendMailWithAttachment(customer.email, 'Boleto de Pagamento - VGON', html, [{
+          await this.mailService.sendMailWithAttachment(customerEmails, 'Boleto de Pagamento - VGON', html, [{
             filename: `boleto-${result.codigoSolicitacao.substring(0, 8)}.pdf`,
             content: pdfBuffer,
             contentType: 'application/pdf',
           }]);
-          this.logger.log('Email com PDF do boleto enviado para: ' + customer.email);
+          this.logger.log('Email com PDF do boleto enviado para: ' + customerEmails);
         } catch (e) {
           this.logger.error('Erro ao enviar email do boleto: ' + e.message);
           // Não enviar mensagem sem o boleto: a falha permanece disponível no histórico de e-mails.
@@ -874,10 +877,10 @@ export class InterService implements OnModuleInit {
       await this.saleRepo.manager.query(`UPDATE sales SET billing_status='emitido', updated_at=NOW() WHERE id=$1`, [sale.id]);
 
       // Enviar email com QR Code PIX
-      if (customer.email) {
+      if (customerEmails) {
         try {
-          await this.sendPixEmail(customer.email, customer.name, result, sale);
-          this.logger.log('Email do PIX enviado para: ' + customer.email);
+          await this.sendPixEmail(customerEmails, customer.name, result, sale);
+          this.logger.log('Email do PIX enviado para: ' + customerEmails);
         } catch (e) {
           this.logger.error('Erro ao enviar email do PIX: ' + e.message);
         }
@@ -1067,7 +1070,7 @@ export class InterService implements OnModuleInit {
     `;
 
     await this.mailService.sendMail(
-      sale.customer.email,
+      getCustomerEmailRecipients(sale.customer),
       'Pagamento Confirmado - VGON',
       html,
     );
