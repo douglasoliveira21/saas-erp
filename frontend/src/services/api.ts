@@ -6,6 +6,7 @@ export function setSessionToken(token: string | null) { memoryToken = token }
 export const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
+  timeout: 30000,
 })
 
 api.interceptors.request.use((config) => {
@@ -19,6 +20,7 @@ let sessionCheck: Promise<boolean> | null = null
 export async function getSessionUser() {
   const options = {
     withCredentials: true,
+    timeout: 10000,
     headers: memoryToken ? { Authorization: 'Bearer ' + memoryToken } : undefined,
   }
 

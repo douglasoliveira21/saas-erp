@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { PrivateRoute } from './components/PrivateRoute'
@@ -48,10 +48,15 @@ const Tutorial = lazy(() => import('./pages/Tutorial').then(module => ({ default
 const CustomerPortalAdmin = lazy(() => import('./pages/CustomerPortalAdmin').then(module => ({ default: module.CustomerPortalAdmin })))
 
 function PageLoader() {
+  const [delayed, setDelayed] = useState(false)
+  useEffect(() => { const timer = window.setTimeout(() => setDelayed(true), 8000); return () => window.clearTimeout(timer) }, [])
   return (
-    <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-live="polite">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary-100 border-t-primary-600" aria-hidden="true" />
-      <span className="sr-only">Carregando página</span>
+    <div className="flex min-h-[60vh] items-center justify-center p-6" role="status" aria-live="polite">
+      <div className="text-center">
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-primary-100 border-t-primary-600" aria-hidden="true" />
+        <p className="mt-4 text-sm text-gray-500">Carregando página...</p>
+        {delayed && <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm text-amber-800">O carregamento está demorando mais que o esperado.</p><button className="btn btn-primary mt-3" onClick={() => window.location.reload()}>Recarregar aplicação</button></div>}
+      </div>
     </div>
   )
 }
