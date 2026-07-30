@@ -23,6 +23,7 @@ export function NewSale() {
   const [dueDay, setDueDay] = useState(10)
   const [multaPercentage, setMultaPercentage] = useState(2.00)
   const [moraPercentage, setMoraPercentage] = useState(0.03)
+  const [alreadyPaid, setAlreadyPaid] = useState(false)
   const [saleType, setSaleType] = useState<'eventual' | 'recorrente'>('eventual')
   const [commissionPct, setCommissionPct] = useState(10)
   const [observations, setObservations] = useState('')
@@ -63,6 +64,7 @@ export function NewSale() {
       setDueDay(sale.dueDay || 10)
       setMultaPercentage(sale.multaPercentage != null ? Number(sale.multaPercentage) : 2.00)
       setMoraPercentage(sale.moraPercentage != null ? Number(sale.moraPercentage) : 0.03)
+      setAlreadyPaid(sale.paymentStatus === 'pago')
       setSaleType(sale.saleType || 'eventual')
       setObservations(sale.observations || '')
       setCommissionPct(sale.commissionPercentage || 10)
@@ -128,7 +130,7 @@ export function NewSale() {
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
 
     // Validação: data de vencimento não pode ser menor que 5 dias
-    if (paymentMethod === 'boleto') {
+    if (paymentMethod === 'boleto' && !alreadyPaid) {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const currentDay = today.getDate()
@@ -151,8 +153,9 @@ export function NewSale() {
         customerId,
         technicianId: user?.id,
         paymentMethod,
-        installments: paymentMethod === 'boleto' ? installments : 1,
-        dueDay: paymentMethod === 'boleto' ? dueDay : null,
+        alreadyPaid,
+        installments: paymentMethod === 'boleto' && !alreadyPaid ? installments : 1,
+        dueDay: paymentMethod === 'boleto' && !alreadyPaid ? dueDay : null,
         multaPercentage,
         moraPercentage,
         saleType,
@@ -225,8 +228,18 @@ export function NewSale() {
               </div>
             </div>
 
+            {!editingSaleId && (
+              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${alreadyPaid ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}>
+                <input type="checkbox" checked={alreadyPaid} onChange={event => setAlreadyPaid(event.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600" />
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900">Venda já foi paga</span>
+                  <span className="mt-1 block text-xs text-gray-500">Use para cadastrar uma venda já realizada. A conta, a parcela e o movimento financeiro serão registrados como pagos, sem gerar boleto pendente.</span>
+                </span>
+              </label>
+            )}
+
             {/* Campos de boleto */}
-            {paymentMethod === 'boleto' && (<>
+            {paymentMethod === 'boleto' && !alreadyPaid && (<>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-700">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parcelas</label>

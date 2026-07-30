@@ -83,7 +83,7 @@ export class FinancialService implements OnModuleInit {
     const existing = await accountRepo.findOne({ where: { saleId: sale.id } });
     if (existing) return existing;
     const now = new Date();
-    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
+    const isImmediate = sale.paymentStatus === 'pago' || ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const isCard = ['cartao_credito', 'cartao_debito'].includes(sale.paymentMethod);
 
     // Create account receivable
@@ -97,7 +97,7 @@ export class FinancialService implements OnModuleInit {
       installments: sale.installments || 1,
       paymentMethod: sale.paymentMethod,
       status: isImmediate ? 'pago' : 'pendente',
-      dueDate: this.calculateDueDate(sale, now),
+      dueDate: isImmediate ? this.formatLocalDate(now) : this.calculateDueDate(sale, now),
       paidAt: isImmediate ? now : null,
       createdBy: userId,
     });
@@ -120,7 +120,7 @@ export class FinancialService implements OnModuleInit {
       const movement = await movementRepo.findOne({ where: { saleId: sale.id, accountId: savedAccount.id, category: 'venda', isForecast: false } });
       if (movement) await paymentRepo.save(savedInstallments.map((installment) => paymentRepo.create({ installmentId: installment.id, movementId: movement.id, idempotencyKey: 'sale-create:' + sale.id + ':' + installment.id, value: Number(installment.value), paymentMethod: sale.paymentMethod, paidAt: now, createdBy: userId })));
     }
-    if (isImmediate) await (manager?.getRepository(Sale) || this.dataSource.getRepository(Sale)).update(sale.id, { status: 'pago' as any, paymentStatus: 'pago' });
+    if (isImmediate) await (manager?.getRepository(Sale) || this.dataSource.getRepository(Sale)).update(sale.id, { status: 'pago' as any, paymentStatus: 'pago', billingStatus: 'pago' });
 
     return savedAccount;
   }
@@ -960,7 +960,7 @@ export class FinancialService implements OnModuleInit {
     const numInstallments = sale.installments || 1;
     const totalAmount = Number(sale.totalAmount);
     const baseValue = Math.floor((totalAmount / numInstallments) * 100) / 100; // Arredondar para baixo
-    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
+    const isImmediate = sale.paymentStatus === 'pago' || ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const installments: Partial<Installment>[] = [];
 
     let totalDistributed = 0;
@@ -995,7 +995,7 @@ export class FinancialService implements OnModuleInit {
   ): string {
     const dueDate = new Date(now);
 
-    if (['dinheiro', 'cartao_debito'].includes(sale.paymentMethod)) {
+    if (sale.paymentStatus === 'pago' || ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod)) {
       return dueDate.toISOString().split('T')[0];
     }
 
@@ -1016,7 +1016,7 @@ export class FinancialService implements OnModuleInit {
     cardFee: CardFee | null,
     movementRepo: Repository<FinancialMovement> = this.movementRepo,
   ): Promise<void> {
-    const isImmediate = ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
+    const isImmediate = sale.paymentStatus === 'pago' || ['dinheiro', 'cartao_debito'].includes(sale.paymentMethod);
     const isCard = ['cartao_credito', 'cartao_debito'].includes(sale.paymentMethod);
     const today = now.toISOString().split('T')[0];
 
@@ -1029,6 +1029,7 @@ export class FinancialService implements OnModuleInit {
           description: `Venda #${sale.id.substring(0, 8)} - ${sale.paymentMethod}`,
           value: Number(sale.totalAmount),
           date: today,
+          paidAt: now,
           saleId: sale.id,
           accountId: account.id,
           paymentMethod: sale.paymentMethod,

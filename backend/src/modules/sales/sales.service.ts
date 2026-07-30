@@ -59,7 +59,12 @@ export class SalesService {
     await queryRunner.startTransaction();
 
     try {
-      const { items, ...saleData } = createSaleDto;
+      const { items, alreadyPaid = false, ...saleData } = createSaleDto;
+      if (alreadyPaid) {
+        saleData.status = 'pago';
+        saleData.paymentStatus = 'pago';
+        saleData.billingStatus = 'pago';
+      }
 
       if (!Array.isArray(items) || items.length === 0) {
         throw new BadRequestException('Adicione pelo menos um item à venda');
@@ -163,7 +168,7 @@ export class SalesService {
       });
       await queryRunner.manager.save(FinancialTask, nfTask);
 
-      if (saleData.paymentMethod === 'boleto') {
+      if (saleData.paymentMethod === 'boleto' && !alreadyPaid) {
         const boletoTask = queryRunner.manager.create(FinancialTask, {
           saleId: savedSale.id,
           type: 'emissao_boleto',
