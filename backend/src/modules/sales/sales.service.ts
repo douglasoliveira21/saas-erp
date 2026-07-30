@@ -605,8 +605,9 @@ export class SalesService {
       const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       oldData = { ...sale };
-      const { technician, customer, items, approver, ...allowedDto } = updateSaleDto;
+      const { technician, customer, items, approver, alreadyPaid, ...allowedDto } = updateSaleDto;
       safeDto = allowedDto;
+      const shouldMarkPaid = Boolean(alreadyPaid) && sale.paymentStatus !== 'pago';
       if (Array.isArray(items) && items.length) {
         const subtotal = moneySum(items.map((item: any) => moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0))));
         const discountAmount = money(safeDto.discountAmount ?? safeDto.discountValue ?? 0);
@@ -631,6 +632,10 @@ export class SalesService {
         if (firstPending[0]) await queryRunner.query(`UPDATE accounts_receivable SET due_date=$1 WHERE sale_id=$2 AND status IN ('pendente','parcial')`, [firstPending[0].due_date, id]);
       }
       await queryRunner.manager.getRepository(Sale).save(sale);
+      if (shouldMarkPaid) {
+        await this.financialService.settleSale(id, safeDto.paymentMethod || sale.paymentMethod, userId, `sale-edit-paid:${id}`, new Date(), undefined, queryRunner.manager);
+        safeDto = { ...safeDto, markedPaid: true };
+      }
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();

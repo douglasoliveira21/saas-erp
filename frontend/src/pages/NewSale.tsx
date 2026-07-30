@@ -24,6 +24,7 @@ export function NewSale() {
   const [multaPercentage, setMultaPercentage] = useState(2.00)
   const [moraPercentage, setMoraPercentage] = useState(0.03)
   const [alreadyPaid, setAlreadyPaid] = useState(false)
+  const [originallyPaid, setOriginallyPaid] = useState(false)
   const [saleType, setSaleType] = useState<'eventual' | 'recorrente'>('eventual')
   const [commissionPct, setCommissionPct] = useState(10)
   const [observations, setObservations] = useState('')
@@ -64,7 +65,9 @@ export function NewSale() {
       setDueDay(sale.dueDay || 10)
       setMultaPercentage(sale.multaPercentage != null ? Number(sale.multaPercentage) : 2.00)
       setMoraPercentage(sale.moraPercentage != null ? Number(sale.moraPercentage) : 0.03)
-      setAlreadyPaid(sale.paymentStatus === 'pago')
+      const saleIsPaid = sale.paymentStatus === 'pago'
+      setAlreadyPaid(saleIsPaid)
+      setOriginallyPaid(saleIsPaid)
       setSaleType(sale.saleType || 'eventual')
       setObservations(sale.observations || '')
       setCommissionPct(sale.commissionPercentage || 10)
@@ -228,15 +231,17 @@ export function NewSale() {
               </div>
             </div>
 
-            {!editingSaleId && (
-              <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors ${alreadyPaid ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200 bg-gray-50 hover:border-gray-300'}`}>
-                <input type="checkbox" checked={alreadyPaid} onChange={event => setAlreadyPaid(event.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600" />
+              <label className={`flex items-start gap-3 rounded-xl border p-4 transition-colors ${originallyPaid ? 'cursor-not-allowed border-emerald-300 bg-emerald-50 opacity-80' : alreadyPaid ? 'cursor-pointer border-emerald-300 bg-emerald-50' : 'cursor-pointer border-gray-200 bg-gray-50 hover:border-gray-300'}`}>
+                <input type="checkbox" checked={alreadyPaid} disabled={originallyPaid} onChange={event => setAlreadyPaid(event.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 disabled:cursor-not-allowed" />
                 <span>
-                  <span className="block text-sm font-semibold text-gray-900">Venda já foi paga</span>
-                  <span className="mt-1 block text-xs text-gray-500">Use para cadastrar uma venda já realizada. A conta, a parcela e o movimento financeiro serão registrados como pagos, sem gerar boleto pendente.</span>
+                  <span className="block text-sm font-semibold text-gray-900">{originallyPaid ? 'Venda já está paga' : 'Venda já foi paga'}</span>
+                  <span className="mt-1 block text-xs text-gray-500">
+                    {originallyPaid
+                      ? 'O pagamento já está registrado. Para desfazer a baixa, utilize o fluxo de estorno financeiro.'
+                      : 'Marque para registrar a conta, a parcela e o movimento financeiro como pagos, sem gerar boleto pendente.'}
+                  </span>
                 </span>
               </label>
-            )}
 
             {/* Campos de boleto */}
             {paymentMethod === 'boleto' && !alreadyPaid && (<>
