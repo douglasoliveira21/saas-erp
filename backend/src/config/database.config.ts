@@ -9,7 +9,7 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
   createTypeOrmOptions(): TypeOrmModuleOptions {
     const isSupabase = env.database.host.includes('supabase.com') || env.database.host.includes('supabase.co');
     const useSSL = isSupabase || process.env.DATABASE_SSL === 'true';
-    const shouldSync = process.env.DATABASE_SYNC === 'true' || env.server.nodeEnv === 'development';
+    const shouldSync = env.server.nodeEnv === 'development' && process.env.DATABASE_SYNC !== 'false';
 
     return {
       type: 'postgres',

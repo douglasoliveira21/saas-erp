@@ -28,23 +28,11 @@ export class MailService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureConfigTable();
-    await this.ensureDeliveryLogTable();
     const config = await this.getConfig();
     this.transporter = this.createTransporter(config);
     this.logger.log(`Mail configurado: ${config.authUser || config.fromEmail}@${config.host}:${config.port}`);
   }
 
-  private async ensureDeliveryLogTable(): Promise<void> {
-    await this.configRepository.query(`
-      CREATE TABLE IF NOT EXISTS email_delivery_logs (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), recipient varchar(500) NOT NULL,
-        subject varchar(500) NOT NULL, provider varchar(30) NOT NULL DEFAULT 'smtp',
-        status varchar(20) NOT NULL, error_message text, attachment_count integer NOT NULL DEFAULT 0,
-        is_test boolean NOT NULL DEFAULT false, user_id uuid, created_at timestamp NOT NULL DEFAULT now()
-      )
-    `);
-    await this.configRepository.query('CREATE INDEX IF NOT EXISTS idx_email_delivery_logs_created_at ON email_delivery_logs (created_at DESC)');
-  }
   private async ensureConfigTable(): Promise<void> {
     try {
       await this.configRepository.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
@@ -244,7 +232,6 @@ export class MailService implements OnModuleInit {
   }
 
   async getDeliveryLogs(filters: { page?: number; limit?: number; status?: string; search?: string }): Promise<any> {
-    await this.ensureDeliveryLogTable();
     const page = Math.max(1, Number(filters.page || 1)); const limit = Math.min(100, Math.max(1, Number(filters.limit || 20))); const where: any = {};
     if (filters.status === 'sent' || filters.status === 'failed') where.status = filters.status;
     if (filters.search) where.recipient = ILike(`%${filters.search.trim()}%`);
@@ -254,7 +241,6 @@ export class MailService implements OnModuleInit {
 
   private async saveDeliveryLog(recipient: string, subject: string, provider: string, status: 'sent' | 'failed', errorMessage: string | null, attachmentCount: number, options: { isTest?: boolean; userId?: string }): Promise<void> {
     try {
-      await this.ensureDeliveryLogTable();
       await this.deliveryLogRepository.save(this.deliveryLogRepository.create({ recipient: String(recipient || '').slice(0, 500), subject: String(subject || '').slice(0, 500), provider, status, errorMessage, attachmentCount, isTest: Boolean(options.isTest), userId: options.userId || null }));
     } catch (error) { this.logger.error('Não foi possível gravar o log de e-mail: ' + this.formatMailError(error)); }
   }
