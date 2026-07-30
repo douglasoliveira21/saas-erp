@@ -284,18 +284,24 @@ export class InterService implements OnModuleInit {
         const cobranca = boleto?.cobranca || boleto;
         const situacao = cobranca?.situacao || boleto?.situacao || boleto?.status;
         if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
-          await this.saleRepo.manager.query(
-            `UPDATE payments
-             SET status = 'cancelado', updated_at = NOW()
-             WHERE codigo_solicitacao = $1`,
-            [codigoSolicitacao],
-          );
-          await this.auditInter('inter.boleto_cancelado_confirmado', null, {
-            codigoSolicitacao,
-            motivoCancelamento,
-            boleto,
-          });
-          return boleto;
+          let localSyncPending = false;
+          try {
+            await this.saleRepo.manager.query(
+              `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+               UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
+              [codigoSolicitacao],
+            );
+            await this.auditInter('inter.boleto_cancelado_confirmado', null, { codigoSolicitacao, motivoCancelamento, boleto });
+          } catch (syncError) {
+            localSyncPending = true;
+            this.logger.error(`Cancelamento confirmado no Inter, mas a sincronização local ficou pendente: ${syncError?.message || syncError}`);
+          }
+          return {
+            ...(boleto && typeof boleto === 'object' ? boleto : { data: boleto }),
+            success: true,
+            localSyncPending,
+            message: localSyncPending ? 'Cancelamento confirmado no Banco Inter; sincronização local pendente' : 'Boleto cancelado com sucesso',
+          };
         }
       } catch {}
 
