@@ -23,9 +23,13 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
       logging: env.server.nodeEnv === 'development',
       ssl: useSSL ? { rejectUnauthorized: false } : false,
       poolSize: 10,
-      extra: isSupabase ? {
-        options: '-c search_path=public',
-      } : {},
+      extra: {
+        connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000),
+        query_timeout: Number(process.env.DB_QUERY_TIMEOUT_MS || 15000),
+        statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15000),
+        idle_in_transaction_session_timeout: Number(process.env.DB_IDLE_TRANSACTION_TIMEOUT_MS || 30000),
+        ...(isSupabase ? { options: '-c search_path=public' } : {}),
+      },
       namingStrategy: new SnakeNamingStrategy(),
       retryAttempts: 5,
       retryDelay: 3000,

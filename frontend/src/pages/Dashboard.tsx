@@ -58,26 +58,32 @@ export function Dashboard() {
   const [techSummary, setTechSummary] = useState<TechSummary[]>([])
   const [financialTasks, setFinancialTasks] = useState<{ nf: FinTask[]; boleto: FinTask[]; overdue: FinTask[] }>({ nf: [], boleto: [], overdue: [] })
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTech, setExpandedTech] = useState<string | null>(null)
   const [expandedSection, setExpandedSection] = useState<Record<string, 'commissions' | 'routes' | null>>({})
 
   useEffect(() => { loadDashboard() }, [])
 
   async function loadDashboard() {
+    setLoading(true)
+    setLoadError(null)
     try {
-      const promises: Promise<any>[] = [api.get('/dashboard')]
-      if (isAdmin || isFinanceiro) {
-        promises.push(api.get('/dashboard/technicians-summary'))
-        promises.push(api.get('/financial-tasks/today'))
-      }
-      const [dashRes, techRes, tasksRes] = await Promise.all(promises)
+      const dashRes = await api.get('/dashboard', { timeout: 12000 })
       setData(dashRes.data)
-      if (techRes) setTechSummary(techRes.data)
-      if (tasksRes) setFinancialTasks(tasksRes.data)
     } catch (error) {
       console.error('Erro ao carregar dashboard:', error)
+      setLoadError('Não foi possível carregar o resumo da dashboard.')
     } finally {
       setLoading(false)
+    }
+
+    if (isAdmin || isFinanceiro) {
+      void Promise.allSettled([
+        api.get('/dashboard/technicians-summary', { timeout: 12000 }).then(response => setTechSummary(response.data)),
+        api.get('/financial-tasks/today', { timeout: 12000 }).then(response => setFinancialTasks(response.data)),
+      ]).then(results => results.forEach(result => {
+        if (result.status === 'rejected') console.error('Erro ao carregar bloco secundário da dashboard:', result.reason)
+      }))
     }
   }
 
@@ -96,6 +102,17 @@ export function Dashboard() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+      </div>
+    )
+  }
+
+  if (loadError && !data) {
+    return (
+      <div className="card mx-auto mt-12 max-w-lg p-8 text-center" role="alert">
+        <AlertTriangle className="mx-auto h-10 w-10 text-amber-500" />
+        <h1 className="mt-4 text-lg font-semibold text-gray-900">A dashboard não respondeu</h1>
+        <p className="mt-2 text-sm text-gray-500">{loadError}</p>
+        <button className="btn btn-primary mt-5" onClick={loadDashboard}>Tentar novamente</button>
       </div>
     )
   }
