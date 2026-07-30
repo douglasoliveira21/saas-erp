@@ -31,6 +31,7 @@ import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
+import { OperationTrackingInterceptor } from './modules/operations/operation-tracking.interceptor';
 
 @Module({
   imports: [
@@ -66,6 +67,9 @@ import { AuditInterceptor } from './modules/audit/audit.interceptor';
     CustomerPortalModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: OperationTrackingInterceptor },
+  ],
 })
 export class AppModule {}

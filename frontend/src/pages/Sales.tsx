@@ -41,7 +41,7 @@ const paymentLabels: Record<string, string> = {
 }
 
 export function Sales() {
-  const { notify, confirm: confirmAction } = useFeedback()
+  const { notify, confirm: confirmAction, runOperation } = useFeedback()
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,23 +83,32 @@ export function Sales() {
   async function cancel(id: string) {
     if (!await confirmAction({ title: 'Cancelar venda', message: 'O estoque, as comissões e as pendências serão estornados. Deseja continuar?', confirmLabel: 'Cancelar venda', danger: true })) return
     try {
-      await api.patch(`/sales/${id}/cancel`)
-      notify('Venda cancelada e operações relacionadas estornadas', 'success'); load(); setSelected(null)
+      await runOperation(
+        () => api.patch(`/sales/${id}/cancel`),
+        { title: 'Cancelando venda', processingMessage: 'Cancelando documentos, recompondo estoque e estornando operações relacionadas.', successMessage: 'Venda cancelada e operações relacionadas estornadas com sucesso.', errorMessage: error => getErrorMessage(error, 'Erro ao cancelar a venda') },
+      )
+      load(); setSelected(null)
     } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao cancelar')) }
   }
 
   async function generatePayment(id: string, type: 'boleto' | 'pix') {
     setError('')
     try {
-      const res = await api.post(`/inter/generate/${id}?type=${type}`)
-      if (res.data.success) {
-        alert(`${type === 'pix' ? 'PIX' : 'Boleto'} gerado com sucesso! Confira em Pagamentos.`)
-        load()
-      }
+      await runOperation(
+        () => api.post(`/inter/generate/${id}?type=${type}`),
+        {
+          title: type === 'pix' ? 'Gerando PIX' : 'Emitindo boleto',
+          processingMessage: type === 'pix' ? 'Registrando a cobrança PIX no Banco Inter.' : 'Enviando as parcelas e confirmando cada boleto no Banco Inter.',
+          successMessage: (res: any) => {
+            const quantity = Number(res.data?.data?.quantidade || 0)
+            return quantity > 1 ? `${quantity} boletos foram emitidos e confirmados com sucesso.` : `${type === 'pix' ? 'PIX' : 'Boleto'} emitido e confirmado com sucesso.`
+          },
+          errorMessage: (e: any) => e.response?.data?.message || `Erro ao gerar ${type}`,
+        },
+      )
+      load()
     } catch (e: any) {
-      const msg = e.response?.data?.message || e.response?.data?.error || JSON.stringify(e.response?.data) || `Erro ao gerar ${type}`
-      setError(msg)
-      alert('Erro: ' + msg)
+      setError(e.response?.data?.message || e.response?.data?.error || `Erro ao gerar ${type}`)
     }
   }
 

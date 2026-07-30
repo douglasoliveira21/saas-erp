@@ -4,12 +4,15 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { OperationsService } from './operations.service';
+import { OperationTrackingService } from './operation-tracking.service';
 
 @Controller('operations')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
 export class OperationsController {
-  constructor(private service: OperationsService) {}
+  constructor(private service: OperationsService, private tracking: OperationTrackingService) {}
+  @Get('executions') executions(@Query() query:any) { return this.tracking.list(query); }
+  @Get('executions/:id') execution(@Param('id') id:string) { return this.tracking.detail(id); }
   @Get('search') search(@Query('q') q: string) { return this.service.search(q); }
   @Get('data-quality') quality() { return this.service.dataQuality(); }
   @Get('approvals') approvals() { return this.service.list('approval_requests'); }

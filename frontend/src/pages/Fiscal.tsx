@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useFeedback } from '../components/ui'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
@@ -12,6 +13,7 @@ const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yel
 
 export function Fiscal() {
   const { isAdmin } = useAuth()
+  const { runOperation } = useFeedback()
   const [tab, setTab] = useState<'invoices' | 'emit' | 'certificates' | 'config'>('invoices')
   const [certificates, setCertificates] = useState<Certificate[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -225,14 +227,20 @@ export function Fiscal() {
         } : undefined,
       }
       const endpoint = emitType === 'nfe' ? '/fiscal/nfe/emit' : '/fiscal/nfse/emit'
-      const res = await api.post(endpoint, payload)
-      if (res.data.status === 'autorizada') {
-        setSuccess('Nota emitida com sucesso! Protocolo: ' + (res.data.protocolNumber || res.data.number))
-      } else if (res.data.status === 'rejeitada') {
-        setError('Nota rejeitada: ' + (res.data.rejectionReason || 'Verifique os dados'))
-      } else {
-        setSuccess('Nota registrada com status: ' + res.data.status)
-      }
+      const res = await runOperation(
+        async () => {
+          const response = await api.post(endpoint, payload)
+          if (response.data.status === 'rejeitada') throw new Error('Nota rejeitada: ' + (response.data.rejectionReason || 'Verifique os dados'))
+          return response
+        },
+        {
+          title: `Emitindo ${emitType === 'nfe' ? 'NF-e' : 'NFS-e'}`,
+          processingMessage: 'Assinando o documento, transmitindo e aguardando a confirmação do órgão fiscal.',
+          successMessage: (response: any) => `Nota autorizada com sucesso. Protocolo: ${response.data.protocolNumber || response.data.number || 'confirmado'}.`,
+          errorMessage: (error: any) => error.response?.data?.message || error.message || 'Erro ao emitir nota fiscal',
+        },
+      )
+      setSuccess('Nota emitida com sucesso! Protocolo: ' + (res.data.protocolNumber || res.data.number))
       load()
       setTab('invoices')
       // Limpar itens importados do XML
@@ -271,8 +279,13 @@ export function Fiscal() {
     if (!activeCert) { setError('Nenhum certificado ativo'); return }
     const inv = invoices.find(i => i.id === id)
     const endpoint = inv?.type === 'nfe' ? '/fiscal/nfe/cancel' : '/fiscal/nfse/cancel'
-    try { await api.post(endpoint, { invoiceId: id, reason, certId: activeCert.id }); setSuccess('Nota cancelada'); load() }
-    catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
+    try {
+      await runOperation(
+        () => api.post(endpoint, { invoiceId: id, reason, certId: activeCert.id }),
+        { title: 'Cancelando nota fiscal', processingMessage: 'Enviando o evento de cancelamento e aguardando a confirmação do órgão fiscal.', successMessage: 'Cancelamento autorizado e confirmado com sucesso.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao cancelar a nota fiscal' },
+      )
+      setSuccess('Nota cancelada'); load(); setShowView(false)
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
   async function openViewInvoice(id: string) {

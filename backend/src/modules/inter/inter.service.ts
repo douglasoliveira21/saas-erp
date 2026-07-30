@@ -710,7 +710,18 @@ export class InterService implements OnModuleInit {
     const document = (customer.cpfCnpj || '').replace(/\D/g, '');
     const missing = [!customer.name && 'nome', ![11, 14].includes(document.length) && 'CPF/CNPJ', !customer.address && 'endereço', !customer.city && 'cidade', !customer.uf && 'UF', !/^\d{8}$/.test((customer.cep || '').replace(/\D/g, '')) && 'CEP'].filter(Boolean);
     if (missing.length) throw new HttpException(`Complete o cadastro do cliente: ${missing.join(', ')}`, HttpStatus.BAD_REQUEST);
-    if (type === 'boleto' && Number(sale.installments || 1) > 1) return this.generateInstallmentBoletos(sale, document);
+    if (type === 'boleto') {
+      const installmentSummary = await this.saleRepo.manager.query(
+        `SELECT COUNT(*)::int total, COUNT(*) FILTER (WHERE status IN ('pendente','vencido'))::int pending
+         FROM installments WHERE sale_id=$1`,
+        [sale.id],
+      );
+      const financialInstallments = Number(installmentSummary[0]?.total || 0);
+      const configuredInstallments = Number(sale.installments || 1);
+      const effectiveInstallments = Math.max(configuredInstallments, financialInstallments);
+      this.logger.log(`Parcelamento da venda ${sale.id}: configurado=${configuredInstallments}, financeiro=${financialInstallments}, efetivo=${effectiveInstallments}`);
+      if (effectiveInstallments > 1) return this.generateInstallmentBoletos(sale, document);
+    }
     const active = await this.saleRepo.manager.query(`SELECT id, codigo_solicitacao, type, status, due_date FROM payments WHERE sale_id=$1 AND type=$2 AND status IN ('pendente','a_receber','vencido') ORDER BY created_at DESC LIMIT 1`, [sale.id, type]);
     if (active[0]) throw new HttpException(`Já existe ${type === 'boleto' ? 'boleto' : 'PIX'} ativo para esta venda`, HttpStatus.CONFLICT);
 

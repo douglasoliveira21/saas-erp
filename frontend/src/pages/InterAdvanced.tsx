@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { useFeedback } from '../components/ui'
 import { FileSearch, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
 
 export function InterAdvanced() {
+  const { runOperation, confirm: confirmAction } = useFeedback()
   const [logs, setLogs] = useState<any[]>([])
   const [codigo, setCodigo] = useState('')
   const [compare, setCompare] = useState<any>(null)
@@ -27,7 +29,7 @@ export function InterAdvanced() {
   }
 
   async function reprocess(id: string) {
-    await act(() => api.post(`/inter/webhook/reprocess/${id}`), 'Webhook reprocessado')
+    await act(() => api.post(`/inter/webhook/reprocess/${id}`), 'Reprocessando webhook', 'Webhook reprocessado com sucesso')
   }
 
   async function comparePayment(e: React.FormEvent) {
@@ -44,21 +46,22 @@ export function InterAdvanced() {
   async function cancelBatch(e: React.FormEvent) {
     e.preventDefault()
     const codes = batchCodes.split(/\r?\n|,/).map((c) => c.trim()).filter(Boolean)
-    await act(() => api.post('/inter/cancel-batch', { codigoSolicitacoes: codes, reason: 'ACERTOS' }), 'Cancelamento em lote enviado')
+    if (!codes.length || !await confirmAction({ title: 'Cancelar boletos', message: `Confirma o cancelamento de ${codes.length} boleto(s) no Banco Inter?`, confirmLabel: 'Cancelar boletos', danger: true })) return
+    await act(() => api.post('/inter/cancel-batch', { codigoSolicitacoes: codes, reason: 'ACERTOS' }), 'Cancelando boletos', 'Cancelamento confirmado pelo Banco Inter')
     setBatchCodes('')
   }
 
   async function handleExpired(e: React.FormEvent) {
     e.preventDefault()
-    await act(() => api.post(`/inter/expired/${codigo}`, { action: expiredAction, reason: 'ACERTOS' }), 'Tratamento de vencido executado')
+    await act(() => api.post(`/inter/expired/${codigo}`, { action: expiredAction, reason: 'ACERTOS' }), 'Processando boleto vencido', 'Tratamento do boleto vencido concluído')
   }
 
-  async function act(request: () => Promise<any>, message: string) {
+  async function act(request: () => Promise<any>, title: string, successMessage: string) {
     setError('')
     setSuccess('')
     try {
-      await request()
-      setSuccess(message)
+      await runOperation(request, { title, processingMessage: 'Aguardando a confirmação do Banco Inter.', successMessage, errorMessage: (error: any) => error.response?.data?.message || 'Falha na operação' })
+      setSuccess(successMessage)
       await loadLogs()
     } catch (err: any) {
       setError(err.response?.data?.message || 'Falha na operação')

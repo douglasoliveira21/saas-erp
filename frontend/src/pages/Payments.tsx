@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Download, Search, RefreshCw, CreditCard, Eye } from 'lucide-react'
+import { Download, Search, RefreshCw, CreditCard, Eye, XCircle } from 'lucide-react'
+import { useFeedback } from '../components/ui'
 
 interface Payment {
   id: string
@@ -21,6 +22,7 @@ const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', pago: 'bg-green-100 text-green-700', vencido: 'bg-red-100 text-red-700', cancelado: 'bg-gray-100 text-gray-700', a_receber: 'bg-blue-100 text-blue-700' }
 
 export function Payments() {
+  const { confirm: confirmAction, runOperation } = useFeedback()
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -76,6 +78,18 @@ export function Payments() {
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao consultar') }
   }
 
+  async function cancelPayment(payment: Payment) {
+    if (!await confirmAction({ title: 'Cancelar boleto', message: 'O cancelamento será solicitado diretamente ao Banco Inter. Deseja continuar?', confirmLabel: 'Cancelar boleto', danger: true })) return
+    try {
+      await runOperation(
+        () => api.post('/inter/cancel-batch', { codigoSolicitacoes: [payment.codigoSolicitacao], reason: 'ACERTOS' }),
+        { title: 'Cancelando boleto', processingMessage: 'Enviando a solicitação e aguardando a confirmação do Banco Inter.', successMessage: 'Boleto cancelado e confirmado pelo Banco Inter.', errorMessage: (error: any) => error.response?.data?.message || 'O Banco Inter não confirmou o cancelamento.' },
+      )
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao cancelar boleto')
+    }
+  }
   async function reconcileInter() {
     setReconciling(true)
     setError('')
@@ -156,6 +170,7 @@ export function Payments() {
                         <>
                           <button onClick={() => viewPdf(p.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>
                           <button onClick={() => downloadPdf(p.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
+                          {!['cancelado', 'pago'].includes(p.status) && <button onClick={() => cancelPayment(p)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar boleto"><XCircle className="w-4 h-4" /></button>}
                         </>
                       )}
                       <button onClick={() => checkStatus(p.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>

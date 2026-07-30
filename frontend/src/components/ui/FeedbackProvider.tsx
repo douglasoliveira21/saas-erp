@@ -1,23 +1,37 @@
 import { createContext, ReactNode, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Info, Loader2, X } from 'lucide-react'
 import { Button } from './Button'
 import { Modal } from './Modal'
 
 type ToastType = 'success' | 'error' | 'info'
 interface Toast { id: number; message: string; type: ToastType }
 interface ConfirmOptions { title?: string; message: string; confirmLabel?: string; danger?: boolean }
+interface OperationOptions {
+  title: string
+  processingMessage?: string
+  successMessage: string | ((result: any) => string)
+  errorMessage?: string | ((error: any) => string)
+}
+interface OperationState { status: 'processing' | 'success' | 'error'; title: string; message: string }
 interface FeedbackContextValue {
   notify: (message: string, type?: ToastType) => void
   confirm: (options: ConfirmOptions | string) => Promise<boolean>
+  runOperation: <T>(operation: () => Promise<T>, options: OperationOptions) => Promise<T>
 }
 
 const FeedbackContext = createContext<FeedbackContextValue | null>(null)
 const icons = { success: CheckCircle2, error: AlertCircle, info: Info }
 const colors = { success: 'border-green-200 text-green-700', error: 'border-red-200 text-red-700', info: 'border-blue-200 text-blue-700' }
 
+function apiError(error: any, fallback: string) {
+  const value = error?.response?.data?.message || error?.response?.data?.error || error?.message
+  return Array.isArray(value) ? value.join(', ') : String(value || fallback)
+}
+
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmation, setConfirmation] = useState<ConfirmOptions | null>(null)
+  const [operationState, setOperationState] = useState<OperationState | null>(null)
   const resolver = useRef<((result: boolean) => void) | null>(null)
   const nextId = useRef(1)
 
@@ -39,7 +53,23 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     setConfirmation(null)
   }, [])
 
-  const value = useMemo(() => ({ notify, confirm }), [notify, confirm])
+  const runOperation = useCallback(async <T,>(operation: () => Promise<T>, options: OperationOptions): Promise<T> => {
+    setOperationState({ status: 'processing', title: options.title, message: options.processingMessage || 'Aguarde enquanto concluímos a operação.' })
+    try {
+      const result = await operation()
+      const message = typeof options.successMessage === 'function' ? options.successMessage(result) : options.successMessage
+      setOperationState({ status: 'success', title: 'Operação concluída', message })
+      window.setTimeout(() => setOperationState(current => current?.status === 'success' ? null : current), 2200)
+      return result
+    } catch (error) {
+      const fallback = typeof options.errorMessage === 'string' ? options.errorMessage : 'Não foi possível concluir a operação.'
+      const message = typeof options.errorMessage === 'function' ? options.errorMessage(error) : apiError(error, fallback)
+      setOperationState({ status: 'error', title: 'Operação não concluída', message })
+      throw error
+    }
+  }, [])
+
+  const value = useMemo(() => ({ notify, confirm, runOperation }), [notify, confirm, runOperation])
 
   return (
     <FeedbackContext.Provider value={value}>
@@ -77,6 +107,21 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
           Esta ação será aplicada imediatamente.
         </div>
       </Modal>
+      {operationState && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-live="assertive">
+          <section className="animate-dialog-in w-full max-w-sm overflow-hidden rounded-3xl bg-white p-7 text-center shadow-2xl">
+            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center">
+              {operationState.status === 'processing' && <Loader2 className="h-16 w-16 animate-spin text-primary-600" aria-hidden="true" />}
+              {operationState.status === 'success' && <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-green-100"><span className="absolute inset-0 animate-ping rounded-full bg-green-200 opacity-60"/><CheckCircle2 className="relative h-12 w-12 text-green-600" aria-hidden="true" /></div>}
+              {operationState.status === 'error' && <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-100"><AlertCircle className="h-12 w-12 text-red-600" aria-hidden="true" /></div>}
+            </div>
+            <h2 className="text-xl font-bold text-gray-900">{operationState.title}</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">{operationState.message}</p>
+            {operationState.status === 'processing' && <div className="mx-auto mt-5 h-1.5 w-40 overflow-hidden rounded-full bg-gray-100"><div className="h-full w-1/2 animate-pulse rounded-full bg-primary-600" /></div>}
+            {operationState.status === 'error' && <Button className="mt-6 w-full" variant="secondary" onClick={() => setOperationState(null)}>Fechar</Button>}
+          </section>
+        </div>
+      )}
     </FeedbackContext.Provider>
   )
 }
