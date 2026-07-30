@@ -312,6 +312,20 @@ export class SalesService {
   }
 
   async cancel(id: string, cancelledBy: string): Promise<Sale> {
+    const preflightSale = await this.salesRepository.findOne({ where: { id } });
+    if (!preflightSale) throw new NotFoundException('Venda não encontrada');
+    if (preflightSale.status === 'finalizado' as any) throw new BadRequestException('Venda finalizada não pode ser cancelada');
+
+    const paidCommissionBeforeCancellation = await this.commissionsRepository.findOne({
+      where: { saleId: id, status: CommissionStatus.PAGA },
+    });
+    if (paidCommissionBeforeCancellation) {
+      throw new BadRequestException('A comissão desta venda já foi paga. Reverta o pagamento da comissão antes de cancelar a venda.');
+    }
+
+    const externalDocumentsCancelled = preflightSale.status !== 'cancelado' as any;
+    if (externalDocumentsCancelled) await this.cancelExternalDocuments(id, cancelledBy);
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -336,10 +350,6 @@ export class SalesService {
         throw new BadRequestException('A comissão desta venda já foi paga. Reverta o pagamento da comissão antes de cancelar a venda.');
       }
 
-      const alreadyCancelled = sale.status === 'cancelado' as any;
-      if (!alreadyCancelled) {
-        await this.cancelExternalDocuments(id, cancelledBy);
-      }
 
       const previousReversal = await queryRunner.manager.findOne(StockMovement, {
         where: { saleId: id, type: StockMovementType.ESTORNO },
@@ -417,20 +427,26 @@ export class SalesService {
         oldData: { status: oldStatus },
         newData: {
           status: 'cancelado',
-          externalDocumentsCancelled: !alreadyCancelled,
+          externalDocumentsCancelled,
           stockReverted: !previousReversal,
         },
       });
       await this.addEvent(id, 'sale.cancelled', 'cancelado', 'Venda cancelada', cancelledBy, {
-        externalDocumentsCancelled: !alreadyCancelled,
+        externalDocumentsCancelled,
         stockReverted: !previousReversal,
       });
       return this.findOne(id);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive && !queryRunner.isReleased) {
+        try {
+          await queryRunner.rollbackTransaction();
+        } catch {}
+      }
       throw error;
     } finally {
-      await queryRunner.release();
+      if (!queryRunner.isReleased) {
+        await queryRunner.release();
+      }
     }
   }
   async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
