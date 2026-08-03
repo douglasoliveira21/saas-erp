@@ -23,7 +23,7 @@ interface Customer {
 
 interface GlpiEntity { id: number; name: string }
 
-const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', additionalEmails: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', observations: '', glpiEntityId: '' }
+const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', additionalEmails: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', cityCode: '', observations: '', glpiEntityId: '' }
 
 export function Customers() {
   const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
@@ -111,7 +111,7 @@ export function Customers() {
 
   function openEdit(c: Customer) {
     setEditing(c)
-    setForm({ name: c.name, cpf_cnpj: c.cpfCnpj || '', phone: c.phone || '', email: c.email || '', additionalEmails: (c.additionalEmails || []).join('\n'), address: c.address || '', stateRegistration: c.stateRegistration || '', city: c.city || '', uf: c.uf || '', neighborhood: c.neighborhood || '', cep: c.cep || '', observations: c.observations || '', glpiEntityId: c.glpiEntityId ? String(c.glpiEntityId) : '' })
+    setForm({ name: c.name, cpf_cnpj: c.cpfCnpj || '', phone: c.phone || '', email: c.email || '', additionalEmails: (c.additionalEmails || []).join('\n'), address: c.address || '', stateRegistration: c.stateRegistration || '', city: c.city || '', uf: c.uf || '', neighborhood: c.neighborhood || '', cep: c.cep || '', cityCode: (c as any).cityCode || '', observations: c.observations || '', glpiEntityId: c.glpiEntityId ? String(c.glpiEntityId) : '' })
     setError('')
     setShowModal(true)
   }
@@ -132,6 +132,7 @@ export function Customers() {
         uf: form.uf,
         neighborhood: form.neighborhood,
         cep: form.cep,
+        cityCode: form.cityCode || null,
         observations: form.observations,
         glpiEntityId: form.glpiEntityId ? parseInt(form.glpiEntityId) : null,
         glpiEntityName: form.glpiEntityId ? glpiEntities.find(e => e.id === parseInt(form.glpiEntityId))?.name || null : null,
@@ -295,6 +296,11 @@ export function Customers() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CEP</label>
                   <input className="input" value={form.cep} onChange={e => setForm({ ...form, cep: e.target.value })} placeholder="00000000" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cód. IBGE Município</label>
+                  <input className="input" value={form.cityCode} onChange={e => setForm({ ...form, cityCode: e.target.value })} placeholder="Ex: 3118601" maxLength={7} />
+                  <p className="text-xs text-gray-400 mt-0.5">Usado na NFS-e. Consulte em ibge.gov.br</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
