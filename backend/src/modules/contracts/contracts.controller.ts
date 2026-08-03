@@ -5,6 +5,7 @@ import { extname, join } from 'path';
 import { Response } from 'express';
 import { existsSync, createReadStream } from 'fs';
 import { ContractsService } from './contracts.service';
+import { ContractBillingService } from './contract-billing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -15,7 +16,10 @@ const uploadDir = join(__dirname, '..', '..', '..', 'uploads', 'contracts');
 @Controller('contracts')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ContractsController {
-  constructor(private readonly service: ContractsService) {}
+  constructor(
+    private readonly service: ContractsService,
+    private readonly billingService: ContractBillingService,
+  ) {}
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
@@ -116,6 +120,24 @@ export class ContractsController {
       dto.fileSize = file.size;
     }
     return this.service.update(id, dto);
+  }
+
+  @Get(':id/billings')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getBillings(@Param('id') id: string) {
+    return this.billingService.getBillingHistory(id);
+  }
+
+  @Post(':id/billing')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  generateBilling(@Param('id') id: string) {
+    return this.billingService.manualBilling(id);
+  }
+
+  @Post('billing/check')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  runBillingCheck() {
+    return this.billingService.runBillingCheck();
   }
 
   @Delete(':id')
