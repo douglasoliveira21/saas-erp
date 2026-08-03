@@ -146,6 +146,10 @@ export class ContractBillingService implements OnModuleInit {
             aliquota: 5,
             recipientEmail: customer.email || '',
             recipientAddress: customer.address || '',
+            recipientCity: customer.city || '',
+            recipientUf: customer.uf || '',
+            recipientNeighborhood: customer.neighborhood || '',
+            recipientCep: customer.cep || '',
           }, certId);
 
           this.logger.log(`NFS-e emitida: ${nfseResult.status} - #${nfseResult.number || ''}`);
@@ -373,6 +377,10 @@ export class ContractBillingService implements OnModuleInit {
       aliquota: 5,
       recipientEmail: customer.email || '',
       recipientAddress: customer.address || '',
+      recipientCity: customer.city || '',
+      recipientUf: customer.uf || '',
+      recipientNeighborhood: customer.neighborhood || '',
+      recipientCep: customer.cep || '',
     }, certId);
 
     return { invoiceId, status: nfseResult.status, number: nfseResult.number, billingPeriod, value: monthlyValue };

@@ -1003,7 +1003,7 @@ export function Fiscal() {
                 {viewConfig && (
                   <div className="p-4 border rounded-lg">
                     <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Prestador</h3>
-                    {viewConfig.companyLogo && <img src={viewConfig.companyLogo} alt="Logo" className="h-10 mb-2 rounded" />}
+                    {viewConfig.companyLogo && viewInvoice?.type === 'nfe' && <img src={viewConfig.companyLogo} alt="Logo" className="h-10 mb-2 rounded" />}
                     <div className="grid grid-cols-3 gap-3 text-sm">
                       <div><span className="text-gray-500">Razao Social:</span> <span className="font-medium">{viewConfig.companyName}</span></div>
                       <div><span className="text-gray-500">CNPJ:</span> <span className="font-medium">{viewConfig.cnpj}</span></div>
