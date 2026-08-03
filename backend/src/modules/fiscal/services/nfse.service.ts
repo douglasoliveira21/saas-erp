@@ -359,7 +359,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     // Montar bloco endereco do tomador (obrigatorio para CNPJ)
     let tomaEndBlock = '';
     if (recipientDoc.length === 14) {
-      const cMunToma = config.cityCode; // Usar municipio do emitente (padrão NFS-e nacional)
+      // Usar código do município do cliente (se disponível via serviceData) ou do emitente como fallback
+      const cMunToma = serviceData?.recipientCMun || serviceData?.recipientCityCode || config.cityCode;
       tomaEndBlock = `<end><endNac><cMun>${cMunToma}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${this.escapeXml(xLgr)}</xLgr><nro>${this.escapeXml(nro)}</nro><xBairro>${this.escapeXml(tomaNeighborhood)}</xBairro></end>`;
     }
 

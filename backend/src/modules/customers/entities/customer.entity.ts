@@ -47,6 +47,9 @@ export class Customer {
   @Column({ length: 10, nullable: true })
   cep: string;
 
+  @Column({ name: 'city_code', length: 10, nullable: true })
+  cityCode: string;
+
   @Column({ type: 'text', nullable: true })
   observations: string;
 

@@ -763,7 +763,7 @@ export function Fiscal() {
                 <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden"><div className="-rotate-45 whitespace-nowrap text-6xl font-black tracking-widest text-red-500/15 md:text-8xl">SEM VALOR FISCAL</div></div>
                 <div className="relative z-0">
                   <div className="grid grid-cols-1 gap-4 border-b-2 border-gray-800 pb-4 md:grid-cols-3">
-                    <div>{fiscalConfig?.companyLogo && <img src={fiscalConfig.companyLogo} alt="Logo da empresa" className="mb-2 max-h-12 max-w-[180px] object-contain" />}<p className="text-lg font-bold">{fiscalConfig?.companyName || activeCert?.companyName || 'VGON'}</p><p className="text-xs">CNPJ: {fiscalConfig?.cnpj || activeCert?.cnpj || '-'}</p></div>
+                    <div>{emitType === 'nfe' && fiscalConfig?.companyLogo && <img src={fiscalConfig.companyLogo} alt="Logo da empresa" className="mb-2 max-h-12 max-w-[180px] object-contain" />}<p className="text-lg font-bold">{fiscalConfig?.companyName || activeCert?.companyName || 'VGON'}</p><p className="text-xs">CNPJ: {fiscalConfig?.cnpj || activeCert?.cnpj || '-'}</p></div>
                     <div className="text-center"><p className="text-3xl font-black">{emitType === 'nfe' ? 'DANFE' : 'NFS-e'}</p><p className="text-xs">PRÉ-VISUALIZAÇÃO DO DOCUMENTO FISCAL</p><p className="mt-2 font-bold">Nº NÃO RESERVADO</p></div>
                     <div className="text-right text-xs"><p>Ambiente: {nfeAmbiente === 1 ? 'Produção' : 'Homologação'}</p><p>Data prevista: {new Date().toLocaleDateString('pt-BR')}</p><p>Modelo: {emitType === 'nfe' ? nfeModelo : 'NFS-e Nacional'}</p></div>
                   </div>
