@@ -337,17 +337,30 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const tomaCep = (serviceData?.recipientCep || '').replace(/\D/g, '');
     const tomaNeighborhood = serviceData?.recipientNeighborhood || 'Centro';
     const tomaCity = serviceData?.recipientCity || '';
+    const tomaUf = serviceData?.recipientUf || '';
     const tomaEmail = serviceData?.recipientEmail || '';
 
-    // Separar logradouro e numero
-    const addressParts = tomaAddress.split(',').map((s: string) => s.trim());
-    const xLgr = addressParts[0] || 'Endereco';
-    const nro = addressParts[1] || '0';
+    // Separar logradouro e numero (formato: "Rua X, 123" ou "Rua X 123")
+    let xLgr = 'Endereco';
+    let nro = '0';
+    if (tomaAddress) {
+      if (tomaAddress.includes(',')) {
+        const parts = tomaAddress.split(',').map((s: string) => s.trim());
+        xLgr = parts[0] || 'Endereco';
+        nro = parts[1] || '0';
+      } else {
+        // Tentar extrair número do final
+        const match = tomaAddress.match(/^(.+?)\s+(\d+)\s*$/);
+        if (match) { xLgr = match[1]; nro = match[2]; }
+        else { xLgr = tomaAddress; nro = 'SN'; }
+      }
+    }
 
     // Montar bloco endereco do tomador (obrigatorio para CNPJ)
     let tomaEndBlock = '';
     if (recipientDoc.length === 14) {
-      tomaEndBlock = `<end><endNac><cMun>${config.cityCode}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${this.escapeXml(xLgr)}</xLgr><nro>${this.escapeXml(nro)}</nro><xBairro>${this.escapeXml(tomaNeighborhood)}</xBairro></end>`;
+      const cMunToma = config.cityCode; // Usar municipio do emitente (padrão NFS-e nacional)
+      tomaEndBlock = `<end><endNac><cMun>${cMunToma}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${this.escapeXml(xLgr)}</xLgr><nro>${this.escapeXml(nro)}</nro><xBairro>${this.escapeXml(tomaNeighborhood)}</xBairro></end>`;
     }
 
     // Montar bloco email do tomador (opcional)
