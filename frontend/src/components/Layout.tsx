@@ -1,9 +1,10 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { LogOut, Menu, X, ChevronRight, Search, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck, BookOpen } from 'lucide-react'
+import { LogOut, Menu, X, ChevronRight, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck, BookOpen } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { navigationSections, NavItem } from './navigation'
 import { api } from '../services/api'
+import { GlobalSearch } from './GlobalSearch'
 
 interface NotificationItem {
   id: string
@@ -199,10 +200,7 @@ export function Layout() {
             <button type="button" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu" aria-expanded={sidebarOpen} className="lg:hidden text-gray-500">
               <Menu className="w-5 h-5" />
             </button>
-            <div className="hidden sm:flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2 w-64">
-              <Search className="w-4 h-4 text-gray-400" />
-              <input aria-label="Busca global" className="bg-transparent border-none outline-none text-sm text-gray-700 placeholder-gray-400 w-full" placeholder="Buscar..." />
-            </div>
+            <GlobalSearch />
           </div>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => navigate('/tutorial')} aria-label="Abrir tutorial do sistema" title="Tutorial do sistema" className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors ${location.pathname === '/tutorial' ? 'bg-primary-50 text-primary-700' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}>
