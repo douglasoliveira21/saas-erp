@@ -156,16 +156,29 @@ export function Contracts() {
     catch { setError('Erro ao remover') }
   }
 
-  async function generateBilling(id: string) {
+  async function generateNfse(id: string) {
     const contract = contracts.find(c => c.id === id)
-    if (!confirm(`Gerar NF + Boleto para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}\nCliente: ${contract?.customer?.name || ''}`)) return
+    if (!confirm(`Gerar Nota Fiscal de Serviço para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}\nCliente: ${contract?.customer?.name || ''}`)) return
     setError('')
     try {
-      const res = await api.post(`/contracts/${id}/billing`)
-      alert(`Cobrança gerada com sucesso!\n\nNFS-e: ${res.data.invoiceId ? 'Emitida' : 'Não gerada'}\nBoleto: ${res.data.boletoCode || 'Não gerado'}\nPeríodo: ${res.data.billingPeriod}\nValor: R$ ${Number(res.data.value).toFixed(2)}`)
+      const res = await api.post(`/contracts/${id}/billing/nfse`)
+      alert(`NFS-e gerada!\n\nStatus: ${res.data.status || 'Processando'}\nNúmero: ${res.data.number || '-'}\nPeríodo: ${res.data.billingPeriod}`)
     } catch (e: any) {
-      setError(e.response?.data?.message || 'Erro ao gerar cobrança')
-      alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar NF + Boleto'))
+      setError(e.response?.data?.message || 'Erro ao gerar NFS-e')
+      alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Nota Fiscal'))
+    }
+  }
+
+  async function generateBoleto(id: string) {
+    const contract = contracts.find(c => c.id === id)
+    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}\nCliente: ${contract?.customer?.name || ''}`)) return
+    setError('')
+    try {
+      const res = await api.post(`/contracts/${id}/billing/boleto`)
+      alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor: R$ ${Number(res.data.value).toFixed(2)}`)
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao gerar boleto')
+      alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Boleto'))
     }
   }
 
@@ -292,7 +305,8 @@ export function Contracts() {
               </div>
               {canManage && (
                 <div className="flex gap-1 flex-shrink-0">
-                  {c.status === 'ativo' && <button onClick={() => generateBilling(c.id)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded" title="Gerar NF + Boleto"><FileText className="w-4 h-4" /></button>}
+                  {c.status === 'ativo' && <button onClick={() => generateNfse(c.id)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded" title="Gerar Nota Fiscal"><FileText className="w-4 h-4" /></button>}
+                  {c.status === 'ativo' && <button onClick={() => generateBoleto(c.id)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><DollarSign className="w-4 h-4" /></button>}
                   {c.status === 'ativo' && <button onClick={() => openRenew(c)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Renovar"><RefreshCw className="w-4 h-4" /></button>}
                   <button onClick={() => openEdit(c)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
                   {isAdmin && <button onClick={() => remove(c.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>}

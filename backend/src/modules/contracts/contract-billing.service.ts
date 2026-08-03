@@ -328,4 +328,122 @@ export class ContractBillingService implements OnModuleInit {
 
     return this.generateBilling(contract, dueDate, billingPeriod);
   }
+
+  /**
+   * Generate only NFS-e for a contract
+   */
+  async manualNfse(contractId: string): Promise<any> {
+    const contract = await this.contractRepo.findOne({
+      where: { id: contractId },
+      relations: ['customer'],
+    });
+    if (!contract) throw new Error('Contrato não encontrado');
+    if (contract.status !== 'ativo') throw new Error('Contrato não está ativo');
+    if (!contract.customer) throw new Error('Contrato sem cliente vinculado');
+
+    const monthlyValue = Number(contract.monthlyValue || contract.totalValue);
+    if (monthlyValue <= 0) throw new Error('Valor mensal do contrato é zero');
+
+    const now = new Date();
+    const chargeDay = contract.chargeDay || 10;
+    const dueDate = new Date(now.getFullYear(), now.getMonth(), chargeDay);
+    if (dueDate <= now) dueDate.setMonth(dueDate.getMonth() + 1);
+    const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+    const description = contract.description || contract.title || 'Prestação de serviços de TI';
+
+    const certResult = await this.dataSource.query(`SELECT id FROM certificates WHERE is_active = true LIMIT 1`);
+    if (certResult.length === 0) throw new Error('Nenhum certificado digital ativo. Configure em Módulo Fiscal > Certificados.');
+
+    const certId = certResult[0].id;
+    const customer = contract.customer;
+
+    const invoiceResult = await this.dataSource.query(
+      `INSERT INTO invoices (sale_id, certificate_id, type, status, recipient_cnpj, recipient_name, total_value)
+       VALUES (NULL, $1, 'nfse', 'pendente', $2, $3, $4) RETURNING id`,
+      [certId, (customer.cpfCnpj || '').replace(/\D/g, ''), customer.name, monthlyValue]
+    );
+
+    const invoiceId = invoiceResult[0]?.id;
+    const nfseResult = await this.nfseService.emit(invoiceId, {
+      recipientCnpj: (customer.cpfCnpj || '').replace(/\D/g, ''),
+      recipientName: customer.name,
+      totalValue: monthlyValue,
+      discriminacao: `${description} - Referência: ${billingPeriod}`,
+      codTribNacional: '010701',
+      aliquota: 5,
+      recipientEmail: customer.email || '',
+      recipientAddress: customer.address || '',
+    }, certId);
+
+    return { invoiceId, status: nfseResult.status, number: nfseResult.number, billingPeriod, value: monthlyValue };
+  }
+
+  /**
+   * Generate only Boleto for a contract
+   */
+  async manualBoleto(contractId: string): Promise<any> {
+    const contract = await this.contractRepo.findOne({
+      where: { id: contractId },
+      relations: ['customer'],
+    });
+    if (!contract) throw new Error('Contrato não encontrado');
+    if (contract.status !== 'ativo') throw new Error('Contrato não está ativo');
+    if (!contract.customer) throw new Error('Contrato sem cliente vinculado');
+
+    const customer = contract.customer;
+    if (!customer.cpfCnpj) throw new Error('Cliente sem CPF/CNPJ cadastrado');
+
+    const monthlyValue = Number(contract.monthlyValue || contract.totalValue);
+    if (monthlyValue <= 0) throw new Error('Valor mensal do contrato é zero');
+
+    const now = new Date();
+    const chargeDay = contract.chargeDay || 10;
+    const dueDate = new Date(now.getFullYear(), now.getMonth(), chargeDay);
+    if (dueDate <= now) dueDate.setMonth(dueDate.getMonth() + 1);
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+    const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const tipoPessoa = (customer.cpfCnpj || '').replace(/\D/g, '').length > 11 ? 'JURIDICA' : 'FISICA';
+
+    const boletoData: any = {
+      seuNumero: contract.id.substring(0, 15),
+      valorNominal: monthlyValue,
+      dataVencimento: dueDateStr,
+      numDiasAgenda: 30,
+      pagador: {
+        cpfCnpj: (customer.cpfCnpj || '').replace(/\D/g, ''),
+        tipoPessoa,
+        nome: customer.name.substring(0, 50),
+        endereco: (customer.address || 'Endereco nao informado').substring(0, 90),
+        cidade: (customer as any).city || 'Contagem',
+        uf: (customer as any).uf || 'MG',
+        cep: ((customer as any).cep || '32000000').replace(/\D/g, '').padEnd(8, '0').substring(0, 8),
+      },
+      multa: { codigo: 'PERCENTUAL', taxa: 2 },
+      mora: { codigo: 'TAXAMENSAL', taxa: 0.03 },
+      mensagem: {
+        linha1: `Ref: ${contract.title}`,
+        linha2: `Período: ${billingPeriod}`,
+        linha3: 'Multa: 2,00% após vencimento',
+        linha4: 'Juros: 0,03% a.m. após vencimento',
+      },
+    };
+
+    const boletoResult = await this.interService.createBoleto(boletoData);
+    const boletoCode = boletoResult.codigoSolicitacao || '';
+
+    // Save payment record
+    if (boletoCode) {
+      const existing = await this.dataSource.query(`SELECT id FROM payments WHERE codigo_solicitacao = $1`, [boletoCode]);
+      if (existing.length === 0) {
+        await this.dataSource.query(
+          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date)
+           VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6)`,
+          [customer.id, boletoCode, monthlyValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
+        );
+      }
+    }
+
+    return { boletoCode, billingPeriod, value: monthlyValue, dueDate: dueDateStr };
+  }
 }

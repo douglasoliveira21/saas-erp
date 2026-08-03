@@ -134,6 +134,18 @@ export class ContractsController {
     return this.billingService.manualBilling(id);
   }
 
+  @Post(':id/billing/nfse')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  generateNfse(@Param('id') id: string) {
+    return this.billingService.manualNfse(id);
+  }
+
+  @Post(':id/billing/boleto')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  generateBoleto(@Param('id') id: string) {
+    return this.billingService.manualBoleto(id);
+  }
+
   @Post('billing/check')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   runBillingCheck() {
