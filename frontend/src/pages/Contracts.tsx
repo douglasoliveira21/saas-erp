@@ -27,6 +27,9 @@ interface Contract {
   adjustmentPercentage: number
   autoCharge: boolean
   chargeDay: number
+  issueDay: number
+  issRetido: boolean
+  issAliquota: number
   equipments: string
   renewalHistory: string
   lastRenewalDate: string
@@ -47,7 +50,7 @@ export function Contracts() {
   const [editing, setEditing] = useState<Contract | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', equipments: '' })
+  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '' })
   const [file, setFile] = useState<File | null>(null)
   const [showRenewModal, setShowRenewModal] = useState(false)
   const [renewingContract, setRenewingContract] = useState<Contract | null>(null)
@@ -90,13 +93,13 @@ export function Contracts() {
 
   function openNew() {
     setEditing(null); setFile(null)
-    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', equipments: '' })
+    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '' })
     setError(''); setShowModal(true)
   }
 
   function openEdit(c: Contract) {
     setEditing(c); setFile(null)
-    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', issueDay: (c as any).issueDay ? String((c as any).issueDay) : '3', equipments: c.equipments || '' })
+    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', issueDay: c.issueDay ? String(c.issueDay) : '3', chargeDateFull: '', issueDateFull: '', issRetido: c.issRetido || false, issAliquota: c.issAliquota ? String(c.issAliquota) : '5', equipments: c.equipments || '' })
     setError(''); setShowModal(true)
   }
 
@@ -203,11 +206,11 @@ export function Contracts() {
 
   async function generateBoleto(id: string) {
     const contract = contracts.find(c => c.id === id)
-    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}\nCliente: ${contract?.customer?.name || ''}`)) return
+    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}${contract?.issRetido ? `\nISS Retido (${contract?.issAliquota || 5}%): - R$ ${(Number(contract?.monthlyValue || contract?.totalValue || 0) * (contract?.issAliquota || 5) / 100).toFixed(2)}\nValor do Boleto: R$ ${(Number(contract?.monthlyValue || contract?.totalValue || 0) * (1 - (contract?.issAliquota || 5) / 100)).toFixed(2)}` : ''}\nCliente: ${contract?.customer?.name || ''}`)) return
     setError('')
     try {
       const res = await api.post(`/contracts/${id}/billing/boleto`)
-      alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor: R$ ${Number(res.data.value).toFixed(2)}`)
+      alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor do Boleto: R$ ${Number(res.data.value).toFixed(2)}${res.data.issRetido ? `\nISS Retido: R$ ${Number(res.data.issValue).toFixed(2)}` : ''}`)
       // Refresh billing status
       const currentPeriod = getCurrentPeriod()
       try {
@@ -346,6 +349,7 @@ export function Contracts() {
                   <span>Inicio: {new Date(c.startDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                   {c.endDate && <span>Fim: {new Date(c.endDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
                   {c.autoCharge && <span className="flex items-center gap-1 text-green-600"><DollarSign className="w-3 h-3" /> Cobrança Automática (dia {c.chargeDay})</span>}
+                  {c.issRetido && <span className="text-blue-600 font-medium">ISS Retido ({c.issAliquota || 5}%)</span>}
                   {c.equipments && <span className="flex items-center gap-1"><Monitor className="w-3 h-3" /> Equipamentos</span>}
                   {c.adjustmentIndex && c.adjustmentPercentage && <span>Reajuste: {c.adjustmentPercentage}% ({c.adjustmentIndex})</span>}
                 </div>

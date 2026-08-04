@@ -64,7 +64,7 @@ export class ContractBillingService implements OnModuleInit {
           }
 
           // Check if today is the issue day for this contract
-          const issueDay = (contract as any).issueDay || 3;
+          const issueDay = contract.issueDay || 3;
           if (currentDay !== issueDay) continue; // Not the issue day
 
           // Check if already billed for this period
@@ -105,10 +105,16 @@ export class ContractBillingService implements OnModuleInit {
     const monthlyValue = Number(contract.monthlyValue || contract.totalValue);
     if (monthlyValue <= 0) throw new Error('Valor mensal do contrato é zero');
 
+    // Calculate boleto value: if ISS is retained by tomador, deduct ISS from boleto
+    const issRetido = contract.issRetido || false;
+    const issAliquota = Number(contract.issAliquota || 5);
+    const issValue = issRetido ? Number((monthlyValue * issAliquota / 100).toFixed(2)) : 0;
+    const boletoValue = issRetido ? Number((monthlyValue - issValue).toFixed(2)) : monthlyValue;
+
     const dueDateStr = dueDate.toISOString().split('T')[0];
     const description = contract.description || contract.title || 'Prestação de serviços de TI';
 
-    this.logger.log(`Gerando cobrança para contrato "${contract.title}" - R$ ${monthlyValue.toFixed(2)} - Venc: ${dueDateStr}`);
+    this.logger.log(`Gerando cobrança para contrato "${contract.title}" - NF: R$ ${monthlyValue.toFixed(2)} - Boleto: R$ ${boletoValue.toFixed(2)}${issRetido ? ` (ISS retido: R$ ${issValue.toFixed(2)})` : ''} - Venc: ${dueDateStr}`);
 
     let invoiceId: string | null = null;
     let boletoCode: string | null = null;
@@ -142,8 +148,8 @@ export class ContractBillingService implements OnModuleInit {
             totalValue: monthlyValue,
             discriminacao: `${description} - Referência: ${billingPeriod}`,
             codTribNacional: '010701',
-            aliquota: (contract as any).issAliquota || 5,
-            issRetido: (contract as any).issRetido || false,
+            aliquota: contract.issAliquota || 5,
+            issRetido: contract.issRetido || false,
             recipientEmail: customer.email || '',
             recipientAddress: customer.address || '',
             recipientCity: customer.city || '',
@@ -171,7 +177,7 @@ export class ContractBillingService implements OnModuleInit {
 
       const boletoData: any = {
         seuNumero,
-        valorNominal: monthlyValue,
+        valorNominal: boletoValue,
         dataVencimento: dueDateStr,
         numDiasAgenda: 30,
         pagador: {
@@ -188,22 +194,22 @@ export class ContractBillingService implements OnModuleInit {
         mensagem: {
           linha1: `Ref: ${contract.title}`,
           linha2: `Período: ${billingPeriod}`,
-          linha3: 'Multa: 2,00% após vencimento',
-          linha4: 'Juros: 0,03% a.m. após vencimento',
+          linha3: issRetido ? `ISS retido: R$ ${issValue.toFixed(2)} (${issAliquota}%)` : 'Multa: 2,00% após vencimento',
+          linha4: issRetido ? 'Multa: 2,00% / Juros: 0,03% a.m. após vencimento' : 'Juros: 0,03% a.m. após vencimento',
         },
       };
 
       const boletoResult = await this.interService.createBoleto(boletoData);
       boletoCode = boletoResult.codigoSolicitacao || '';
 
-      this.logger.log(`Boleto gerado: ${boletoCode}`);
+      this.logger.log(`Boleto gerado: ${boletoCode} - Valor: R$ ${boletoValue.toFixed(2)}`);
 
       // Save payment record
       if (boletoCode) {
         await this.dataSource.query(
           `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date)
            VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6)`,
-          [customer.id, boletoCode, monthlyValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
+          [customer.id, boletoCode, boletoValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
         );
 
         // Try to get PDF
@@ -268,7 +274,9 @@ export class ContractBillingService implements OnModuleInit {
               <table style="width:100%;margin:20px 0;border-collapse:collapse">
                 <tr><td style="padding:8px;color:#6b7280">Contrato:</td><td style="padding:8px;font-weight:bold">${contract.title}</td></tr>
                 <tr><td style="padding:8px;color:#6b7280">Referência:</td><td style="padding:8px;font-weight:bold">${billingPeriod}</td></tr>
-                <tr><td style="padding:8px;color:#6b7280">Valor:</td><td style="padding:8px;font-weight:bold;color:#059669">R$ ${monthlyValue.toFixed(2)}</td></tr>
+                <tr><td style="padding:8px;color:#6b7280">Valor do Serviço:</td><td style="padding:8px;font-weight:bold">R$ ${monthlyValue.toFixed(2)}</td></tr>
+                ${issRetido ? `<tr><td style="padding:8px;color:#6b7280">ISS Retido (${issAliquota}%):</td><td style="padding:8px;color:#dc2626">- R$ ${issValue.toFixed(2)}</td></tr>` : ''}
+                <tr><td style="padding:8px;color:#6b7280">Valor do Boleto:</td><td style="padding:8px;font-weight:bold;color:#059669">R$ ${boletoValue.toFixed(2)}</td></tr>
                 <tr><td style="padding:8px;color:#6b7280">Vencimento:</td><td style="padding:8px;font-weight:bold">${dueDateStr.split('-').reverse().join('/')}</td></tr>
                 <tr><td style="padding:8px;color:#6b7280">Descrição:</td><td style="padding:8px">${description}</td></tr>
               </table>
@@ -440,8 +448,8 @@ export class ContractBillingService implements OnModuleInit {
       totalValue: monthlyValue,
       discriminacao: `${description} - Referência: ${billingPeriod}`,
       codTribNacional: '010701',
-      aliquota: (contract as any).issAliquota || 5,
-      issRetido: (contract as any).issRetido || false,
+      aliquota: contract.issAliquota || 5,
+      issRetido: contract.issRetido || false,
       recipientEmail: customer.email || '',
       recipientAddress: customer.address || '',
       recipientCity: customer.city || '',
@@ -503,11 +511,17 @@ export class ContractBillingService implements OnModuleInit {
       throw new Error(`Já existe um boleto emitido para o período ${billingPeriod}. Não é possível emitir novamente.`);
     }
 
+    // Calculate boleto value: if ISS is retained by tomador, deduct ISS from boleto
+    const issRetido = contract.issRetido || false;
+    const issAliquota = Number(contract.issAliquota || 5);
+    const issValue = issRetido ? Number((monthlyValue * issAliquota / 100).toFixed(2)) : 0;
+    const boletoValue = issRetido ? Number((monthlyValue - issValue).toFixed(2)) : monthlyValue;
+
     const tipoPessoa = (customer.cpfCnpj || '').replace(/\D/g, '').length > 11 ? 'JURIDICA' : 'FISICA';
 
     const boletoData: any = {
       seuNumero: contract.id.substring(0, 15),
-      valorNominal: monthlyValue,
+      valorNominal: boletoValue,
       dataVencimento: dueDateStr,
       numDiasAgenda: 30,
       pagador: {
@@ -524,8 +538,8 @@ export class ContractBillingService implements OnModuleInit {
       mensagem: {
         linha1: `Ref: ${contract.title}`,
         linha2: `Período: ${billingPeriod}`,
-        linha3: 'Multa: 2,00% após vencimento',
-        linha4: 'Juros: 0,03% a.m. após vencimento',
+        linha3: issRetido ? `ISS retido: R$ ${issValue.toFixed(2)} (${issAliquota}%)` : 'Multa: 2,00% após vencimento',
+        linha4: issRetido ? 'Multa: 2,00% / Juros: 0,03% a.m. após vencimento' : 'Juros: 0,03% a.m. após vencimento',
       },
     };
 
@@ -539,7 +553,7 @@ export class ContractBillingService implements OnModuleInit {
         await this.dataSource.query(
           `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date)
            VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6)`,
-          [customer.id, boletoCode, monthlyValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
+          [customer.id, boletoCode, boletoValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
         );
       }
     }
@@ -549,7 +563,7 @@ export class ContractBillingService implements OnModuleInit {
       INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code, status)
       VALUES ($1, $2, $3, $4, $5, $6, 'emitido')
       ON CONFLICT (contract_id, billing_period) DO UPDATE SET boleto_code = $6, updated_at = NOW()
-    `, [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, boletoCode]).catch(async () => {
+    `, [contract.id, customer.id, billingPeriod, dueDateStr, boletoValue, boletoCode]).catch(async () => {
       // If ON CONFLICT fails (no unique constraint yet), try upsert manually
       const existingBilling = await this.dataSource.query(`SELECT id FROM contract_billings WHERE contract_id = $1 AND billing_period = $2`, [contract.id, billingPeriod]);
       if (existingBilling[0]) {
@@ -557,12 +571,12 @@ export class ContractBillingService implements OnModuleInit {
       } else {
         await this.dataSource.query(
           `INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code, status) VALUES ($1, $2, $3, $4, $5, $6, 'emitido')`,
-          [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, boletoCode]
+          [contract.id, customer.id, billingPeriod, dueDateStr, boletoValue, boletoCode]
         );
       }
     });
 
-    return { boletoCode, billingPeriod, value: monthlyValue, dueDate: dueDateStr };
+    return { boletoCode, billingPeriod, value: boletoValue, serviceValue: monthlyValue, issRetido, issValue, dueDate: dueDateStr };
   }
 
   /**
