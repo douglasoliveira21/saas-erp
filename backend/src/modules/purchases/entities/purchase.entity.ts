@@ -87,6 +87,24 @@ export class Purchase {
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdBy: string;
 
+  @Column({ name: 'financial_status', type: 'varchar', length: 20, nullable: true })
+  financialStatus: string; // generated | partially_paid | paid | cancelled | reversed
+
+  @Column({ name: 'financial_total', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  financialTotal: number;
+
+  @Column({ name: 'financial_generated_at', type: 'timestamp', nullable: true })
+  financialGeneratedAt: Date;
+
+  @Column({ name: 'financial_generated_by', type: 'uuid', nullable: true })
+  financialGeneratedBy: string;
+
+  @Column({ name: 'financial_adjustment_type', type: 'varchar', length: 30, nullable: true })
+  financialAdjustmentType: string;
+
+  @Column({ name: 'financial_adjustment_reason', type: 'text', nullable: true })
+  financialAdjustmentReason: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -41,6 +41,9 @@ export class FinancialMovement {
   @Column({ name: 'installment_id', type: 'uuid', nullable: true })
   installmentId: string;
 
+  @Column({ name: 'bill_id', type: 'uuid', nullable: true })
+  billId: string;
+
   @Column({ name: 'payment_method', type: 'varchar', length: 50, nullable: true })
   paymentMethod: string;
 

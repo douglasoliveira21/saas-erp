@@ -374,4 +374,164 @@ export class PurchasesService {
       userId,
     }));
   }
+
+  /**
+   * Generate financial records (bills + forecast movements) for a purchase.
+   * Supports installments with custom values/dates, allocations by cost center.
+   * Runs in a single transaction with rollback on failure.
+   */
+  async generateFinancial(purchaseId: string, dto: {
+    installments: Array<{ number: number; dueDate: string; value: number }>;
+    category: string;
+    observations?: string;
+    financialTotal?: number;
+    financialAdjustmentType?: string;
+    financialAdjustmentReason?: string;
+    allocations?: Array<{ costCenterId: string; chartAccountId?: string; contractId?: string; percentage: number }>;
+  }, userId: string): Promise<{ billGroupId: string; bills: any[]; movements: any[] }> {
+    const purchase = await this.purchasesRepo.findOne({ where: { id: purchaseId } });
+    if (!purchase) throw new NotFoundException('Compra não encontrada');
+    if (purchase.financialStatus === 'generated' || purchase.financialStatus === 'paid') {
+      throw new BadRequestException('Financeiro já gerado para esta compra');
+    }
+
+    // Validate installments sum
+    const totalFromInstallments = dto.installments.reduce((s, i) => s + Number(i.value), 0);
+    const financialTotal = dto.financialTotal ?? Number(purchase.totalValue);
+    const diff = Math.abs(totalFromInstallments - financialTotal);
+    if (diff > 0.01) {
+      throw new BadRequestException(`Soma das parcelas (${totalFromInstallments.toFixed(2)}) diferente do total financeiro (${financialTotal.toFixed(2)})`);
+    }
+
+    // Validate adjustment reason if total differs from purchase
+    if (dto.financialTotal && Math.abs(dto.financialTotal - Number(purchase.totalValue)) > 0.01) {
+      if (!dto.financialAdjustmentType || !dto.financialAdjustmentReason) {
+        throw new BadRequestException('Quando o total financeiro difere do valor fiscal, informe tipo e motivo do ajuste');
+      }
+    }
+
+    // Validate allocations sum = 100%
+    if (dto.allocations && dto.allocations.length > 0) {
+      const totalPct = dto.allocations.reduce((s, a) => s + Number(a.percentage), 0);
+      if (Math.abs(totalPct - 100) > 0.01) {
+        throw new BadRequestException(`Soma dos rateios (${totalPct.toFixed(2)}%) deve ser 100%`);
+      }
+    }
+
+    // Find or create supplier
+    let supplierId = purchase.supplierId;
+    if (!supplierId && purchase.supplierCnpj) {
+      const normalizedCnpj = (purchase.supplierCnpj || '').replace(/\D/g, '');
+      const existing = await this.purchasesRepo.manager.query(
+        `SELECT id FROM suppliers WHERE REPLACE(REPLACE(REPLACE(cpf_cnpj, '.', ''), '/', ''), '-', '') = $1 AND archived_at IS NULL LIMIT 1`,
+        [normalizedCnpj]
+      );
+      if (existing[0]) {
+        supplierId = existing[0].id;
+      } else {
+        const newSupplier = await this.purchasesRepo.manager.query(
+          `INSERT INTO suppliers (name, cpf_cnpj, origin, registration_status) VALUES ($1, $2, 'nfe_xml', 'pendente') RETURNING id`,
+          [purchase.supplierName || 'Fornecedor (XML)', normalizedCnpj]
+        );
+        supplierId = newSupplier[0]?.id;
+      }
+    }
+
+    if (!supplierId) throw new BadRequestException('Fornecedor não identificado. Vincule um fornecedor à compra.');
+
+    const billGroupId = `PUR-${purchaseId.substring(0, 8)}-${Date.now()}`;
+    const bills: any[] = [];
+    const movements: any[] = [];
+
+    // Execute in transaction
+    await this.purchasesRepo.manager.transaction(async manager => {
+      const totalInstallments = dto.installments.length;
+
+      for (const inst of dto.installments) {
+        // Check idempotency (UNIQUE index on purchase_id + installment_number)
+        const existingBill = await manager.query(
+          'SELECT id FROM bills WHERE purchase_id = $1 AND installment_number = $2 AND archived_at IS NULL',
+          [purchaseId, inst.number]
+        );
+        if (existingBill[0]) {
+          bills.push(existingBill[0]);
+          continue;
+        }
+
+        // Create bill
+        const billResult = await manager.query(
+          `INSERT INTO bills (supplier_id, description, value, due_date, status, category, installments, installment_number, purchase_id, bill_group_id, document_number, observations, created_by)
+           VALUES ($1, $2, $3, $4, 'pendente', $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING id`,
+          [
+            supplierId,
+            `NF ${purchase.invoiceNumber || ''} - ${purchase.description || 'Compra'}${totalInstallments > 1 ? ` (${inst.number}/${totalInstallments})` : ''}`,
+            inst.value,
+            inst.dueDate,
+            dto.category || 'compra_mercadoria',
+            totalInstallments,
+            inst.number,
+            purchaseId,
+            billGroupId,
+            purchase.invoiceNumber || null,
+            dto.observations || null,
+            userId,
+          ]
+        );
+        const billId = billResult[0]?.id;
+        bills.push({ id: billId, number: inst.number, value: inst.value, dueDate: inst.dueDate });
+
+        // Create forecast financial_movement for this bill
+        const movIdempotencyKey = `purchase-bill-forecast-${purchaseId}-${inst.number}`;
+        const movResult = await manager.query(
+          `INSERT INTO financial_movements (type, category, description, value, date, due_date, bill_id, reference_id, reference_type, is_forecast, idempotency_key, created_by)
+           VALUES ('despesa', $1, $2, $3, $4, $5, $6, $7, 'purchase', true, $8, $9)
+           RETURNING id`,
+          [
+            dto.category || 'compra_mercadoria',
+            `Previsão: NF ${purchase.invoiceNumber || ''} - ${purchase.supplierName || ''}${totalInstallments > 1 ? ` (${inst.number}/${totalInstallments})` : ''}`,
+            inst.value,
+            inst.dueDate,
+            inst.dueDate,
+            billId,
+            purchaseId,
+            movIdempotencyKey,
+            userId,
+          ]
+        );
+        movements.push({ id: movResult[0]?.id, billId, value: inst.value });
+
+        // Create allocations for this bill
+        if (dto.allocations && dto.allocations.length > 0) {
+          for (const alloc of dto.allocations) {
+            const allocValue = Math.round(inst.value * Number(alloc.percentage) / 100 * 100) / 100;
+            await manager.query(
+              `INSERT INTO bill_allocations (bill_id, cost_center_id, chart_account_id, contract_id, percentage, value, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [billId, alloc.costCenterId || null, alloc.chartAccountId || null, alloc.contractId || null, alloc.percentage, allocValue, userId]
+            );
+          }
+        }
+      }
+
+      // Update purchase financial status
+      await manager.query(
+        `UPDATE purchases SET financial_status = 'generated', financial_total = $1, financial_generated_at = NOW(), financial_generated_by = $2,
+         financial_adjustment_type = $3, financial_adjustment_reason = $4, supplier_id = $5
+         WHERE id = $6`,
+        [financialTotal, userId, dto.financialAdjustmentType || null, dto.financialAdjustmentReason || null, supplierId, purchaseId]
+      );
+    });
+
+    // Audit
+    await this.auditService.create({
+      action: 'purchase.generate_financial',
+      entity: 'purchases',
+      entityId: purchaseId,
+      newData: { billGroupId, totalInstallments: dto.installments.length, financialTotal, category: dto.category, allocations: dto.allocations },
+      userId,
+    });
+
+    return { billGroupId, bills, movements };
+  }
 }

@@ -42,6 +42,12 @@ export class Bill {
   @Column({ name: 'recurring_group_id', length: 100, nullable: true })
   recurringGroupId: string;
 
+  @Column({ name: 'purchase_id', type: 'uuid', nullable: true })
+  purchaseId: string;
+
+  @Column({ name: 'bill_group_id', length: 100, nullable: true })
+  billGroupId: string;
+
   @Column({ name: 'document_number', length: 100, nullable: true })
   documentNumber: string;
 

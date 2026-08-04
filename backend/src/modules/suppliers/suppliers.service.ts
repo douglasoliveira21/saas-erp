@@ -119,7 +119,47 @@ export class SuppliersService {
       bill.status = Number(bill.paidValue) >= Number(bill.value) ? 'pago' : 'parcial';
       if (paymentData?.paymentMethod) bill.paymentMethod = paymentData.paymentMethod;
       const saved = await repo.save(bill);
-      await manager.query('INSERT INTO bill_payments (bill_id,value,payment_method,idempotency_key,paid_at) VALUES ($1,$2,$3,$4,now())', [id, paidValue, paymentData?.paymentMethod || null, idempotencyKey || null]);
+
+      // Insert bill_payment record
+      const paymentResult = await manager.query(
+        'INSERT INTO bill_payments (bill_id,value,payment_method,idempotency_key,paid_at) VALUES ($1,$2,$3,$4,now()) RETURNING id',
+        [id, paidValue, paymentData?.paymentMethod || null, idempotencyKey || null]
+      );
+      const billPaymentId = paymentResult[0]?.id;
+
+      // Create realized financial_movement for this payment
+      const movIdempotencyKey = `bill-payment-${billPaymentId || id}-${Date.now()}`;
+      const existingMov = await manager.query('SELECT id FROM financial_movements WHERE idempotency_key=$1', [movIdempotencyKey]);
+      if (!existingMov[0]) {
+        const today = new Date().toISOString().split('T')[0];
+        await manager.query(
+          `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, idempotency_key, created_by)
+           VALUES ('despesa', $1, $2, $3, $4, $5, $6, 'bill_payment', $7, false, $8, $9)`,
+          [
+            bill.category || 'outros',
+            `Pgto: ${bill.description || 'Conta a pagar'}${bill.installments > 1 ? ` (${bill.installmentNumber}/${bill.installments})` : ''}`,
+            paidValue,
+            today,
+            id,
+            billPaymentId,
+            paymentData?.paymentMethod || null,
+            movIdempotencyKey,
+            null,
+          ]
+        );
+      }
+
+      // Update purchase financial_status if linked
+      if (bill.purchaseId) {
+        const allBills = await manager.query(
+          'SELECT status FROM bills WHERE purchase_id = $1 AND archived_at IS NULL', [bill.purchaseId]
+        );
+        const allPaid = allBills.every((b: any) => b.status === 'pago');
+        const somePaid = allBills.some((b: any) => ['pago', 'parcial'].includes(b.status));
+        const newStatus = allPaid ? 'paid' : somePaid ? 'partially_paid' : 'generated';
+        await manager.query('UPDATE purchases SET financial_status = $1 WHERE id = $2', [newStatus, bill.purchaseId]);
+      }
+
       return saved;
     });
   }

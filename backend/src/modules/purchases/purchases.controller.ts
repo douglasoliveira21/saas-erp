@@ -136,6 +136,12 @@ export class PurchasesController {
     return this.service.returnPurchase(id, req.user.id, body.reason || 'Devolução');
   }
 
+  @Post(':id/generate-financial')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  generateFinancial(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.service.generateFinancial(id, body, req.user.id);
+  }
+
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   cancel(@Param('id') id: string) {
