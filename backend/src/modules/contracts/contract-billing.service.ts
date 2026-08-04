@@ -63,10 +63,9 @@ export class ContractBillingService implements OnModuleInit {
             dueDate.setMonth(dueDate.getMonth() + 1);
           }
 
-          // Check if we're exactly 7 days before the due date
-          const diffDays = Math.ceil((dueDate.getTime() - brToday.getTime()) / (1000 * 60 * 60 * 24));
-
-          if (diffDays !== 7) continue; // Not time to bill yet
+          // Check if today is the issue day for this contract
+          const issueDay = (contract as any).issueDay || 3;
+          if (currentDay !== issueDay) continue; // Not the issue day
 
           // Check if already billed for this period
           const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;

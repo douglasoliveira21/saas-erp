@@ -52,6 +52,7 @@ export class ContractsController {
       adjustmentPercentage: body.adjustmentPercentage ? parseFloat(body.adjustmentPercentage) : null,
       autoCharge: body.autoCharge === 'true' || body.autoCharge === true,
       chargeDay: body.chargeDay ? parseInt(body.chargeDay) : 10,
+      issueDay: body.issueDay ? parseInt(body.issueDay) : 3,
       equipments: body.equipments || null,
       createdBy: req.user.id,
     };
@@ -113,6 +114,7 @@ export class ContractsController {
     if (dto.slaOverageRate !== undefined) dto.slaOverageRate = parseFloat(dto.slaOverageRate) || 0;
     if (dto.adjustmentPercentage) dto.adjustmentPercentage = parseFloat(dto.adjustmentPercentage);
     if (dto.chargeDay) dto.chargeDay = parseInt(dto.chargeDay);
+    if (dto.issueDay) dto.issueDay = parseInt(dto.issueDay);
     if (dto.autoCharge !== undefined) dto.autoCharge = dto.autoCharge === 'true' || dto.autoCharge === true;
     if (file) {
       dto.fileName = file.originalname;

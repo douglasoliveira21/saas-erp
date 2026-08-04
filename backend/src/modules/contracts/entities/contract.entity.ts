@@ -71,6 +71,9 @@ export class Contract {
   @Column({ name: 'charge_day', type: 'int', nullable: true, default: 10 })
   chargeDay: number;
 
+  @Column({ name: 'issue_day', type: 'int', nullable: true, default: 3 })
+  issueDay: number;
+
   @Column({ type: 'text', nullable: true })
   equipments: string;
 

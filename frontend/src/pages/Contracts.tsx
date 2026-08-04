@@ -47,7 +47,7 @@ export function Contracts() {
   const [editing, setEditing] = useState<Contract | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
+  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', equipments: '' })
   const [file, setFile] = useState<File | null>(null)
   const [showRenewModal, setShowRenewModal] = useState(false)
   const [renewingContract, setRenewingContract] = useState<Contract | null>(null)
@@ -67,13 +67,13 @@ export function Contracts() {
 
   function openNew() {
     setEditing(null); setFile(null)
-    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', equipments: '' })
+    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', equipments: '' })
     setError(''); setShowModal(true)
   }
 
   function openEdit(c: Contract) {
     setEditing(c); setFile(null)
-    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', equipments: c.equipments || '' })
+    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', issueDay: (c as any).issueDay ? String((c as any).issueDay) : '3', equipments: c.equipments || '' })
     setError(''); setShowModal(true)
   }
 
@@ -99,6 +99,7 @@ export function Contracts() {
       if (form.adjustmentPercentage) fd.append('adjustmentPercentage', form.adjustmentPercentage)
       fd.append('autoCharge', String(form.autoCharge))
       fd.append('chargeDay', form.chargeDay)
+      if (form.autoCharge) fd.append('issueDay', form.issueDay || '3')
       if (form.equipments) fd.append('equipments', form.equipments)
       if (file) fd.append('file', file)
 
@@ -430,22 +431,35 @@ export function Contracts() {
                 <p className="text-xs text-gray-400 mt-1">Equipamentos que estão cobertos pelo contrato de suporte</p>
               </div>
 
-              {/* Cobrança Automática */}
+              {/* Cobrança e Vencimento */}
               <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <h3 className="text-sm font-semibold text-green-700 dark:text-green-400 mb-3">Cobrança Automática</h3>
+                <h3 className="text-sm font-semibold text-green-700 dark:text-green-400 mb-3">Cobrança</h3>
                 <div className="flex items-center gap-3 mb-3">
                   <input type="checkbox" id="autoCharge" checked={form.autoCharge} onChange={e => setForm({ ...form, autoCharge: e.target.checked })} className="w-4 h-4 text-primary-600 rounded" />
-                  <label htmlFor="autoCharge" className="text-sm text-gray-700 dark:text-gray-300">Ativar cobrança automática mensal</label>
+                  <label htmlFor="autoCharge" className="text-sm text-gray-700 dark:text-gray-300">Ativar emissão automática de NF + Boleto mensal</label>
                 </div>
-                {form.autoCharge && (
-                  <div className="ml-7">
-                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Dia da Cobrança</label>
-                    <select className="input w-32" value={form.chargeDay} onChange={e => setForm({ ...form, chargeDay: e.target.value })}>
-                      {[1,5,10,15,20,25,28].map(d => <option key={d} value={String(d)}>Dia {d}</option>)}
+
+                <div className="grid grid-cols-2 gap-4 mt-3">
+                  {/* Dia da Emissão - só aparece se automático */}
+                  {form.autoCharge && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Dia da Emissão (NF)</label>
+                      <select className="input" value={form.issueDay || '3'} onChange={e => setForm({ ...form, issueDay: e.target.value })}>
+                        {[1,2,3,4,5,6,7,8,9,10,15,20,25].map(d => <option key={d} value={String(d)}>Dia {d}</option>)}
+                      </select>
+                      <p className="text-xs text-gray-400 mt-1">Dia do mês que o sistema emitirá a NF e o boleto automaticamente</p>
+                    </div>
+                  )}
+
+                  {/* Dia do Vencimento - sempre aparece */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Dia do Vencimento (Boleto)</label>
+                    <select className="input" value={form.chargeDay} onChange={e => setForm({ ...form, chargeDay: e.target.value })}>
+                      {[5,10,15,20,25,28].map(d => <option key={d} value={String(d)}>Dia {d}</option>)}
                     </select>
-                    <p className="text-xs text-gray-400 mt-1">O sistema gerará a cobrança automaticamente neste dia de cada mês</p>
+                    <p className="text-xs text-gray-400 mt-1">{form.autoCharge ? 'Vencimento do boleto gerado automaticamente' : 'Vencimento do boleto ao gerar manualmente'}</p>
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Upload */}
