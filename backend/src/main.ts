@@ -48,6 +48,9 @@ async function bootstrap() {
     `).catch(() => {});
     // Unique constraint for idempotency
     await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_purchase_installment ON bills(purchase_id, installment_number) WHERE purchase_id IS NOT NULL`).catch(() => {});
+    // contract_billings unique constraint + updated_at column
+    await ds.query(`ALTER TABLE contract_billings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
+    await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contract_billings_period ON contract_billings(contract_id, billing_period)`).catch(() => {});
     // bill_payments table (ensure exists)
     await ds.query(`
       CREATE TABLE IF NOT EXISTS bill_payments (

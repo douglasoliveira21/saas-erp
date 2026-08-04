@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Request, UseInterceptors, UploadedFile, Res } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -132,6 +132,12 @@ export class ContractsController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getBillings(@Param('id') id: string) {
     return this.billingService.getBillingHistory(id);
+  }
+
+  @Get(':id/billing-status')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getBillingStatus(@Param('id') id: string, @Query('period') period: string) {
+    return this.billingService.getBillingStatusForPeriod(id, period);
   }
 
   @Post(':id/billing')

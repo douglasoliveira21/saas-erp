@@ -54,7 +54,7 @@ export function Contracts() {
   const [renewMonths, setRenewMonths] = useState('12')
   const [renewAdjust, setRenewAdjust] = useState('')
   const [renewSaving, setRenewSaving] = useState(false)
-  const [billings, setBillings] = useState<Record<string, any[]>>({})
+  const [billingStatus, setBillingStatus] = useState<Record<string, { hasNf: boolean; hasBoleto: boolean; period: string }>>({})
 
   useEffect(() => { load() }, [])
 
@@ -62,31 +62,30 @@ export function Contracts() {
     try {
       const [c, cust] = await Promise.all([api.get('/contracts'), api.get('/customers')])
       setContracts(c.data); setCustomers(cust.data)
-      // Load billings for active contracts
+      // Load billing status for active contracts
       const activeContracts = c.data.filter((ct: any) => ct.status === 'ativo')
-      const billingsMap: Record<string, any[]> = {}
+      const statusMap: Record<string, { hasNf: boolean; hasBoleto: boolean; period: string }> = {}
+      const now = new Date()
+      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
       for (const ct of activeContracts) {
         try {
-          const res = await api.get(`/contracts/${ct.id}/billings`)
-          billingsMap[ct.id] = res.data || []
-        } catch { billingsMap[ct.id] = [] }
+          const res = await api.get(`/contracts/${ct.id}/billing-status?period=${currentPeriod}`)
+          statusMap[ct.id] = res.data
+        } catch { statusMap[ct.id] = { hasNf: false, hasBoleto: false, period: currentPeriod } }
       }
-      setBillings(billingsMap)
+      setBillingStatus(statusMap)
     } catch { setError('Erro ao carregar contratos') }
     finally { setLoading(false) }
   }
 
-  function getCurrentMonthBilling(contractId: string) {
-    const now = new Date()
-    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const contractBillings = billings[contractId] || []
-    return contractBillings.find((b: any) => b.billing_period === currentPeriod || b.billingPeriod === currentPeriod)
+  function hasBillingReady(contractId: string): boolean {
+    const status = billingStatus[contractId]
+    return !!(status?.hasNf && status?.hasBoleto)
   }
 
-  function hasBillingReady(contractId: string): boolean {
-    const billing = getCurrentMonthBilling(contractId)
-    if (!billing) return false
-    return !!(billing.invoice_id || billing.invoiceId) && !!(billing.boleto_code || billing.boletoCode)
+  function getCurrentPeriod(): string {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   }
 
   function openNew() {
@@ -190,6 +189,12 @@ export function Contracts() {
     try {
       const res = await api.post(`/contracts/${id}/billing/nfse`)
       alert(`NFS-e gerada!\n\nStatus: ${res.data.status || 'Processando'}\nNúmero: ${res.data.number || '-'}\nPeríodo: ${res.data.billingPeriod}`)
+      // Refresh billing status
+      const currentPeriod = getCurrentPeriod()
+      try {
+        const statusRes = await api.get(`/contracts/${id}/billing-status?period=${currentPeriod}`)
+        setBillingStatus(prev => ({ ...prev, [id]: statusRes.data }))
+      } catch {}
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao gerar NFS-e')
       alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Nota Fiscal'))
@@ -203,7 +208,12 @@ export function Contracts() {
     try {
       const res = await api.post(`/contracts/${id}/billing/boleto`)
       alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor: R$ ${Number(res.data.value).toFixed(2)}`)
-      load()
+      // Refresh billing status
+      const currentPeriod = getCurrentPeriod()
+      try {
+        const statusRes = await api.get(`/contracts/${id}/billing-status?period=${currentPeriod}`)
+        setBillingStatus(prev => ({ ...prev, [id]: statusRes.data }))
+      } catch {}
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao gerar boleto')
       alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Boleto'))
@@ -212,12 +222,11 @@ export function Contracts() {
 
   async function sendBillingEmail(id: string) {
     const contract = contracts.find(c => c.id === id)
-    const billing = getCurrentMonthBilling(id)
-    if (!billing) { alert('Nenhuma cobrança encontrada para o mês atual'); return }
-    if (!confirm(`Enviar NF + Boleto por email para ${contract?.customer?.name}?\n\nPeríodo: ${billing.billing_period || billing.billingPeriod}`)) return
+    const period = getCurrentPeriod()
+    if (!confirm(`Enviar NF + Boleto por email para ${contract?.customer?.name}?\n\nPeríodo: ${period}`)) return
     setError('')
     try {
-      await api.post(`/contracts/${id}/billing/send`, { billingPeriod: billing.billing_period || billing.billingPeriod })
+      await api.post(`/contracts/${id}/billing/send`, { billingPeriod: period })
       alert('Email enviado com sucesso! NF e Boleto em anexo.')
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao enviar email')
@@ -348,8 +357,8 @@ export function Contracts() {
               </div>
               {canManage && (
                 <div className="flex gap-1 flex-shrink-0">
-                  {c.status === 'ativo' && <button onClick={() => generateNfse(c.id)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded" title="Gerar Nota Fiscal"><FileText className="w-4 h-4" /></button>}
-                  {c.status === 'ativo' && <button onClick={() => generateBoleto(c.id)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><DollarSign className="w-4 h-4" /></button>}
+                  {c.status === 'ativo' && <button onClick={() => generateNfse(c.id)} className={`p-1.5 rounded ${billingStatus[c.id]?.hasNf ? 'text-green-600 hover:bg-green-50' : 'text-purple-600 hover:bg-purple-50'}`} title={billingStatus[c.id]?.hasNf ? `NFS-e já emitida (${billingStatus[c.id]?.period})` : 'Gerar Nota Fiscal'}><FileText className="w-4 h-4" /></button>}
+                  {c.status === 'ativo' && <button onClick={() => generateBoleto(c.id)} className={`p-1.5 rounded ${billingStatus[c.id]?.hasBoleto ? 'text-green-600 hover:bg-green-50' : 'text-orange-600 hover:bg-orange-50'}`} title={billingStatus[c.id]?.hasBoleto ? `Boleto já emitido (${billingStatus[c.id]?.period})` : 'Gerar Boleto'}><DollarSign className="w-4 h-4" /></button>}
                   {c.status === 'ativo' && (
                     <button
                       onClick={() => sendBillingEmail(c.id)}

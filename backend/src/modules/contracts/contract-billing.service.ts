@@ -315,6 +315,65 @@ export class ContractBillingService implements OnModuleInit {
   }
 
   /**
+   * Check if NF and Boleto exist for a contract in a given period.
+   * Checks both contract_billings table AND directly in invoices/payments.
+   */
+  async getBillingStatusForPeriod(contractId: string, period: string): Promise<{ hasNf: boolean; hasBoleto: boolean; invoiceId: string | null; boletoCode: string | null; period: string }> {
+    if (!period) {
+      const now = new Date();
+      period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const [year, month] = period.split('-').map(Number);
+    const startDate = `${period}-01`;
+    const nextMonthStart = new Date(year, month, 1).toISOString().split('T')[0];
+
+    // Check contract_billings first
+    const billingRecord = await this.dataSource.query(
+      `SELECT invoice_id, boleto_code FROM contract_billings WHERE contract_id = $1 AND billing_period = $2 LIMIT 1`,
+      [contractId, period]
+    ).catch(() => []);
+
+    if (billingRecord[0]) {
+      return {
+        hasNf: !!billingRecord[0].invoice_id,
+        hasBoleto: !!billingRecord[0].boleto_code,
+        invoiceId: billingRecord[0].invoice_id || null,
+        boletoCode: billingRecord[0].boleto_code || null,
+        period,
+      };
+    }
+
+    // Fallback: check invoices and payments directly by date + customer
+    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
+    if (!contract || !contract.customer) return { hasNf: false, hasBoleto: false, invoiceId: null, boletoCode: null, period };
+
+    const customerDoc = (contract.customer.cpfCnpj || '').replace(/\D/g, '');
+
+    // Check if there's an authorized NFS-e for this customer in this month
+    const invoices = await this.dataSource.query(
+      `SELECT id FROM invoices WHERE recipient_cnpj = $1 AND type = 'nfse' AND status = 'autorizada'
+       AND created_at >= $2 AND created_at < $3 LIMIT 1`,
+      [customerDoc || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00']
+    ).catch(() => []);
+
+    // Check if there's a boleto payment for this customer in this month
+    const payments = await this.dataSource.query(
+      `SELECT id, codigo_solicitacao FROM payments WHERE customer_id = $1 AND type = 'boleto' AND status != 'cancelado'
+       AND created_at >= $2 AND created_at < $3 LIMIT 1`,
+      [contract.customerId || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00']
+    ).catch(() => []);
+
+    return {
+      hasNf: invoices.length > 0,
+      hasBoleto: payments.length > 0,
+      invoiceId: invoices[0]?.id || null,
+      boletoCode: payments[0]?.codigo_solicitacao || null,
+      period,
+    };
+  }
+
+  /**
    * Manual trigger for a specific contract
    */
   async manualBilling(contractId: string): Promise<any> {
@@ -356,6 +415,12 @@ export class ContractBillingService implements OnModuleInit {
     const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
     const description = contract.description || contract.title || 'Prestação de serviços de TI';
 
+    // Check if NFS-e already exists for this period (prevent duplicate)
+    const existingStatus = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    if (existingStatus.hasNf) {
+      throw new Error(`Já existe uma NFS-e emitida para o período ${billingPeriod}. Não é possível emitir novamente.`);
+    }
+
     const certResult = await this.dataSource.query(`SELECT id FROM certificates WHERE is_active = true LIMIT 1`);
     if (certResult.length === 0) throw new Error('Nenhum certificado digital ativo. Configure em Módulo Fiscal > Certificados.');
 
@@ -386,6 +451,24 @@ export class ContractBillingService implements OnModuleInit {
       recipientCMun: (customer as any).cityCode || '',
     }, certId);
 
+    // Update or create contract_billings record for this period
+    await this.dataSource.query(`
+      INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, invoice_id, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'emitido')
+      ON CONFLICT (contract_id, billing_period) DO UPDATE SET invoice_id = $6, updated_at = NOW()
+    `, [contract.id, customer.id, billingPeriod, dueDate.toISOString().split('T')[0], monthlyValue, invoiceId]).catch(async () => {
+      // If ON CONFLICT fails (no unique constraint yet), try upsert manually
+      const existing = await this.dataSource.query(`SELECT id FROM contract_billings WHERE contract_id = $1 AND billing_period = $2`, [contract.id, billingPeriod]);
+      if (existing[0]) {
+        await this.dataSource.query(`UPDATE contract_billings SET invoice_id = $1 WHERE id = $2`, [invoiceId, existing[0].id]);
+      } else {
+        await this.dataSource.query(
+          `INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, invoice_id, status) VALUES ($1, $2, $3, $4, $5, $6, 'emitido')`,
+          [contract.id, customer.id, billingPeriod, dueDate.toISOString().split('T')[0], monthlyValue, invoiceId]
+        );
+      }
+    });
+
     return { invoiceId, status: nfseResult.status, number: nfseResult.number, billingPeriod, value: monthlyValue };
   }
 
@@ -413,6 +496,12 @@ export class ContractBillingService implements OnModuleInit {
     if (dueDate <= now) dueDate.setMonth(dueDate.getMonth() + 1);
     const dueDateStr = dueDate.toISOString().split('T')[0];
     const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
+
+    // Check if Boleto already exists for this period (prevent duplicate)
+    const existingStatus = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    if (existingStatus.hasBoleto) {
+      throw new Error(`Já existe um boleto emitido para o período ${billingPeriod}. Não é possível emitir novamente.`);
+    }
 
     const tipoPessoa = (customer.cpfCnpj || '').replace(/\D/g, '').length > 11 ? 'JURIDICA' : 'FISICA';
 
@@ -455,32 +544,48 @@ export class ContractBillingService implements OnModuleInit {
       }
     }
 
+    // Update or create contract_billings record for this period
+    await this.dataSource.query(`
+      INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'emitido')
+      ON CONFLICT (contract_id, billing_period) DO UPDATE SET boleto_code = $6, updated_at = NOW()
+    `, [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, boletoCode]).catch(async () => {
+      // If ON CONFLICT fails (no unique constraint yet), try upsert manually
+      const existingBilling = await this.dataSource.query(`SELECT id FROM contract_billings WHERE contract_id = $1 AND billing_period = $2`, [contract.id, billingPeriod]);
+      if (existingBilling[0]) {
+        await this.dataSource.query(`UPDATE contract_billings SET boleto_code = $1 WHERE id = $2`, [boletoCode, existingBilling[0].id]);
+      } else {
+        await this.dataSource.query(
+          `INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code, status) VALUES ($1, $2, $3, $4, $5, $6, 'emitido')`,
+          [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, boletoCode]
+        );
+      }
+    });
+
     return { boletoCode, billingPeriod, value: monthlyValue, dueDate: dueDateStr };
   }
 
   /**
-   * Send billing email with NF XML + Boleto PDF for a specific period
+   * Send billing email with NF XML + Boleto PDF for a specific period.
+   * Works both with contract_billings records AND directly from invoices/payments.
    */
   async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
     const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
     if (!contract) throw new Error('Contrato não encontrado');
     if (!contract.customer?.email) throw new Error('Cliente sem email cadastrado');
 
-    // Find billing record
-    const billingRecords = await this.dataSource.query(
-      `SELECT * FROM contract_billings WHERE contract_id = $1 AND billing_period = $2 ORDER BY created_at DESC LIMIT 1`,
-      [contractId, billingPeriod]
-    ).catch(() => []);
-
-    const billing = billingRecords[0];
-    if (!billing) throw new Error(`Nenhuma cobrança encontrada para o período ${billingPeriod}`);
+    // First try to get billing status (which handles both contract_billings and fallback)
+    const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    if (!status.hasNf && !status.hasBoleto) {
+      throw new Error(`Nenhuma NF ou Boleto encontrado para o período ${billingPeriod}. Gere a NF e o Boleto antes de enviar.`);
+    }
 
     const attachments: any[] = [];
 
-    // Get NFS-e XML if invoice exists
-    if (billing.invoice_id) {
+    // Get NFS-e XML/PDF from invoiceId (either from contract_billings or direct lookup)
+    if (status.invoiceId) {
       const invoice = await this.dataSource.query(
-        `SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [billing.invoice_id]
+        `SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [status.invoiceId]
       );
       if (invoice[0]) {
         const xml = invoice[0].xml_authorized || invoice[0].xml_sent;
@@ -503,18 +608,70 @@ export class ContractBillingService implements OnModuleInit {
           } catch { /* PDF not available */ }
         }
       }
+    } else if (status.hasNf) {
+      // Fallback: find NF directly by customer doc + period
+      const customerDoc = (contract.customer.cpfCnpj || '').replace(/\D/g, '');
+      const [year, month] = billingPeriod.split('-').map(Number);
+      const startDate = `${billingPeriod}-01T00:00:00`;
+      const nextMonthStart = new Date(year, month, 1).toISOString().split('T')[0] + 'T00:00:00';
+      const invoices = await this.dataSource.query(
+        `SELECT id, xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices
+         WHERE recipient_cnpj = $1 AND type = 'nfse' AND status = 'autorizada'
+         AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC LIMIT 1`,
+        [customerDoc, startDate, nextMonthStart]
+      ).catch(() => []);
+      if (invoices[0]) {
+        const xml = invoices[0].xml_authorized || invoices[0].xml_sent;
+        if (xml) {
+          attachments.push({
+            filename: `NFSe_${invoices[0].number || 'nota'}_serie${invoices[0].series || 1}.xml`,
+            content: Buffer.from(xml, 'utf-8'),
+            contentType: 'application/xml',
+          });
+        }
+        if (invoices[0].access_key && invoices[0].certificate_id) {
+          try {
+            const pdf = await this.nfseService.downloadPdf(invoices[0].access_key, invoices[0].certificate_id);
+            attachments.push({
+              filename: `NFSe_${invoices[0].number || 'nota'}.pdf`,
+              content: pdf,
+              contentType: 'application/pdf',
+            });
+          } catch { /* PDF not available */ }
+        }
+      }
     }
 
-    // Get Boleto PDF if code exists
-    if (billing.boleto_code) {
+    // Get Boleto PDF from boletoCode
+    if (status.boletoCode) {
       try {
-        const pdf = await this.interService.getBoletoPdf(billing.boleto_code);
+        const pdf = await this.interService.getBoletoPdf(status.boletoCode);
         attachments.push({
           filename: `boleto-${billingPeriod}.pdf`,
           content: pdf,
           contentType: 'application/pdf',
         });
       } catch { /* Boleto PDF not available */ }
+    } else if (status.hasBoleto) {
+      // Fallback: find boleto by customer + period
+      const [year, month] = billingPeriod.split('-').map(Number);
+      const startDate = `${billingPeriod}-01T00:00:00`;
+      const nextMonthStart = new Date(year, month, 1).toISOString().split('T')[0] + 'T00:00:00';
+      const payments = await this.dataSource.query(
+        `SELECT codigo_solicitacao FROM payments WHERE customer_id = $1 AND type = 'boleto' AND status != 'cancelado'
+         AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC LIMIT 1`,
+        [contract.customerId, startDate, nextMonthStart]
+      ).catch(() => []);
+      if (payments[0]?.codigo_solicitacao) {
+        try {
+          const pdf = await this.interService.getBoletoPdf(payments[0].codigo_solicitacao);
+          attachments.push({
+            filename: `boleto-${billingPeriod}.pdf`,
+            content: pdf,
+            contentType: 'application/pdf',
+          });
+        } catch { /* Boleto PDF not available */ }
+      }
     }
 
     if (attachments.length === 0) throw new Error('Nenhum documento disponível para envio (NF ou Boleto não encontrados)');
@@ -530,7 +687,7 @@ export class ContractBillingService implements OnModuleInit {
           <table style="width:100%;margin:20px 0;border-collapse:collapse">
             <tr><td style="padding:8px;color:#6b7280">Contrato:</td><td style="padding:8px;font-weight:bold">${contract.title}</td></tr>
             <tr><td style="padding:8px;color:#6b7280">Referência:</td><td style="padding:8px;font-weight:bold">${billingPeriod}</td></tr>
-            <tr><td style="padding:8px;color:#6b7280">Valor:</td><td style="padding:8px;font-weight:bold;color:#059669">R$ ${Number(billing.value || contract.monthlyValue || 0).toFixed(2)}</td></tr>
+            <tr><td style="padding:8px;color:#6b7280">Valor:</td><td style="padding:8px;font-weight:bold;color:#059669">R$ ${Number(contract.monthlyValue || contract.totalValue || 0).toFixed(2)}</td></tr>
           </table>
           <p style="color:#6b7280;font-size:14px">Efetue o pagamento até a data de vencimento.</p>
           <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
