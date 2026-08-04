@@ -47,7 +47,7 @@ export function Contracts() {
   const [editing, setEditing] = useState<Contract | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', equipments: '' })
+  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', equipments: '' })
   const [file, setFile] = useState<File | null>(null)
   const [showRenewModal, setShowRenewModal] = useState(false)
   const [renewingContract, setRenewingContract] = useState<Contract | null>(null)
@@ -67,7 +67,7 @@ export function Contracts() {
 
   function openNew() {
     setEditing(null); setFile(null)
-    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', equipments: '' })
+    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', equipments: '' })
     setError(''); setShowModal(true)
   }
 
@@ -440,24 +440,49 @@ export function Contracts() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mt-3">
-                  {/* Dia da Emissão - só aparece se automático */}
                   {form.autoCharge && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Dia da Emissão (NF)</label>
-                      <select className="input" value={form.issueDay || '3'} onChange={e => setForm({ ...form, issueDay: e.target.value })}>
-                        {[1,2,3,4,5,6,7,8,9,10,15,20,25].map(d => <option key={d} value={String(d)}>Dia {d}</option>)}
-                      </select>
-                      <p className="text-xs text-gray-400 mt-1">Dia do mês que o sistema emitirá a NF e o boleto automaticamente</p>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Data da Emissão (NF)</label>
+                      <input
+                        type="date"
+                        className="input"
+                        value={form.issueDateFull || ''}
+                        onChange={e => {
+                          const date = e.target.value
+                          setForm({ ...form, issueDateFull: date, issueDay: date ? String(new Date(date + 'T12:00:00').getDate()) : form.issueDay })
+                        }}
+                      />
+                      {form.issueDateFull && (
+                        <p className="text-xs text-green-600 mt-1 font-medium">
+                          Emissão recorrente: todo dia {new Date(form.issueDateFull + 'T12:00:00').getDate()} de cada mês
+                        </p>
+                      )}
+                      {!form.issueDateFull && (
+                        <p className="text-xs text-gray-400 mt-1">Dia do mês que o sistema emitirá a NF e o boleto automaticamente</p>
+                      )}
                     </div>
                   )}
 
                   {/* Dia do Vencimento - sempre aparece */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Dia do Vencimento (Boleto)</label>
-                    <select className="input" value={form.chargeDay} onChange={e => setForm({ ...form, chargeDay: e.target.value })}>
-                      {[5,10,15,20,25,28].map(d => <option key={d} value={String(d)}>Dia {d}</option>)}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">{form.autoCharge ? 'Vencimento do boleto gerado automaticamente' : 'Vencimento do boleto ao gerar manualmente'}</p>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Data de Vencimento</label>
+                    <input
+                      type="date"
+                      className="input"
+                      value={form.chargeDateFull || ''}
+                      onChange={e => {
+                        const date = e.target.value
+                        setForm({ ...form, chargeDateFull: date, chargeDay: date ? String(new Date(date + 'T12:00:00').getDate()) : form.chargeDay })
+                      }}
+                    />
+                    {form.chargeDateFull && (
+                      <p className="text-xs text-green-600 mt-1 font-medium">
+                        Vencimento recorrente: todo dia {new Date(form.chargeDateFull + 'T12:00:00').getDate()} de cada mês
+                      </p>
+                    )}
+                    {!form.chargeDateFull && (
+                      <p className="text-xs text-gray-400 mt-1">{form.autoCharge ? 'Vencimento do boleto gerado automaticamente' : 'Selecione a data do primeiro vencimento'}</p>
+                    )}
                   </div>
                 </div>
               </div>
