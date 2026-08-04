@@ -152,6 +152,12 @@ export class ContractsController {
     return this.billingService.manualBoleto(id);
   }
 
+  @Post(':id/billing/send')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendBillingEmail(@Param('id') id: string, @Body() body: any) {
+    return this.billingService.sendBillingEmail(id, body.billingPeriod);
+  }
+
   @Post('billing/check')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   runBillingCheck() {

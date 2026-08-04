@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Search, Edit, Trash2, X, Check, FileText, Download, Clock, AlertTriangle, RefreshCw, Bell, Monitor, DollarSign } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, X, Check, FileText, Download, Clock, AlertTriangle, RefreshCw, Bell, Monitor, DollarSign, Send } from 'lucide-react'
 
 interface Contract {
   id: string
@@ -54,6 +54,7 @@ export function Contracts() {
   const [renewMonths, setRenewMonths] = useState('12')
   const [renewAdjust, setRenewAdjust] = useState('')
   const [renewSaving, setRenewSaving] = useState(false)
+  const [billings, setBillings] = useState<Record<string, any[]>>({})
 
   useEffect(() => { load() }, [])
 
@@ -61,8 +62,31 @@ export function Contracts() {
     try {
       const [c, cust] = await Promise.all([api.get('/contracts'), api.get('/customers')])
       setContracts(c.data); setCustomers(cust.data)
+      // Load billings for active contracts
+      const activeContracts = c.data.filter((ct: any) => ct.status === 'ativo')
+      const billingsMap: Record<string, any[]> = {}
+      for (const ct of activeContracts) {
+        try {
+          const res = await api.get(`/contracts/${ct.id}/billings`)
+          billingsMap[ct.id] = res.data || []
+        } catch { billingsMap[ct.id] = [] }
+      }
+      setBillings(billingsMap)
     } catch { setError('Erro ao carregar contratos') }
     finally { setLoading(false) }
+  }
+
+  function getCurrentMonthBilling(contractId: string) {
+    const now = new Date()
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const contractBillings = billings[contractId] || []
+    return contractBillings.find((b: any) => b.billing_period === currentPeriod || b.billingPeriod === currentPeriod)
+  }
+
+  function hasBillingReady(contractId: string): boolean {
+    const billing = getCurrentMonthBilling(contractId)
+    if (!billing) return false
+    return !!(billing.invoice_id || billing.invoiceId) && !!(billing.boleto_code || billing.boletoCode)
   }
 
   function openNew() {
@@ -179,9 +203,25 @@ export function Contracts() {
     try {
       const res = await api.post(`/contracts/${id}/billing/boleto`)
       alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor: R$ ${Number(res.data.value).toFixed(2)}`)
+      load()
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao gerar boleto')
       alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Boleto'))
+    }
+  }
+
+  async function sendBillingEmail(id: string) {
+    const contract = contracts.find(c => c.id === id)
+    const billing = getCurrentMonthBilling(id)
+    if (!billing) { alert('Nenhuma cobrança encontrada para o mês atual'); return }
+    if (!confirm(`Enviar NF + Boleto por email para ${contract?.customer?.name}?\n\nPeríodo: ${billing.billing_period || billing.billingPeriod}`)) return
+    setError('')
+    try {
+      await api.post(`/contracts/${id}/billing/send`, { billingPeriod: billing.billing_period || billing.billingPeriod })
+      alert('Email enviado com sucesso! NF e Boleto em anexo.')
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao enviar email')
+      alert('Erro: ' + (e.response?.data?.message || 'Falha ao enviar'))
     }
   }
 
@@ -310,6 +350,16 @@ export function Contracts() {
                 <div className="flex gap-1 flex-shrink-0">
                   {c.status === 'ativo' && <button onClick={() => generateNfse(c.id)} className="p-1.5 text-purple-600 hover:bg-purple-50 rounded" title="Gerar Nota Fiscal"><FileText className="w-4 h-4" /></button>}
                   {c.status === 'ativo' && <button onClick={() => generateBoleto(c.id)} className="p-1.5 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><DollarSign className="w-4 h-4" /></button>}
+                  {c.status === 'ativo' && (
+                    <button
+                      onClick={() => sendBillingEmail(c.id)}
+                      disabled={!hasBillingReady(c.id)}
+                      className={`p-1.5 rounded ${hasBillingReady(c.id) ? 'text-cyan-600 hover:bg-cyan-50' : 'text-gray-300 cursor-not-allowed'}`}
+                      title={hasBillingReady(c.id) ? 'Enviar NF + Boleto por email' : 'Gere NF e Boleto primeiro para habilitar envio'}
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  )}
                   {c.status === 'ativo' && <button onClick={() => openRenew(c)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Renovar"><RefreshCw className="w-4 h-4" /></button>}
                   <button onClick={() => openEdit(c)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
                   {isAdmin && <button onClick={() => remove(c.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>}

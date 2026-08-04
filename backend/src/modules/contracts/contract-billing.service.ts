@@ -457,4 +457,95 @@ export class ContractBillingService implements OnModuleInit {
 
     return { boletoCode, billingPeriod, value: monthlyValue, dueDate: dueDateStr };
   }
+
+  /**
+   * Send billing email with NF XML + Boleto PDF for a specific period
+   */
+  async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
+    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
+    if (!contract) throw new Error('Contrato não encontrado');
+    if (!contract.customer?.email) throw new Error('Cliente sem email cadastrado');
+
+    // Find billing record
+    const billingRecords = await this.dataSource.query(
+      `SELECT * FROM contract_billings WHERE contract_id = $1 AND billing_period = $2 ORDER BY created_at DESC LIMIT 1`,
+      [contractId, billingPeriod]
+    ).catch(() => []);
+
+    const billing = billingRecords[0];
+    if (!billing) throw new Error(`Nenhuma cobrança encontrada para o período ${billingPeriod}`);
+
+    const attachments: any[] = [];
+
+    // Get NFS-e XML if invoice exists
+    if (billing.invoice_id) {
+      const invoice = await this.dataSource.query(
+        `SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [billing.invoice_id]
+      );
+      if (invoice[0]) {
+        const xml = invoice[0].xml_authorized || invoice[0].xml_sent;
+        if (xml) {
+          attachments.push({
+            filename: `NFSe_${invoice[0].number || 'nota'}_serie${invoice[0].series || 1}.xml`,
+            content: Buffer.from(xml, 'utf-8'),
+            contentType: 'application/xml',
+          });
+        }
+        // Try to get PDF from Cidade360
+        if (invoice[0].access_key && invoice[0].certificate_id) {
+          try {
+            const pdf = await this.nfseService.downloadPdf(invoice[0].access_key, invoice[0].certificate_id);
+            attachments.push({
+              filename: `NFSe_${invoice[0].number || 'nota'}.pdf`,
+              content: pdf,
+              contentType: 'application/pdf',
+            });
+          } catch { /* PDF not available */ }
+        }
+      }
+    }
+
+    // Get Boleto PDF if code exists
+    if (billing.boleto_code) {
+      try {
+        const pdf = await this.interService.getBoletoPdf(billing.boleto_code);
+        attachments.push({
+          filename: `boleto-${billingPeriod}.pdf`,
+          content: pdf,
+          contentType: 'application/pdf',
+        });
+      } catch { /* Boleto PDF not available */ }
+    }
+
+    if (attachments.length === 0) throw new Error('Nenhum documento disponível para envio (NF ou Boleto não encontrados)');
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <div style="background:linear-gradient(90deg,#7c3aed,#5b21b6);padding:20px;border-radius:8px 8px 0 0;text-align:center">
+          <h1 style="color:white;margin:0">Documentos do Contrato</h1>
+        </div>
+        <div style="background:#f9fafb;padding:30px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
+          <p>Olá ${contract.customer.name},</p>
+          <p>Segue em anexo a Nota Fiscal e o Boleto referente ao contrato <strong>${contract.title}</strong>.</p>
+          <table style="width:100%;margin:20px 0;border-collapse:collapse">
+            <tr><td style="padding:8px;color:#6b7280">Contrato:</td><td style="padding:8px;font-weight:bold">${contract.title}</td></tr>
+            <tr><td style="padding:8px;color:#6b7280">Referência:</td><td style="padding:8px;font-weight:bold">${billingPeriod}</td></tr>
+            <tr><td style="padding:8px;color:#6b7280">Valor:</td><td style="padding:8px;font-weight:bold;color:#059669">R$ ${Number(billing.value || contract.monthlyValue || 0).toFixed(2)}</td></tr>
+          </table>
+          <p style="color:#6b7280;font-size:14px">Efetue o pagamento até a data de vencimento.</p>
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+          <p style="color:#9ca3af;font-size:12px;text-align:center">VGON Soluções em Informática</p>
+        </div>
+      </div>
+    `;
+
+    await this.mailService.sendMailWithAttachment(
+      contract.customer.email,
+      `NF + Boleto - ${contract.title} (${billingPeriod})`,
+      html,
+      attachments,
+    );
+
+    return { sent: true };
+  }
 }
