@@ -53,6 +53,8 @@ export class ContractsController {
       autoCharge: body.autoCharge === 'true' || body.autoCharge === true,
       chargeDay: body.chargeDay ? parseInt(body.chargeDay) : 10,
       issueDay: body.issueDay ? parseInt(body.issueDay) : 3,
+      issRetido: body.issRetido === 'true' || body.issRetido === true,
+      issAliquota: body.issAliquota ? parseFloat(body.issAliquota) : 5,
       equipments: body.equipments || null,
       createdBy: req.user.id,
     };
@@ -115,6 +117,8 @@ export class ContractsController {
     if (dto.adjustmentPercentage) dto.adjustmentPercentage = parseFloat(dto.adjustmentPercentage);
     if (dto.chargeDay) dto.chargeDay = parseInt(dto.chargeDay);
     if (dto.issueDay) dto.issueDay = parseInt(dto.issueDay);
+    if (dto.issRetido !== undefined) dto.issRetido = dto.issRetido === 'true' || dto.issRetido === true;
+    if (dto.issAliquota !== undefined) dto.issAliquota = parseFloat(dto.issAliquota) || 5;
     if (dto.autoCharge !== undefined) dto.autoCharge = dto.autoCharge === 'true' || dto.autoCharge === true;
     if (file) {
       dto.fileName = file.originalname;

@@ -74,6 +74,12 @@ export class Contract {
   @Column({ name: 'issue_day', type: 'int', nullable: true, default: 3 })
   issueDay: number;
 
+  @Column({ name: 'iss_retido', type: 'boolean', default: false })
+  issRetido: boolean;
+
+  @Column({ name: 'iss_aliquota', type: 'decimal', precision: 5, scale: 2, default: 5.00 })
+  issAliquota: number;
+
   @Column({ type: 'text', nullable: true })
   equipments: string;
 

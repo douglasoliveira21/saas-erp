@@ -100,6 +100,8 @@ export function Contracts() {
       fd.append('autoCharge', String(form.autoCharge))
       fd.append('chargeDay', form.chargeDay)
       if (form.autoCharge) fd.append('issueDay', form.issueDay || '3')
+      fd.append('issRetido', String(form.issRetido || false))
+      fd.append('issAliquota', form.issAliquota || '5')
       if (form.equipments) fd.append('equipments', form.equipments)
       if (file) fd.append('file', file)
 
@@ -429,6 +431,24 @@ export function Contracts() {
                 <h3 className="text-sm font-semibold text-purple-700 dark:text-purple-400 mb-3">Equipamentos Vinculados</h3>
                 <textarea className="input" rows={3} value={form.equipments} onChange={e => setForm({ ...form, equipments: e.target.value })} placeholder="Liste os equipamentos cobertos por este contrato (um por linha)&#10;Ex: Servidor Dell PowerEdge T340 - SN: ABC123&#10;Switch 24P TP-Link - SN: XYZ789" />
                 <p className="text-xs text-gray-400 mt-1">Equipamentos que estão cobertos pelo contrato de suporte</p>
+              </div>
+
+              {/* ISSQN */}
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <h3 className="text-sm font-semibold text-blue-700 dark:text-blue-400 mb-3">ISSQN (Nota Fiscal de Serviço)</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Alíquota ISS (%)</label>
+                    <input type="number" step="0.01" min="0" max="100" className="input" value={form.issAliquota || '5'} onChange={e => setForm({ ...form, issAliquota: e.target.value })} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 mt-5">
+                      <input type="checkbox" id="issRetido" checked={form.issRetido || false} onChange={e => setForm({ ...form, issRetido: e.target.checked })} className="w-4 h-4 text-primary-600 rounded" />
+                      <label htmlFor="issRetido" className="text-sm text-gray-700 dark:text-gray-300">ISS Retido na Fonte (pelo tomador)</label>
+                    </div>
+                  </div>
+                </div>
+                {form.issRetido && <p className="text-xs text-blue-600 mt-2">O ISS será retido pelo tomador (cliente). O valor do ISS não será cobrado no boleto.</p>}
               </div>
 
               {/* Cobrança e Vencimento */}

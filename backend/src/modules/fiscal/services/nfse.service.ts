@@ -321,6 +321,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const pisCofins = taxDetails.pisCofins || {};
     const ibsCbs = taxDetails.ibsCbs || {};
     const aliqFormatted = Number(iss.rate ?? serviceData?.aliquota ?? 5).toFixed(2);
+    // ISSQN Retido: 1 = não retido, 2 = retido pelo tomador
+    const issRetentionType = iss.retentionType || (serviceData?.issRetido ? '2' : '1');
     let codTribNac = serviceData?.codTribNacional || '010701';
     codTribNac = codTribNac.replace(/\D/g, '').slice(0, 6);
 
@@ -373,7 +375,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       ? `<IBSCBS><finNFSe>${ibsCbs.purpose}</finNFSe><indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
       : '';
 
-    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${iss.retentionType || '1'}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
+    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
   }
 
   private escapeXml(value: string): string {

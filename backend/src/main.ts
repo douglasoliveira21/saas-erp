@@ -13,6 +13,8 @@ async function bootstrap() {
     const ds = app.get(DataSource);
     await ds.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS city_code VARCHAR(10)`).catch(() => {});
     await ds.query(`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS issue_day INT DEFAULT 3`).catch(() => {});
+    await ds.query(`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS iss_retido BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await ds.query(`ALTER TABLE contracts ADD COLUMN IF NOT EXISTS iss_aliquota DECIMAL(5,2) DEFAULT 5.00`).catch(() => {});
     await ds.query(`ALTER TABLE financial_movements ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE`).catch(() => {});
     await ds.query(`ALTER TABLE financial_movements ADD COLUMN IF NOT EXISTS recurring_group_id VARCHAR(100)`).catch(() => {});
     await ds.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS due_date DATE`).catch(() => {});
