@@ -243,6 +243,8 @@ export class SalesService {
   private async applyEffectiveBillingStatus(sales: Sale[]): Promise<void> {
     const ids = sales.map(sale => sale.id);
     if (!ids.length) return;
+
+    // Check which sales have boleto emitted
     const rows = await this.dataSource.query(
       `SELECT DISTINCT sale_id FROM payments
        WHERE sale_id = ANY($1::uuid[]) AND type = 'boleto'
@@ -250,8 +252,53 @@ export class SalesService {
       [ids],
     );
     const withBoleto = new Set(rows.map((row: any) => row.sale_id));
+
+    // Get earliest pending due date per sale (from payments or installments)
+    const dueDates = await this.dataSource.query(
+      `SELECT sale_id, MIN(due_date) as earliest_due
+       FROM payments
+       WHERE sale_id = ANY($1::uuid[])
+         AND type IN ('boleto', 'pix')
+         AND status IN ('a_receber', 'vencido')
+       GROUP BY sale_id`,
+      [ids],
+    );
+    const dueDateMap = new Map(dueDates.map((r: any) => [r.sale_id, r.earliest_due]));
+
+    // Also check installments for due dates when payments table doesn't have them
+    const installDueDates = await this.dataSource.query(
+      `SELECT sale_id, MIN(due_date) as earliest_due
+       FROM installments
+       WHERE sale_id = ANY($1::uuid[])
+         AND status IN ('pendente', 'vencido')
+       GROUP BY sale_id`,
+      [ids],
+    );
+    for (const r of installDueDates) {
+      if (!dueDateMap.has(r.sale_id)) dueDateMap.set(r.sale_id, r.earliest_due);
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
     for (const sale of sales) {
-      if (withBoleto.has(sale.id) && !['pago', 'vencido'].includes(sale.billingStatus)) sale.billingStatus = 'emitido';
+      if (withBoleto.has(sale.id) && !['pago', 'vencido'].includes(sale.billingStatus)) {
+        sale.billingStatus = 'emitido';
+      }
+
+      // Set dueDate from payments/installments if not set on sale
+      const earliestDue = dueDateMap.get(sale.id);
+      if (earliestDue && !sale.dueDate) {
+        sale.dueDate = String(earliestDue).split('T')[0];
+      }
+
+      // Set paymentStatus based on billing and due date
+      if (!['pago', 'cancelado'].includes(sale.billingStatus) && !['pago', 'finalizado', 'cancelado'].includes(sale.status)) {
+        const rawDue = earliestDue ? String(earliestDue) : null;
+        const effectiveDue = sale.dueDate || (rawDue ? rawDue.split('T')[0] : null);
+        if (effectiveDue && effectiveDue < today && (sale.billingStatus === 'emitido' || withBoleto.has(sale.id))) {
+          (sale as any).paymentStatus = 'inadimplente';
+        }
+      }
     }
   }
   async findOne(id: string): Promise<Sale> {

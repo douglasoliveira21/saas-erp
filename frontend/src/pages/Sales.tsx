@@ -211,7 +211,7 @@ export function Sales() {
                 {!isTecnico && <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Técnico</th>}
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Pagamento</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Total</th>
-                <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Status</th>
+                <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Status / Pagamento</th>
                 <th className="table-cell font-semibold text-gray-700 dark:text-gray-300">Ações</th>
               </tr>
             </thead>
@@ -237,7 +237,35 @@ export function Sales() {
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">{paymentLabels[s.paymentMethod] || s.paymentMethod}{s.installments > 1 ? ` (${s.installments}x)` : ''}</td>
                   <td className="table-cell font-semibold text-gray-900 dark:text-white">R$ {Number(s.totalAmount).toFixed(2)}</td>
                   <td className="table-cell">
-                    <div className="flex flex-wrap gap-1"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[s.status] || ''}`}>{statusLabels[s.status] || s.status}</span>{s.fiscalStatus === 'autorizada' && <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">Fiscal autorizada</span>}{s.billingStatus === 'emitido' && <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700">Cobrança emitida</span>}{s.paymentStatus === 'parcial' && <span className="px-2 py-1 rounded-full text-xs bg-cyan-100 text-cyan-700">Pagamento parcial</span>}</div>
+                    <div className="flex flex-wrap gap-1">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[s.status] || ''}`}>{statusLabels[s.status] || s.status}</span>
+                      {s.fiscalStatus === 'autorizada' && <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">NF Autorizada</span>}
+                      {/* Payment status badge */}
+                      {(() => {
+                        if (s.status === 'cancelado') return null
+                        if (s.billingStatus === 'pago' || s.status === 'pago' || s.status === 'finalizado') {
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pago</span>
+                        }
+                        if (s.paymentStatus === 'inadimplente') {
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 animate-pulse">Inadimplente</span>
+                        }
+                        if (s.paymentStatus === 'parcial') {
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-cyan-100 text-cyan-700">Pago Parcial</span>
+                        }
+                        if (s.billingStatus === 'emitido' || s.status === 'boleto_emitido') {
+                          const today = new Date().toISOString().split('T')[0]
+                          const dueDate = s.dueDate || ''
+                          if (dueDate && dueDate < today) {
+                            return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 animate-pulse">Inadimplente</span>
+                          }
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pendente</span>
+                        }
+                        if (s.status === 'pendente' || s.status === 'nf_emitida') {
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Aguardando</span>
+                        }
+                        return null
+                      })()}
+                    </div>
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-2">
