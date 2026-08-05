@@ -935,7 +935,7 @@ export class InterService implements OnModuleInit {
   /**
    * Obtém PDF do boleto (com retry automático caso o banco ainda esteja processando)
    */
-  async getBoletoPdf(codigoSolicitacao: string, retries = 3): Promise<Buffer> {
+  async getBoletoPdf(codigoSolicitacao: string, retries = 5): Promise<Buffer> {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         return await this._fetchBoletoPdf(codigoSolicitacao);
@@ -943,7 +943,7 @@ export class InterService implements OnModuleInit {
         const isProcessing = error?.response?.statusCode === 400 || error?.status === 400 ||
           (error?.message || '').includes('processamento');
         if (isProcessing && attempt < retries) {
-          const delay = attempt * 3000; // 3s, 6s, 9s
+          const delay = attempt * 5000; // 5s, 10s, 15s, 20s
           this.logger.warn(`PDF do boleto ${codigoSolicitacao} ainda em processamento. Tentativa ${attempt}/${retries}. Aguardando ${delay/1000}s...`);
           await new Promise(r => setTimeout(r, delay));
           continue;
@@ -951,7 +951,7 @@ export class InterService implements OnModuleInit {
         throw error;
       }
     }
-    throw new HttpException('PDF do boleto não disponível após múltiplas tentativas. Tente novamente em alguns segundos.', HttpStatus.SERVICE_UNAVAILABLE);
+    throw new HttpException('PDF do boleto não disponível após múltiplas tentativas. O boleto foi gerado com sucesso, mas o PDF demora alguns minutos para ficar pronto. Tente baixar novamente em instantes.', HttpStatus.SERVICE_UNAVAILABLE);
   }
 
   private async _fetchBoletoPdf(codigoSolicitacao: string): Promise<Buffer> {
