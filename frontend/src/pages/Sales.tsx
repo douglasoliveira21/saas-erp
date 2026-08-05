@@ -240,14 +240,14 @@ export function Sales() {
                     <div className="flex flex-wrap gap-1">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[s.status] || ''}`}>{statusLabels[s.status] || s.status}</span>
                       {s.fiscalStatus === 'autorizada' && <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">NF Autorizada</span>}
-                      {/* Payment status badge */}
+                      {/* Payment status badge - only show if status doesn't already convey payment info */}
                       {(() => {
-                        if (s.status === 'cancelado') return null
-                        if (s.billingStatus === 'pago' || s.status === 'pago' || s.status === 'finalizado') {
-                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pago</span>
-                        }
+                        if (s.status === 'cancelado' || s.status === 'pago' || s.status === 'finalizado') return null
                         if (s.paymentStatus === 'inadimplente') {
                           return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 animate-pulse">Inadimplente</span>
+                        }
+                        if (s.billingStatus === 'pago') {
+                          return <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Pago</span>
                         }
                         if (s.paymentStatus === 'parcial') {
                           return <span className="px-2 py-1 rounded-full text-xs font-medium bg-cyan-100 text-cyan-700">Pago Parcial</span>
