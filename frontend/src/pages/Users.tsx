@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, Edit, Trash2, X, Check, Shield } from 'lucide-react'
 
 interface User {
@@ -16,6 +17,7 @@ const roleColors: Record<string, string> = { admin: 'bg-purple-100 text-purple-7
 const emptyForm = { name: '', email: '', password: '', role: 'tecnico', observations: '', active: true }
 
 export function Users() {
+  const { trackAction } = useActionToast()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -62,7 +64,7 @@ export function Users() {
 
   async function remove(id: string) {
     if (!confirm('Remover este usuário?')) return
-    try { await api.delete(`/users/${id}`); load() }
+    try { await trackAction('Removendo usuário...', api.delete(`/users/${id}`), 'Usuário removido!'); load() }
     catch { setError('Erro ao remover') }
   }
 

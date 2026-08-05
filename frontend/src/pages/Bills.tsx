@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useActionToast } from '../components/ActionToast'
 import {
   Plus, Search, Check, X, Filter, AlertTriangle, DollarSign,
   Clock, CheckCircle, Trash2, Edit2, Receipt, Users,
@@ -61,6 +62,7 @@ function formatDate(d: string) {
 
 export function Bills() {
   const { isAdmin } = useAuth()
+  const { trackAction } = useActionToast()
   const [activeTab, setActiveTab] = useState<Tab>('contas')
   const [bills, setBills] = useState<Bill[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -206,13 +208,13 @@ export function Bills() {
 
   async function cancelBill(id: string) {
     if (!confirm('Cancelar esta conta?')) return
-    try { await api.patch('/bills/' + id + '/cancel'); loadAll() }
+    try { await trackAction('Cancelando conta...', api.patch('/bills/' + id + '/cancel'), 'Conta cancelada!'); loadAll() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
   async function removeBill(id: string) {
     if (!confirm('Excluir esta conta permanentemente?')) return
-    try { await api.delete('/bills/' + id); loadAll() }
+    try { await trackAction('Excluindo conta...', api.delete('/bills/' + id), 'Conta excluída!'); loadAll() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir') }
   }
 
@@ -250,7 +252,7 @@ export function Bills() {
 
   async function removeSupplier(id: string) {
     if (!confirm('Excluir este fornecedor?')) return
-    try { await api.delete('/suppliers/' + id); loadAll() }
+    try { await trackAction('Excluindo fornecedor...', api.delete('/suppliers/' + id), 'Fornecedor excluído!'); loadAll() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir') }
   }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, Check, X, Filter, ShoppingBag, Truck, RotateCcw, CheckCircle, XCircle, Eye, Trash2, DollarSign, Package, ClipboardList, FileCheck } from 'lucide-react'
 
 type Tab = 'all' | 'solicitacao' | 'cotacao' | 'ordem_compra' | 'aprovacao' | 'entrada' | 'devolucao' | 'fornecedores'
@@ -38,6 +39,7 @@ function formatDate(d: string) { if (!d) return '-'; return new Date(d + (d.leng
 
 export function Purchases() {
   const { isAdmin } = useAuth()
+  const { trackAction } = useActionToast()
   const [activeTab, setActiveTab] = useState<Tab>('all')
   const [purchases, setPurchases] = useState<Purchase[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
@@ -147,13 +149,13 @@ export function Purchases() {
 
   async function cancel(id: string) {
     if (!confirm('Cancelar esta compra?')) return
-    try { await api.patch('/purchases/' + id + '/cancel'); load() }
+    try { await trackAction('Cancelando compra...', api.patch('/purchases/' + id + '/cancel'), 'Compra cancelada!'); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
   async function remove(id: string) {
     if (!confirm('Excluir esta compra?')) return
-    try { await api.delete('/purchases/' + id); load() }
+    try { await trackAction('Excluindo compra...', api.delete('/purchases/' + id), 'Compra excluída!'); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir') }
   }
 

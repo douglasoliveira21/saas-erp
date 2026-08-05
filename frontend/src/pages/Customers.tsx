@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, Edit, Trash2, X, Check, Loader2 } from 'lucide-react'
 
 interface Customer {
@@ -26,6 +27,7 @@ interface GlpiEntity { id: number; name: string }
 const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', additionalEmails: '', address: '', stateRegistration: '', city: '', uf: '', neighborhood: '', cep: '', cityCode: '', observations: '', glpiEntityId: '' }
 
 export function Customers() {
+  const { trackAction } = useActionToast()
   const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -152,7 +154,7 @@ export function Customers() {
   async function remove(id: string) {
     if (!confirm('Remover este cliente?')) return
     try {
-      await api.delete(`/customers/${id}`)
+      await trackAction('Removendo cliente...', api.delete(`/customers/${id}`), 'Cliente removido!')
       load()
     } catch { setError('Erro ao remover') }
   }

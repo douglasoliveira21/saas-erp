@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, FileText, CheckCircle, XCircle, Copy, ShoppingCart, Trash2, Filter, Eye, Download } from 'lucide-react'
 
 interface QuoteItem {
@@ -50,6 +51,7 @@ const statusColors: Record<string, string> = {
 }
 
 export function Orcamentos() {
+  const { trackAction } = useActionToast()
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,14 +85,14 @@ export function Orcamentos() {
   async function handleApprove(id: string) {
     if (!confirm('Aprovar este orçamento?')) return
     try {
-      await api.patch(`/quotes/${id}/approve`)
+      await trackAction('Aprovando orçamento...', api.patch(`/quotes/${id}/approve`), 'Orçamento aprovado!')
       load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao aprovar') }
   }
 
   async function handleReject(id: string) {
     try {
-      await api.patch(`/quotes/${id}/reject`, { reason: rejectReason })
+      await trackAction('Rejeitando orçamento...', api.patch(`/quotes/${id}/reject`, { reason: rejectReason }), 'Orçamento rejeitado!')
       setRejectingId('')
       setRejectReason('')
       load()
@@ -99,7 +101,7 @@ export function Orcamentos() {
 
   async function handleDuplicate(id: string) {
     try {
-      await api.post(`/quotes/${id}/duplicate`)
+      await trackAction('Duplicando orçamento...', api.post(`/quotes/${id}/duplicate`), 'Orçamento duplicado!')
       load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao duplicar') }
   }
@@ -107,7 +109,7 @@ export function Orcamentos() {
   async function handleDelete(id: string) {
     if (!confirm('Excluir este orçamento?')) return
     try {
-      await api.delete(`/quotes/${id}`)
+      await trackAction('Excluindo orçamento...', api.delete(`/quotes/${id}`), 'Orçamento excluído!')
       load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao excluir') }
   }
@@ -482,6 +484,7 @@ function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote
 }
 
 function ConvertModal({ quote, onClose, onSuccess }: { quote: Quote; onClose: () => void; onSuccess: () => void }) {
+  const { trackAction } = useActionToast()
   const [paymentMethod, setPaymentMethod] = useState('boleto')
   const [installments, setInstallments] = useState(1)
   const [commissionPercentage, setCommissionPercentage] = useState(10)
@@ -494,13 +497,12 @@ function ConvertModal({ quote, onClose, onSuccess }: { quote: Quote; onClose: ()
     setConverting(true)
     setConvertError('')
     try {
-      await api.post(`/quotes/${quote.id}/convert`, {
+      await trackAction('Convertendo orçamento...', api.post(`/quotes/${quote.id}/convert`, {
         paymentMethod,
         installments,
         commissionPercentage,
         dueDay,
-      })
-      alert('Orçamento convertido em venda com sucesso!')
+      }), 'Orçamento convertido em venda!')
       onSuccess()
     } catch (e: any) {
       setConvertError(e.response?.data?.message || 'Erro ao converter')

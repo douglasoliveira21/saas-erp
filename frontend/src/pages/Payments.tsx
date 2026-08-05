@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { Download, Search, RefreshCw, CreditCard, Eye, XCircle } from 'lucide-react'
 import { useFeedback } from '../components/ui'
+import { useActionToast } from '../components/ActionToast'
 
 interface Payment {
   id: string
@@ -23,6 +24,7 @@ const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yel
 
 export function Payments() {
   const { confirm: confirmAction, runOperation } = useFeedback()
+  const { trackAction } = useActionToast()
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -70,10 +72,7 @@ export function Payments() {
 
   async function checkStatus(codigoSolicitacao: string) {
     try {
-      const res = await api.get(`/inter/status/${codigoSolicitacao}`)
-      const data = res.data?.data || res.data
-      const situacao = data?.situacao || data?.cobranca?.situacao || data?.status || 'Desconhecido'
-      alert('Situação do boleto: ' + situacao)
+      await trackAction('Consultando status...', api.get(`/inter/status/${codigoSolicitacao}`), 'Status atualizado!')
       load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao consultar') }
   }
@@ -94,9 +93,7 @@ export function Payments() {
     setReconciling(true)
     setError('')
     try {
-      const res = await api.post('/inter/reconcile')
-      const data = res.data?.data || res.data
-      alert(`Conciliacao concluida: ${data.checked || 0} verificado(s), ${data.updated || 0} atualizado(s), ${data.repaired || 0} inconsistência(s) reparada(s), ${data.failed || 0} erro(s).`)
+      await trackAction('Conciliando pagamentos...', api.post('/inter/reconcile'), 'Conciliação concluída!')
       load()
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao conciliar pagamentos')
@@ -175,7 +172,7 @@ export function Payments() {
                       )}
                       <button onClick={() => checkStatus(p.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
                       {p.linhaDigitavel && (
-                        <button onClick={() => { navigator.clipboard.writeText(p.linhaDigitavel!); alert('Linha digitável copiada!') }} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Copiar linha digitável"><CreditCard className="w-4 h-4" /></button>
+                        <button onClick={() => { navigator.clipboard.writeText(p.linhaDigitavel!).then(() => trackAction('Copiando...', Promise.resolve(), 'Linha digitável copiada!')) }} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Copiar linha digitável"><CreditCard className="w-4 h-4" /></button>
                       )}
                     </div>
                   </td>

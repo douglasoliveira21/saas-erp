@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, CheckCircle, XCircle, DollarSign, MapPin, Filter, X, Check, Navigation, Trash2, ChevronDown, ChevronUp, Map, Edit, Calendar, Car } from 'lucide-react'
 
 interface RouteLeg { id?: string; origin: string; destination: string; km: string | number }
@@ -12,6 +13,7 @@ const emptyLeg = (): RouteLeg => ({ origin: '', destination: '', km: '' })
 
 export function Routes() {
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
+  const { trackAction } = useActionToast()
   const canManage = isAdmin || isFinanceiro
   const [routes, setRoutes] = useState<Route[]>([])
   const [loading, setLoading] = useState(true)
@@ -112,14 +114,14 @@ export function Routes() {
     catch (e: any) { setError(e.response?.data?.message || 'Erro') } finally { setSaving(false) }
   }
 
-  async function pay(id: string) { try { await api.patch('/routes/' + id + '/pay'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
-  async function cancel(id: string) { if (!confirm('Cancelar?')) return; try { await api.patch('/routes/' + id + '/cancel'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
-  async function remove(id: string) { if (!confirm('Remover?')) return; try { await api.delete('/routes/' + id); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
+  async function pay(id: string) { try { await trackAction('Pagando rota...', api.patch('/routes/' + id + '/pay'), 'Rota paga!'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
+  async function cancel(id: string) { if (!confirm('Cancelar?')) return; try { await trackAction('Cancelando rota...', api.patch('/routes/' + id + '/cancel'), 'Rota cancelada!'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
+  async function remove(id: string) { if (!confirm('Remover?')) return; try { await trackAction('Removendo rota...', api.delete('/routes/' + id), 'Rota removida!'); load() } catch (e: any) { setError(e.response?.data?.message || 'Erro') } }
 
   async function payMonth() {
     const [y, m] = monthFilter.split('-')
     if (!confirm('Pagar todas aprovadas do mes?')) return
-    try { const r = await api.patch('/routes/pay-month?year=' + y + '&month=' + m); if (r.data.count === 0) { setError('Nenhuma aprovada neste mes'); return } alert(r.data.count + ' rota(s) pagas - R$ ' + Number(r.data.total).toFixed(2)); load() }
+    try { const r = await trackAction('Pagando rotas do mês...', api.patch('/routes/pay-month?year=' + y + '&month=' + m), 'Rotas pagas com sucesso!'); if (r.data.count === 0) { setError('Nenhuma aprovada neste mes'); return } load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro') }
   }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye } from 'lucide-react'
 
 interface Commission {
@@ -26,6 +27,7 @@ const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yel
 
 export function Commissions() {
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
+  const { trackAction } = useActionToast()
   const canManage = isAdmin || isFinanceiro
   const [commissions, setCommissions] = useState<Commission[]>([])
   const [technicians, setTechnicians] = useState<User[]>([])
@@ -70,7 +72,7 @@ export function Commissions() {
 
   async function cancel(id: string) {
     if (!confirm('Cancelar esta comissão?')) return
-    try { await api.patch(`/commissions/${id}/cancel`); load() }
+    try { await trackAction('Cancelando comissão...', api.patch(`/commissions/${id}/cancel`), 'Comissão cancelada!'); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
