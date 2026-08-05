@@ -343,11 +343,28 @@ export class ContractBillingService implements OnModuleInit {
     ).catch(() => []);
 
     if (billingRecord[0]) {
+      let hasBoleto = !!billingRecord[0].boleto_code;
+      // Verify the boleto isn't cancelled in payments table
+      if (hasBoleto) {
+        const boletoStatus = await this.dataSource.query(
+          `SELECT status FROM payments WHERE codigo_solicitacao = $1 LIMIT 1`,
+          [billingRecord[0].boleto_code]
+        ).catch(() => []);
+        if (boletoStatus[0]?.status === 'cancelado') {
+          hasBoleto = false;
+          // Clear the boleto_code in contract_billings since it's cancelled
+          await this.dataSource.query(
+            `UPDATE contract_billings SET boleto_code = NULL, updated_at = NOW() WHERE contract_id = $1 AND billing_period = $2`,
+            [contractId, period]
+          ).catch(() => {});
+        }
+      }
+
       return {
         hasNf: !!billingRecord[0].invoice_id,
-        hasBoleto: !!billingRecord[0].boleto_code,
+        hasBoleto,
         invoiceId: billingRecord[0].invoice_id || null,
-        boletoCode: billingRecord[0].boleto_code || null,
+        boletoCode: hasBoleto ? billingRecord[0].boleto_code : null,
         period,
       };
     }
