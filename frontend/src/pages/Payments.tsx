@@ -7,6 +7,7 @@ import { useActionToast } from '../components/ActionToast'
 interface Payment {
   id: string
   saleId: string
+  customerId: string
   type: string
   codigoSolicitacao: string
   status: string
@@ -17,6 +18,8 @@ interface Payment {
   createdAt: string
   linhaDigitavel?: string
   pixCopiaECola?: string
+  origem?: string
+  contractTitle?: string
 }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', vencido: 'Vencido', cancelado: 'Cancelado', a_receber: 'A Receber' }
@@ -142,6 +145,7 @@ export function Payments() {
             <thead className="table-header">
               <tr>
                 <th className="table-cell font-semibold text-gray-700">Tipo</th>
+                <th className="table-cell font-semibold text-gray-700">Origem</th>
                 <th className="table-cell font-semibold text-gray-700">Cliente</th>
                 <th className="table-cell font-semibold text-gray-700">Valor</th>
                 <th className="table-cell font-semibold text-gray-700">Vencimento</th>
@@ -152,10 +156,20 @@ export function Payments() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
+                <tr><td colSpan={8} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50">
                   <td className="table-cell"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + (p.type === 'pix' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700')}>{p.type === 'pix' ? 'PIX' : 'Boleto'}</span></td>
+                  <td className="table-cell">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      p.origem === 'contrato' ? 'bg-purple-100 text-purple-700' :
+                      p.origem === 'venda' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {p.origem === 'contrato' ? 'Contrato' : p.origem === 'venda' ? 'Venda' : 'Outro'}
+                    </span>
+                    {p.contractTitle && <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[150px]" title={p.contractTitle}>{p.contractTitle}</p>}
+                  </td>
                   <td className="table-cell text-sm font-medium">{p.customerName}</td>
                   <td className="table-cell font-semibold">R$ {Number(p.value).toFixed(2)}</td>
                   <td className="table-cell text-sm">{p.dueDate ? new Date(p.dueDate).toLocaleDateString('pt-BR') : '-'}</td>

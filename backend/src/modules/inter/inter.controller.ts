@@ -49,7 +49,10 @@ export class InterController {
   async listPayments(@Query('page') page = '1', @Query('limit') limit = '50') {
     const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
     const payments = await this.saleRepo.manager.query(
-      `SELECT id, sale_id as "saleId", type, codigo_solicitacao as "codigoSolicitacao", status, value, customer_name as "customerName", customer_doc as "customerDoc", due_date as "dueDate", linha_digitavel as "linhaDigitavel", pix_copia_e_cola as "pixCopiaECola", nosso_numero as "nossoNumero", created_at as "createdAt" FROM payments ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt",
+       CASE WHEN p.sale_id IS NOT NULL THEN 'venda' ELSE COALESCE((SELECT 'contrato' FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1), 'outro') END as "origem",
+       CASE WHEN p.sale_id IS NOT NULL THEN NULL ELSE (SELECT c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1) END as "contractTitle"
+       FROM payments p ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
       [safeLimit, (safePage - 1) * safeLimit],
     );
     const count = await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments`);
