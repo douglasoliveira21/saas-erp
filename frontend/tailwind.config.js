@@ -31,9 +31,10 @@ export default {
       },
       boxShadow: {
         'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 12px -4px rgba(0, 0, 0, 0.05)',
-        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 2px 8px -1px rgba(0, 0, 0, 0.04)',
-        'elevated': '0 4px 16px -4px rgba(0, 0, 0, 0.08), 0 8px 24px -8px rgba(0, 0, 0, 0.06)',
-        'glow-violet': '0 4px 14px -3px rgba(124, 58, 237, 0.35)',
+        'card': '0 1px 3px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.03)',
+        'elevated': '0 8px 30px -4px rgba(0, 0, 0, 0.07), 0 4px 12px -6px rgba(0, 0, 0, 0.05)',
+        'glow-violet': '0 4px 14px -3px rgba(124, 58, 237, 0.3)',
+        'inner-glow': 'inset 0 1px 2px rgba(0, 0, 0, 0.03)',
       },
     },
   },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, Edit, Trash2, X, Check, FileText, Download, Clock, AlertTriangle, RefreshCw, Bell, Monitor, DollarSign, Send } from 'lucide-react'
 
 interface Contract {
@@ -41,6 +42,7 @@ const statusColors: Record<string, string> = { ativo: 'bg-green-100 text-green-7
 
 export function Contracts() {
   const { isAdmin, isFinanceiro } = useAuth()
+  const { trackAction } = useActionToast()
   const canManage = isAdmin || isFinanceiro
   const [contracts, setContracts] = useState<Contract[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -131,10 +133,13 @@ export function Contracts() {
       if (form.equipments) fd.append('equipments', form.equipments)
       if (file) fd.append('file', file)
 
+      const action = editing ? 'Salvando contrato...' : 'Criando contrato...'
+      const success = editing ? 'Contrato atualizado!' : 'Contrato criado!'
+
       if (editing) {
-        await api.patch('/contracts/' + editing.id, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+        await trackAction(action, api.patch('/contracts/' + editing.id, fd, { headers: { 'Content-Type': 'multipart/form-data' } }), success)
       } else {
-        await api.post('/contracts', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+        await trackAction(action, api.post('/contracts', fd, { headers: { 'Content-Type': 'multipart/form-data' } }), success)
       }
       setShowModal(false); load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao salvar') }
@@ -157,15 +162,19 @@ export function Contracts() {
       const renewalEntry = `${new Date().toLocaleDateString('pt-BR')}: Renovado por ${renewMonths} meses${adjustPct > 0 ? ` com reajuste de ${adjustPct}%` : ''}`
       const history = renewingContract.renewalHistory ? renewingContract.renewalHistory + '\n' + renewalEntry : renewalEntry
 
-      await api.patch('/contracts/' + renewingContract.id, {
-        startDate: newStart,
-        endDate: newEnd,
-        totalValue: newTotal?.toFixed(2),
-        monthlyValue: newMonthly?.toFixed(2) || renewingContract.monthlyValue,
-        status: 'ativo',
-        renewalHistory: history,
-        lastRenewalDate: new Date().toISOString().split('T')[0],
-      })
+      await trackAction(
+        'Renovando contrato...',
+        api.patch('/contracts/' + renewingContract.id, {
+          startDate: newStart,
+          endDate: newEnd,
+          totalValue: newTotal?.toFixed(2),
+          monthlyValue: newMonthly?.toFixed(2) || renewingContract.monthlyValue,
+          status: 'ativo',
+          renewalHistory: history,
+          lastRenewalDate: new Date().toISOString().split('T')[0],
+        }),
+        'Contrato renovado com sucesso!'
+      )
       setShowRenewModal(false); setRenewingContract(null); load()
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao renovar') }
     finally { setRenewSaving(false) }
@@ -181,17 +190,22 @@ export function Contracts() {
 
   async function remove(id: string) {
     if (!confirm('Remover este contrato?')) return
-    try { await api.delete('/contracts/' + id); load() }
-    catch { setError('Erro ao remover') }
+    try {
+      await trackAction('Removendo contrato...', api.delete('/contracts/' + id), 'Contrato removido!')
+      load()
+    } catch { setError('Erro ao remover') }
   }
 
   async function generateNfse(id: string) {
     const contract = contracts.find(c => c.id === id)
-    if (!confirm(`Gerar Nota Fiscal de Serviço para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}\nCliente: ${contract?.customer?.name || ''}`)) return
+    if (!confirm(`Gerar Nota Fiscal de Serviço para o contrato "${contract?.title}"?`)) return
     setError('')
     try {
-      const res = await api.post(`/contracts/${id}/billing/nfse`)
-      alert(`NFS-e gerada!\n\nStatus: ${res.data.status || 'Processando'}\nNúmero: ${res.data.number || '-'}\nPeríodo: ${res.data.billingPeriod}`)
+      await trackAction(
+        'Emitindo NFS-e...',
+        api.post(`/contracts/${id}/billing/nfse`),
+        'NFS-e emitida com sucesso!'
+      )
       // Refresh billing status
       const currentPeriod = getCurrentPeriod()
       try {
@@ -200,17 +214,19 @@ export function Contracts() {
       } catch {}
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao gerar NFS-e')
-      alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Nota Fiscal'))
     }
   }
 
   async function generateBoleto(id: string) {
     const contract = contracts.find(c => c.id === id)
-    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?\n\nValor: R$ ${Number(contract?.monthlyValue || contract?.totalValue || 0).toFixed(2)}${contract?.issRetido ? `\nISS Retido (${contract?.issAliquota || 5}%): - R$ ${(Number(contract?.monthlyValue || contract?.totalValue || 0) * (contract?.issAliquota || 5) / 100).toFixed(2)}\nValor do Boleto: R$ ${(Number(contract?.monthlyValue || contract?.totalValue || 0) * (1 - (contract?.issAliquota || 5) / 100)).toFixed(2)}` : ''}\nCliente: ${contract?.customer?.name || ''}`)) return
+    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?`)) return
     setError('')
     try {
-      const res = await api.post(`/contracts/${id}/billing/boleto`)
-      alert(`Boleto gerado!\n\nCódigo: ${res.data.boletoCode || '-'}\nPeríodo: ${res.data.billingPeriod}\nValor do Boleto: R$ ${Number(res.data.value).toFixed(2)}${res.data.issRetido ? `\nISS Retido: R$ ${Number(res.data.issValue).toFixed(2)}` : ''}`)
+      await trackAction(
+        'Gerando boleto...',
+        api.post(`/contracts/${id}/billing/boleto`),
+        'Boleto gerado com sucesso!'
+      )
       // Refresh billing status
       const currentPeriod = getCurrentPeriod()
       try {
@@ -219,21 +235,22 @@ export function Contracts() {
       } catch {}
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao gerar boleto')
-      alert('Erro: ' + (e.response?.data?.message || 'Falha ao gerar Boleto'))
     }
   }
 
   async function sendBillingEmail(id: string) {
     const contract = contracts.find(c => c.id === id)
     const period = getCurrentPeriod()
-    if (!confirm(`Enviar NF + Boleto por email para ${contract?.customer?.name}?\n\nPeríodo: ${period}`)) return
+    if (!confirm(`Enviar NF + Boleto por email para ${contract?.customer?.name}?`)) return
     setError('')
     try {
-      await api.post(`/contracts/${id}/billing/send`, { billingPeriod: period })
-      alert('Email enviado com sucesso! NF e Boleto em anexo.')
+      await trackAction(
+        'Enviando documentos por email...',
+        api.post(`/contracts/${id}/billing/send`, { billingPeriod: period }),
+        'Email enviado com sucesso!'
+      )
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao enviar email')
-      alert('Erro: ' + (e.response?.data?.message || 'Falha ao enviar'))
     }
   }
 
