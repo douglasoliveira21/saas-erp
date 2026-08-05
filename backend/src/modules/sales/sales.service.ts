@@ -269,7 +269,7 @@ export class SalesService {
     const installDueDates = await this.dataSource.query(
       `SELECT sale_id, MIN(due_date) as earliest_due
        FROM installments
-       WHERE sale_id = ANY($1::uuid[])
+       WHERE sale_id::uuid = ANY($1::uuid[])
          AND status IN ('pendente', 'vencido')
        GROUP BY sale_id`,
       [ids],
