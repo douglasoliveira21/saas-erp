@@ -1,9 +1,17 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Trash2, History } from 'lucide-react'
 import { Button, Card, TableContainer } from '../ui'
+import { api } from '../../services/api'
 
 export interface SaleProduct { id: string; name: string; code: string; salePrice: number; taxPercentage: number; purchasePrice: number; quantity: number }
 export interface SaleService { id: string; name: string; salePrice: number; taxPercentage: number; operationalCost: number }
 export interface SaleItem { type: 'product' | 'service'; id: string; name: string; quantity: number; unitPrice: number; taxPercentage: number; costPrice: number }
+
+interface LastPriceInfo {
+  lastPrice: number | null
+  lastDate: string | null
+  customerName: string | null
+}
 
 interface SaleItemsEditorProps {
   itemType: 'product' | 'service'
@@ -22,6 +30,21 @@ interface SaleItemsEditorProps {
 }
 
 export function SaleItemsEditor({ itemType, selectedId, quantity, unitPrice, products, services, items, onTypeChange, onSelect, onQuantityChange, onUnitPriceChange, onAdd, onRemove }: SaleItemsEditorProps) {
+  const [lastPrice, setLastPrice] = useState<LastPriceInfo | null>(null)
+  const [loadingPrice, setLoadingPrice] = useState(false)
+
+  useEffect(() => {
+    if (!selectedId) {
+      setLastPrice(null)
+      return
+    }
+    setLoadingPrice(true)
+    api.get(`/sales/last-price/${itemType}/${selectedId}`)
+      .then(res => setLastPrice(res.data))
+      .catch(() => setLastPrice(null))
+      .finally(() => setLoadingPrice(false))
+  }, [selectedId, itemType])
+
   return (
     <Card className="space-y-4">
       <div>
@@ -52,6 +75,34 @@ export function SaleItemsEditor({ itemType, selectedId, quantity, unitPrice, pro
         </div>
         <Button onClick={onAdd} disabled={!selectedId} aria-label="Adicionar item à venda"><Plus className="h-4 w-4" aria-hidden="true" />Adicionar</Button>
       </div>
+
+      {/* Last price indicator */}
+      {selectedId && !loadingPrice && lastPrice?.lastPrice != null && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-sm">
+          <History className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <span className="text-amber-800">
+            Último preço praticado: <strong className="text-amber-900">R$ {lastPrice.lastPrice.toFixed(2)}</strong>
+            {lastPrice.customerName && <span className="text-amber-600"> — {lastPrice.customerName}</span>}
+            {lastPrice.lastDate && <span className="text-amber-500 text-xs ml-1">({new Date(lastPrice.lastDate).toLocaleDateString('pt-BR')})</span>}
+          </span>
+          {lastPrice.lastPrice !== unitPrice && unitPrice > 0 && (
+            <button
+              type="button"
+              onClick={() => onUnitPriceChange(lastPrice.lastPrice!)}
+              className="ml-auto text-xs font-medium text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded-lg transition-colors"
+            >
+              Usar este preço
+            </button>
+          )}
+        </div>
+      )}
+      {selectedId && !loadingPrice && lastPrice && lastPrice.lastPrice == null && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm">
+          <History className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <span className="text-gray-500">Primeira venda deste {itemType === 'product' ? 'produto' : 'serviço'}.</span>
+        </div>
+      )}
+
       {items.length > 0 && (
         <TableContainer aria-label="Itens adicionados à venda">
           <table className="min-w-[640px] w-full text-sm">

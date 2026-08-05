@@ -301,6 +301,34 @@ export class SalesService {
       }
     }
   }
+
+  /**
+   * Get the last price a product or service was sold at.
+   */
+  async getLastSalePrice(type: 'product' | 'service', itemId: string): Promise<{ lastPrice: number | null; lastDate: string | null; customerName: string | null }> {
+    const column = type === 'product' ? 'product_id' : 'service_id';
+    const result = await this.dataSource.query(
+      `SELECT si.unit_price, s.created_at, c.name as customer_name
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE si.${column} = $1 AND s.status != 'cancelado'
+       ORDER BY s.created_at DESC
+       LIMIT 1`,
+      [itemId],
+    );
+
+    if (result.length === 0) {
+      return { lastPrice: null, lastDate: null, customerName: null };
+    }
+
+    return {
+      lastPrice: Number(result[0].unit_price),
+      lastDate: result[0].created_at ? new Date(result[0].created_at).toISOString() : null,
+      customerName: result[0].customer_name || null,
+    };
+  }
+
   async findOne(id: string): Promise<Sale> {
     const sale = await this.salesRepository.findOne({
       where: { id },

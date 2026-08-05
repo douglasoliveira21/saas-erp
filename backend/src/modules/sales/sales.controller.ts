@@ -29,6 +29,11 @@ export class SalesController {
     return this.salesService.findAll(page ? Number(page) : undefined, limit ? Number(limit) : undefined);
   }
 
+  @Get('last-price/:type/:itemId')
+  getLastPrice(@Param('type') type: string, @Param('itemId') itemId: string) {
+    return this.salesService.getLastSalePrice(type as 'product' | 'service', itemId);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.salesService.findOne(id);
