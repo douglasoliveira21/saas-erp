@@ -936,12 +936,26 @@ export class InterService implements OnModuleInit {
    * Obtém PDF do boleto (com retry automático caso o banco ainda esteja processando)
    */
   async getBoletoPdf(codigoSolicitacao: string, retries = 5): Promise<Buffer> {
+    // First check if boleto is in a valid state
+    try {
+      const boleto = await this.getBoleto(codigoSolicitacao);
+      const cobranca = boleto?.cobranca || boleto;
+      const situacao = (cobranca?.situacao || boleto?.situacao || '').toUpperCase();
+      if (['CANCELADO', 'CANCELADA', 'BAIXADO'].includes(situacao)) {
+        throw new HttpException('Este boleto foi cancelado e não possui PDF disponível.', HttpStatus.BAD_REQUEST);
+      }
+    } catch (error: any) {
+      // If it's our own thrown error, rethrow
+      if (error instanceof HttpException && error.getStatus() === HttpStatus.BAD_REQUEST) throw error;
+      // Otherwise ignore consultation error and try PDF directly
+    }
+
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         return await this._fetchBoletoPdf(codigoSolicitacao);
       } catch (error: any) {
         const isProcessing = error?.response?.statusCode === 400 || error?.status === 400 ||
-          (error?.message || '').includes('processamento');
+          (error?.message || '').includes('processamento') || (error?.message || '').includes('Falha ao obter PDF');
         if (isProcessing && attempt < retries) {
           const delay = attempt * 5000; // 5s, 10s, 15s, 20s
           this.logger.warn(`PDF do boleto ${codigoSolicitacao} ainda em processamento. Tentativa ${attempt}/${retries}. Aguardando ${delay/1000}s...`);
