@@ -950,7 +950,7 @@ export class InterService implements OnModuleInit {
   /**
    * Obtém PDF do boleto (com retry automático caso o banco ainda esteja processando)
    */
-  async getBoletoPdf(codigoSolicitacao: string, retries = 5): Promise<Buffer> {
+  async getBoletoPdf(codigoSolicitacao: string, retries = 2): Promise<Buffer> {
     // First check if boleto is in a valid state
     try {
       const boleto = await this.getBoleto(codigoSolicitacao);
@@ -960,13 +960,11 @@ export class InterService implements OnModuleInit {
         throw new HttpException('Este boleto foi cancelado e não possui PDF disponível.', HttpStatus.BAD_REQUEST);
       }
       if (situacao === 'EM_PROCESSAMENTO') {
-        this.logger.warn(`Boleto ${codigoSolicitacao} ainda EM_PROCESSAMENTO. Aguardando antes de buscar PDF...`);
-        await new Promise(r => setTimeout(r, 8000));
+        throw new HttpException('Boleto ainda em processamento no Banco Inter. Aguarde alguns minutos e tente novamente. Se o problema persistir, cancele e gere um novo boleto.', HttpStatus.BAD_REQUEST);
       }
     } catch (error: any) {
-      // If it's our own thrown error, rethrow
-      if (error instanceof HttpException && error.getStatus() === HttpStatus.BAD_REQUEST) throw error;
-      // Otherwise ignore consultation error and try PDF directly
+      if (error instanceof HttpException) throw error;
+      // Ignore consultation error and try PDF directly
     }
 
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -976,15 +974,17 @@ export class InterService implements OnModuleInit {
         const isProcessing = error?.response?.statusCode === 400 || error?.status === 400 ||
           (error?.message || '').includes('processamento') || (error?.message || '').includes('Falha ao obter PDF');
         if (isProcessing && attempt < retries) {
-          const delay = attempt * 5000; // 5s, 10s, 15s, 20s
-          this.logger.warn(`PDF do boleto ${codigoSolicitacao} ainda em processamento. Tentativa ${attempt}/${retries}. Aguardando ${delay/1000}s...`);
-          await new Promise(r => setTimeout(r, delay));
+          this.logger.warn(`PDF do boleto ${codigoSolicitacao} indisponível. Tentativa ${attempt}/${retries}. Aguardando 5s...`);
+          await new Promise(r => setTimeout(r, 5000));
           continue;
         }
-        throw error;
+        throw new HttpException(
+          'PDF do boleto não disponível. O boleto pode estar em processamento ou com problema. Tente novamente em instantes ou cancele e gere um novo.',
+          HttpStatus.BAD_REQUEST,
+        );
       }
     }
-    throw new HttpException('PDF do boleto não disponível após múltiplas tentativas. O boleto foi gerado com sucesso, mas o PDF demora alguns minutos para ficar pronto. Tente baixar novamente em instantes.', HttpStatus.SERVICE_UNAVAILABLE);
+    throw new HttpException('PDF do boleto não disponível.', HttpStatus.SERVICE_UNAVAILABLE);
   }
 
   private async _fetchBoletoPdf(codigoSolicitacao: string): Promise<Buffer> {
