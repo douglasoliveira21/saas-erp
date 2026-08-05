@@ -247,70 +247,85 @@ export class InterService implements OnModuleInit {
    * A API de Cobranca v3 usa o codigoSolicitacao como identificador da baixa.
    */
   async cancelBoleto(codigoSolicitacao: string, motivoCancelamento = 'ACERTOS'): Promise<any> {
-    const token = await this.getAccessToken();
-
     this.logger.log(`Cancelando boleto no Banco Inter: ${codigoSolicitacao}`);
 
-    try {
-      const response = await this.httpRequest(
-        'POST',
-        `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`,
-        { motivoCancelamento },
-        {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      );
-
-      await this.saleRepo.manager.query(
-        `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
-         UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-        [codigoSolicitacao],
-      );
-
-      await this.auditInter('inter.boleto_cancelado', null, {
-        codigoSolicitacao,
-        motivoCancelamento,
-        response,
-      });
-
-      this.logger.log(`Boleto cancelado no Banco Inter: ${codigoSolicitacao}`);
-      return response || { success: true };
-    } catch (error) {
-      const errorDetail = JSON.stringify(error.data || error.message || error);
-      this.logger.error('Erro ao cancelar boleto no Banco Inter: ' + errorDetail);
-
+    // Retry loop for EM_PROCESSAMENTO state
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const token = await this.getAccessToken();
       try {
-        const boleto = await this.getBoleto(codigoSolicitacao);
-        const cobranca = boleto?.cobranca || boleto;
-        const situacao = cobranca?.situacao || boleto?.situacao || boleto?.status;
-        if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
-          let localSyncPending = false;
-          try {
-            await this.saleRepo.manager.query(
-              `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
-               UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-              [codigoSolicitacao],
-            );
-            await this.auditInter('inter.boleto_cancelado_confirmado', null, { codigoSolicitacao, motivoCancelamento, boleto });
-          } catch (syncError) {
-            localSyncPending = true;
-            this.logger.error(`Cancelamento confirmado no Inter, mas a sincronização local ficou pendente: ${syncError?.message || syncError}`);
-          }
-          return {
-            ...(boleto && typeof boleto === 'object' ? boleto : { data: boleto }),
-            success: true,
-            localSyncPending,
-            message: localSyncPending ? 'Cancelamento confirmado no Banco Inter; sincronização local pendente' : 'Boleto cancelado com sucesso',
-          };
-        }
-      } catch {}
+        const response = await this.httpRequest(
+          'POST',
+          `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`,
+          { motivoCancelamento },
+          {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        );
 
-      throw new HttpException(
-        'Falha ao cancelar boleto no Banco Inter: ' + (error.data?.detail || error.data?.message || error.data?.title || errorDetail),
-        error.status || HttpStatus.BAD_REQUEST,
-      );
+        await this.saleRepo.manager.query(
+          `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+           UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
+          [codigoSolicitacao],
+        );
+
+        await this.auditInter('inter.boleto_cancelado', null, {
+          codigoSolicitacao,
+          motivoCancelamento,
+          response,
+        });
+
+        this.logger.log(`Boleto cancelado no Banco Inter: ${codigoSolicitacao}`);
+        return response || { success: true };
+      } catch (error) {
+        const errorDetail = JSON.stringify(error.data || error.message || error);
+        const detail = error.data?.detail || errorDetail || '';
+
+        // If boleto is still processing, wait and retry
+        if (detail.includes('EM_PROCESSAMENTO') && attempt < maxAttempts) {
+          const delay = attempt * 5000;
+          this.logger.warn(`Boleto ${codigoSolicitacao} em processamento. Tentativa ${attempt}/${maxAttempts}. Aguardando ${delay/1000}s...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        this.logger.error('Erro ao cancelar boleto no Banco Inter: ' + errorDetail);
+
+        try {
+          const boleto = await this.getBoleto(codigoSolicitacao);
+          const cobranca = boleto?.cobranca || boleto;
+          const situacao = cobranca?.situacao || boleto?.situacao || boleto?.status;
+          if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
+            let localSyncPending = false;
+            try {
+              await this.saleRepo.manager.query(
+                `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+                 UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
+                [codigoSolicitacao],
+              );
+              await this.auditInter('inter.boleto_cancelado_confirmado', null, { codigoSolicitacao, motivoCancelamento, boleto });
+            } catch (syncError) {
+              localSyncPending = true;
+              this.logger.error(`Cancelamento confirmado no Inter, mas a sincronização local ficou pendente: ${syncError?.message || syncError}`);
+            }
+            return {
+              ...(boleto && typeof boleto === 'object' ? boleto : { data: boleto }),
+              success: true,
+              localSyncPending,
+              message: localSyncPending ? 'Cancelamento confirmado no Banco Inter; sincronização local pendente' : 'Boleto cancelado com sucesso',
+            };
+          }
+        } catch {}
+
+        throw new HttpException(
+          'Falha ao cancelar boleto no Banco Inter: ' + (error.data?.detail || error.data?.message || error.data?.title || errorDetail),
+          error.status || HttpStatus.BAD_REQUEST,
+        );
+      }
     }
+
+    throw new HttpException('Boleto ainda em processamento no Banco Inter. Tente cancelar novamente em alguns segundos.', HttpStatus.SERVICE_UNAVAILABLE);
   }
 
   async cancelPix(txid: string): Promise<void> {
@@ -943,6 +958,10 @@ export class InterService implements OnModuleInit {
       const situacao = (cobranca?.situacao || boleto?.situacao || '').toUpperCase();
       if (['CANCELADO', 'CANCELADA', 'BAIXADO'].includes(situacao)) {
         throw new HttpException('Este boleto foi cancelado e não possui PDF disponível.', HttpStatus.BAD_REQUEST);
+      }
+      if (situacao === 'EM_PROCESSAMENTO') {
+        this.logger.warn(`Boleto ${codigoSolicitacao} ainda EM_PROCESSAMENTO. Aguardando antes de buscar PDF...`);
+        await new Promise(r => setTimeout(r, 8000));
       }
     } catch (error: any) {
       // If it's our own thrown error, rethrow
