@@ -11,6 +11,8 @@ interface DashboardData {
   totalProfit: number
   totalReceivable: number
   pendingCommissions: number
+  paidCommissionsMonth: number
+  currentMonth: string
   lowStockProducts: number
 }
 
@@ -515,6 +517,10 @@ export function Dashboard() {
                 <div className="flex items-center justify-between py-2 border-b border-gray-100">
                   <span className="text-sm text-gray-500 flex items-center gap-2">💰 Comissões pendentes</span>
                   <span className="text-sm font-bold text-orange-600">R$ {Number(data.pendingCommissions).toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <span className="text-sm text-gray-500 flex items-center gap-2">✅ Comissões pagas no mês</span>
+                  <span className="text-sm font-bold text-green-600">R$ {Number(data.paidCommissionsMonth || 0).toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between py-2 border-b border-gray-100">
                   <span className="text-sm text-gray-500 flex items-center gap-2">📦 Produtos com estoque baixo</span>

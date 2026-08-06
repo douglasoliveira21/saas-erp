@@ -128,12 +128,16 @@ export function Commissions() {
     const matchTech = !techFilter || c.technician?.id === techFilter
     const matchType = !typeFilter || c.type === typeFilter
     const matchUser = isTecnico ? c.technician?.id === user?.id : true
-    const matchMonth = !monthFilter || (c.createdAt && c.createdAt.startsWith(monthFilter))
+    // Use referenceMonth if available, otherwise fall back to createdAt month
+    const commMonth = c.referenceMonth || (c.createdAt ? c.createdAt.slice(0, 7) : '')
+    const matchMonth = !monthFilter || commMonth === monthFilter
     return matchSearch && matchStatus && matchTech && matchType && matchUser && matchMonth
   })
 
   const totalPendente = filtered.filter(c => c.status === 'pendente').reduce((s, c) => s + Number(c.amount), 0)
   const totalAprovada = filtered.filter(c => c.status === 'aprovada').reduce((s, c) => s + Number(c.amount), 0)
+  const totalPaga = filtered.filter(c => c.status === 'paga').reduce((s, c) => s + Number(c.amount), 0)
+  const totalMes = filtered.reduce((s, c) => s + (c.status !== 'cancelada' ? Number(c.amount) : 0), 0)
 
   return (
     <div>
@@ -153,15 +157,23 @@ export function Commissions() {
         )}
       </div>
 
-      {/* Resumo */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Resumo mensal */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="card flex items-center gap-4">
           <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center"><DollarSign className="w-5 h-5 text-yellow-600" /></div>
-          <div><p className="text-sm text-gray-500">Pendentes</p><p className="text-xl font-bold text-gray-900 dark:text-white">R$ {totalPendente.toFixed(2)}</p></div>
+          <div><p className="text-xs text-gray-500">Pendentes</p><p className="text-lg font-bold text-yellow-700">R$ {totalPendente.toFixed(2)}</p></div>
         </div>
         <div className="card flex items-center gap-4">
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center"><CheckCircle className="w-5 h-5 text-blue-600" /></div>
-          <div><p className="text-sm text-gray-500">Aprovadas</p><p className="text-xl font-bold text-gray-900 dark:text-white">R$ {totalAprovada.toFixed(2)}</p></div>
+          <div><p className="text-xs text-gray-500">Aprovadas</p><p className="text-lg font-bold text-blue-700">R$ {totalAprovada.toFixed(2)}</p></div>
+        </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-600" /></div>
+          <div><p className="text-xs text-gray-500">Pagas no mês</p><p className="text-lg font-bold text-green-700">R$ {totalPaga.toFixed(2)}</p></div>
+        </div>
+        <div className="card flex items-center gap-4">
+          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center"><DollarSign className="w-5 h-5 text-purple-600" /></div>
+          <div><p className="text-xs text-gray-500">Total do mês</p><p className="text-lg font-bold text-purple-700">R$ {totalMes.toFixed(2)}</p></div>
         </div>
       </div>
 

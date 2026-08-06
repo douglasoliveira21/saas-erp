@@ -22,6 +22,11 @@ export class DashboardService {
   async getDashboardData() {
     const totalSales = await this.salesRepository.count();
 
+    // Current month boundaries (Brasilia UTC-3)
+    const now = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const monthStart = `${currentMonth}-01`;
+
     // Faturamento e lucro = apenas vendas PAGAS ou FINALIZADAS
     const paidData = await this.salesRepository
       .createQueryBuilder('sale')
@@ -43,6 +48,15 @@ export class DashboardService {
       .where('commission.status = :status', { status: 'pendente' })
       .getRawOne();
 
+    // Commissions paid this month
+    const paidCommissionsMonth = await this.commissionsRepository
+      .createQueryBuilder('commission')
+      .select('SUM(commission.amount)', 'total')
+      .where('commission.status = :status', { status: 'paga' })
+      .andWhere('(commission.reference_month = :month OR (commission.reference_month IS NULL AND commission.created_at >= :start))',
+        { month: currentMonth, start: monthStart })
+      .getRawOne();
+
     const lowStockProducts = await this.productsRepository
       .createQueryBuilder('product')
       .where('product.quantity <= product.min_stock')
@@ -54,22 +68,34 @@ export class DashboardService {
       totalProfit: parseFloat(paidData?.totalProfit || '0'),
       totalReceivable: parseFloat(receivableData?.totalReceivable || '0'),
       pendingCommissions: parseFloat(pendingCommissions?.total || '0'),
+      paidCommissionsMonth: parseFloat(paidCommissionsMonth?.total || '0'),
+      currentMonth,
       lowStockProducts,
     };
   }
 
   async getTechniciansSummary() {
-    // Comissões pendentes (a pagar) por técnico
-    const commissions = await this.commissionsRepository.find({
-      where: { status: 'pendente' as any },
-      relations: ['technician'],
-    });
+    // Current month boundaries
+    const now = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const monthStart = `${currentMonth}-01`;
 
-    // Rotas pendentes (a pagar) por técnico
-    const routes = await this.routesRepository.find({
-      where: { status: 'pendente' },
-      relations: ['technician'],
-    });
+    // Comissões pendentes do mês atual por técnico
+    const commissions = await this.commissionsRepository
+      .createQueryBuilder('commission')
+      .leftJoinAndSelect('commission.technician', 'technician')
+      .where('commission.status IN (:...statuses)', { statuses: ['pendente', 'aprovada'] })
+      .andWhere('(commission.reference_month = :month OR (commission.reference_month IS NULL AND commission.created_at >= :start))',
+        { month: currentMonth, start: monthStart })
+      .getMany();
+
+    // Rotas pendentes do mês atual por técnico
+    const routes = await this.routesRepository
+      .createQueryBuilder('route')
+      .leftJoinAndSelect('route.technician', 'technician')
+      .where('route.status IN (:...statuses)', { statuses: ['pendente', 'aprovado'] })
+      .andWhere('route.route_date >= :start', { start: monthStart })
+      .getMany();
 
     // Agrupar por técnico
     const techMap: Record<string, {
