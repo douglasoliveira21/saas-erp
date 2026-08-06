@@ -68,11 +68,10 @@ export function Dashboard() {
   useEffect(() => { loadDashboard() }, [])
 
   useEffect(() => {
-    if (isAdmin || isFinanceiro) {
-      api.get('/dashboard/technicians-summary', { timeout: 12000, params: { month: commissionMonth } })
-        .then(response => setTechSummary(response.data))
-        .catch(() => {})
-    }
+    if (!commissionMonth) return
+    api.get('/dashboard/technicians-summary', { timeout: 12000, params: { month: commissionMonth } })
+      .then(response => setTechSummary(response.data))
+      .catch(() => {})
   }, [commissionMonth])
 
   async function loadDashboard() {
