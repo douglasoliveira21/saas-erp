@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
-import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye, Edit } from 'lucide-react'
+import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye, Edit, RefreshCw } from 'lucide-react'
 
 interface Commission {
   id: string
@@ -102,6 +102,21 @@ export function Commissions() {
     finally { setEditSaving(false) }
   }
 
+  async function generateFixedMonth() {
+    const month = monthFilter || new Date().toISOString().slice(0, 7)
+    try {
+      const res = await trackAction(
+        `Gerando comissões fixas (${month})...`,
+        api.post('/commissions/generate-monthly', { month }),
+        'Comissões fixas geradas!'
+      )
+      if (res.data.created === 0) {
+        setError('Nenhuma comissão fixa nova para gerar neste mês (já existem ou não há templates)')
+      }
+      load()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao gerar') }
+  }
+
   async function payAll() {
     const pending = filtered.filter(c => c.status === 'pendente' || c.status === 'aprovada')
     if (pending.length === 0) { setError('Nenhuma comissão pendente para pagar'); return }
@@ -171,6 +186,9 @@ export function Commissions() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Comissoes</h1>
         {canManage && (
           <div className="flex gap-2">
+            <button onClick={generateFixedMonth} className="btn btn-secondary flex items-center gap-2" title="Gerar comissões fixas do mês selecionado">
+              <RefreshCw className="w-4 h-4" /> Gerar Fixas
+            </button>
             <button onClick={() => { setForm({ technicianId: '', description: '', baseValue: 0, percentage: 10, observations: '' }); setCommissionType('avulsa'); setError(''); setShowModal(true) }} className="btn btn-primary flex items-center gap-2">
               <Plus className="w-4 h-4" /> Nova Comissao
             </button>
