@@ -15,8 +15,7 @@ export class CommissionsService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // Gerar comissões fixas do mês atual na inicialização
-    // Aguarda um momento para garantir que as tabelas foram criadas pelo synchronize
+    // Generate fixed commissions for current month on startup
     setTimeout(async () => {
       try {
         const result = await this.generateMonthlyFixed();
@@ -32,18 +31,15 @@ export class CommissionsService implements OnModuleInit {
       }
     }, 5000);
 
-    // Verificar diariamente se precisa gerar (para o caso do servidor ficar ligado por meses)
+    // Check every 6 hours if current month fixed commissions exist
     setInterval(async () => {
       try {
-        const now = new Date();
-        if (now.getDate() === 1 && now.getHours() === 8) {
-          const result = await this.generateMonthlyFixed();
-          if (result.created > 0) {
-            this.logger.log(`Comissoes fixas mensais geradas: ${result.created}`);
-          }
+        const result = await this.generateMonthlyFixed();
+        if (result.created > 0) {
+          this.logger.log(`Comissoes fixas mensais geradas (check periódico): ${result.created}`);
         }
       } catch {}
-    }, 3600000); // Verifica a cada hora
+    }, 6 * 3600000);
   }
 
   async create(createCommissionDto: any, userId?: string): Promise<Commission> {
@@ -77,6 +73,7 @@ export class CommissionsService implements OnModuleInit {
       .createQueryBuilder('c')
       .where('c.type = :type', { type: 'fixa' })
       .andWhere('c.is_recurring = true')
+      .andWhere('c.status != :cancelled', { cancelled: 'cancelada' })
       .orderBy('c.created_at', 'DESC')
       .getMany();
 

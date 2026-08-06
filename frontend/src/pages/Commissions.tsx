@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
-import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye } from 'lucide-react'
+import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye, Edit } from 'lucide-react'
 
 interface Commission {
   id: string
@@ -44,6 +44,9 @@ export function Commissions() {
   const [error, setError] = useState('')
   const [selectedSale, setSelectedSale] = useState<any>(null)
   const [selectedCommission, setSelectedCommission] = useState<Commission | null>(null)
+  const [editingCommission, setEditingCommission] = useState<Commission | null>(null)
+  const [editForm, setEditForm] = useState({ description: '', baseValue: 0, percentage: 10, amount: 0, observations: '' })
+  const [editSaving, setEditSaving] = useState(false)
 
   useEffect(() => {
     load()
@@ -74,6 +77,29 @@ export function Commissions() {
     if (!confirm('Cancelar esta comissão?')) return
     try { await trackAction('Cancelando comissão...', api.patch(`/commissions/${id}/cancel`), 'Comissão cancelada!'); load() }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
+  }
+
+  function openEdit(c: Commission) {
+    setEditingCommission(c)
+    setEditForm({
+      description: c.description || '',
+      baseValue: Number(c.baseValue),
+      percentage: Number(c.percentage),
+      amount: Number(c.amount),
+      observations: c.observations || '',
+    })
+    setError('')
+  }
+
+  async function saveEdit() {
+    if (!editingCommission) return
+    setEditSaving(true)
+    try {
+      await trackAction('Salvando comissão...', api.patch(`/commissions/${editingCommission.id}`, editForm), 'Comissão atualizada!')
+      setEditingCommission(null)
+      load()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao salvar') }
+    finally { setEditSaving(false) }
   }
 
   async function payAll() {
@@ -264,6 +290,7 @@ export function Commissions() {
                     <div className="flex gap-1">
                       {c.sale && <button onClick={() => viewSale(c.sale!.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver venda"><Eye className="w-4 h-4" /></button>}
                       {!c.sale && <button onClick={() => setSelectedCommission(c)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver comissão"><Eye className="w-4 h-4" /></button>}
+                      {isAdmin && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => openEdit(c)} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>}
                       {canManage && c.status === 'pendente' && <button onClick={() => pay(c.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar pagamento"><DollarSign className="w-4 h-4" /></button>}
                       {canManage && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => cancel(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>}
                       {isAdmin && c.status === 'cancelada' && (
@@ -366,6 +393,70 @@ export function Commissions() {
           </div>
         </div>
       )}
+      {/* Modal Editar Comissão */}
+      {editingCommission && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Editar Comissão</h2>
+              <button onClick={() => setEditingCommission(null)}><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+
+              <div className="p-3 bg-gray-50 rounded-lg text-sm space-y-1">
+                <p><span className="text-gray-500">Técnico:</span> <strong>{editingCommission.technician?.name}</strong></p>
+                <p><span className="text-gray-500">Tipo:</span> <strong>{editingCommission.type === 'fixa' ? 'Fixa (Recorrente)' : editingCommission.type === 'venda' ? 'Venda' : 'Avulsa'}</strong></p>
+                <p><span className="text-gray-500">Mês referência:</span> <strong>{editingCommission.referenceMonth || editingCommission.createdAt?.slice(0, 7)}</strong></p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição</label>
+                <input className="input" value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor Base (R$)</label>
+                  <input className="input" type="number" step="0.01" min="0" value={editForm.baseValue} onChange={e => {
+                    const baseValue = parseFloat(e.target.value) || 0
+                    const amount = editingCommission.type === 'fixa' ? baseValue : baseValue * editForm.percentage / 100
+                    setEditForm({ ...editForm, baseValue, amount })
+                  }} />
+                </div>
+                {editingCommission.type !== 'fixa' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Percentual (%)</label>
+                    <input className="input" type="number" step="0.01" min="0" value={editForm.percentage} onChange={e => {
+                      const percentage = parseFloat(e.target.value) || 0
+                      const amount = editForm.baseValue * percentage / 100
+                      setEditForm({ ...editForm, percentage, amount })
+                    }} />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor Final (R$)</label>
+                <input className="input" type="number" step="0.01" min="0" value={editForm.amount} onChange={e => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })} />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Observações</label>
+                <textarea className="input" rows={2} value={editForm.observations} onChange={e => setEditForm({ ...editForm, observations: e.target.value })} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
+              <button onClick={() => setEditingCommission(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={saveEdit} disabled={editSaving} className="btn btn-primary flex items-center gap-2">
+                {editSaving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg mx-4">
