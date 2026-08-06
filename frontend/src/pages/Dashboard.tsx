@@ -63,8 +63,17 @@ export function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTech, setExpandedTech] = useState<string | null>(null)
   const [expandedSection, setExpandedSection] = useState<Record<string, 'commissions' | 'routes' | null>>({})
+  const [commissionMonth, setCommissionMonth] = useState(() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') })
 
   useEffect(() => { loadDashboard() }, [])
+
+  useEffect(() => {
+    if (isAdmin || isFinanceiro) {
+      api.get('/dashboard/technicians-summary', { timeout: 12000, params: { month: commissionMonth } })
+        .then(response => setTechSummary(response.data))
+        .catch(() => {})
+    }
+  }, [commissionMonth])
 
   async function loadDashboard() {
     setLoading(true)
@@ -81,7 +90,7 @@ export function Dashboard() {
 
     if (isAdmin || isFinanceiro) {
       void Promise.allSettled([
-        api.get('/dashboard/technicians-summary', { timeout: 12000 }).then(response => setTechSummary(response.data)),
+        api.get('/dashboard/technicians-summary', { timeout: 12000, params: { month: commissionMonth } }).then(response => setTechSummary(response.data)),
         api.get('/financial-tasks/today', { timeout: 12000 }).then(response => setFinancialTasks(response.data)),
       ]).then(results => results.forEach(result => {
         if (result.status === 'rejected') console.error('Erro ao carregar bloco secundário da dashboard:', result.reason)
@@ -253,16 +262,24 @@ export function Dashboard() {
       {/* Painel financeiro */}
       {(isAdmin || isFinanceiro) && (
         <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">
               Pagamentos Pendentes por Técnico
             </h2>
-            {totalAPagar > 0 && (
-              <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                <span className="text-sm text-gray-500">Total a pagar: </span>
-                <span className="font-bold text-red-600 text-lg">R$ {totalAPagar.toFixed(2)}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <input
+                type="month"
+                className="input w-44 text-sm"
+                value={commissionMonth}
+                onChange={e => setCommissionMonth(e.target.value)}
+              />
+              {totalAPagar > 0 && (
+                <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <span className="text-sm text-gray-500">Total: </span>
+                  <span className="font-bold text-red-600 text-lg">R$ {totalAPagar.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {techSummary.length === 0 ? (

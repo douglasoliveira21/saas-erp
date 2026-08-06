@@ -74,13 +74,13 @@ export class DashboardService {
     };
   }
 
-  async getTechniciansSummary() {
-    // Current month boundaries
+  async getTechniciansSummary(month?: string) {
+    // Use provided month or current month (Brasilia UTC-3)
     const now = new Date(Date.now() - 3 * 60 * 60 * 1000);
-    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = month || `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     const monthStart = `${currentMonth}-01`;
 
-    // Comissões pendentes do mês atual por técnico
+    // Comissões pendentes/aprovadas do mês por técnico
     const commissions = await this.commissionsRepository
       .createQueryBuilder('commission')
       .leftJoinAndSelect('commission.technician', 'technician')
@@ -89,7 +89,7 @@ export class DashboardService {
         { month: currentMonth, start: monthStart })
       .getMany();
 
-    // Rotas pendentes do mês atual por técnico
+    // Rotas pendentes/aprovadas do mês por técnico
     const routes = await this.routesRepository
       .createQueryBuilder('route')
       .leftJoinAndSelect('route.technician', 'technician')
