@@ -9,6 +9,7 @@ import { SaleSummary } from '../components/sales/SaleSummary'
 import { getErrorMessage } from '../services/errors'
 
 interface Customer { id: string; name: string }
+interface TechnicianOption { id: string; name: string; active?: boolean }
 
 export function NewSale() {
   const navigate = useNavigate()
@@ -17,6 +18,8 @@ export function NewSale() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<SaleProduct[]>([])
   const [services, setServices] = useState<SaleService[]>([])
+  const [technicians, setTechnicians] = useState<TechnicianOption[]>([])
+  const [technicianId, setTechnicianId] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [installments, setInstallments] = useState(1)
@@ -44,6 +47,7 @@ export function NewSale() {
       api.get('/customers').then(r => setCustomers(r.data)),
       api.get('/products').then(r => setProducts(r.data)),
       api.get('/services').then(r => setServices(r.data)),
+      isAdmin ? api.get('/users').then(r => setTechnicians(r.data.filter((u: any) => u.active))) : Promise.resolve(),
     ]).then(() => {
       // Check if editing an existing sale
       const params = new URLSearchParams(window.location.search)
@@ -52,6 +56,7 @@ export function NewSale() {
         loadSaleForEdit(editId)
       }
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function loadSaleForEdit(saleId: string) {
@@ -59,6 +64,7 @@ export function NewSale() {
       const res = await api.get('/sales/' + saleId)
       const sale = res.data
       setEditingSaleId(saleId)
+      setTechnicianId(sale.technician?.id || sale.technicianId || '')
       setCustomerId(sale.customer?.id || '')
       setPaymentMethod(sale.paymentMethod || 'pix')
       setInstallments(sale.installments || 1)
@@ -154,7 +160,12 @@ export function NewSale() {
     try {
       const payload = {
         customerId,
-        technicianId: user?.id,
+        // Ao criar, o backend atribui o vendedor logado automaticamente.
+        // Ao editar, só enviamos technicianId se um admin escolheu reatribuir a venda,
+        // para não sobrescrever o vendedor original (e sua comissão) com quem está editando.
+        ...(editingSaleId
+          ? (isAdmin && technicianId ? { technicianId } : {})
+          : { technicianId: technicianId || user?.id }),
         paymentMethod,
         alreadyPaid,
         installments: paymentMethod === 'boleto' && !alreadyPaid ? installments : 1,
@@ -230,6 +241,16 @@ export function NewSale() {
                 </select>
               </div>
             </div>
+
+            {isAdmin && editingSaleId && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Técnico responsável (vendedor)</label>
+                <select className="input" value={technicianId} onChange={e => setTechnicianId(e.target.value)}>
+                  {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Somente administradores podem reatribuir a venda. Ao trocar, a comissão passa a ser do novo técnico.</p>
+              </div>
+            )}
 
               <label className={`flex items-start gap-3 rounded-xl border p-4 transition-colors ${originallyPaid ? 'cursor-not-allowed border-emerald-300 bg-emerald-50 opacity-80' : alreadyPaid ? 'cursor-pointer border-emerald-300 bg-emerald-50' : 'cursor-pointer border-gray-200 bg-gray-50 hover:border-gray-300'}`}>
                 <input type="checkbox" checked={alreadyPaid} disabled={originallyPaid} onChange={event => setAlreadyPaid(event.target.checked)} className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 disabled:cursor-not-allowed" />

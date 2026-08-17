@@ -670,18 +670,30 @@ export class SalesService {
     }
   }
 
-  async update(id: string, updateSaleDto: any, userId?: string): Promise<Sale> {
+  async update(id: string, updateSaleDto: any, userId?: string, userRole?: string): Promise<Sale> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     let oldData: any;
     let safeDto: any;
+    let reassignedTechnician: { fromId: string; toId: string } | null = null;
     try {
       const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       oldData = { ...sale };
-      const { technician, customer, items, approver, alreadyPaid, ...allowedDto } = updateSaleDto;
+      const { technician, customer, items, approver, alreadyPaid, technicianId, ...allowedDto } = updateSaleDto;
       safeDto = allowedDto;
+
+      // Somente administradores podem reatribuir quem realizou a venda.
+      // Sem isso, a venda mantém o vendedor original mesmo quando outro usuário a edita.
+      if (technicianId && technicianId !== sale.technicianId) {
+        if (userRole !== 'admin') {
+          throw new BadRequestException('Apenas administradores podem alterar o técnico responsável pela venda');
+        }
+        reassignedTechnician = { fromId: sale.technicianId, toId: technicianId };
+        safeDto.technicianId = technicianId;
+      }
+
       const shouldMarkPaid = Boolean(alreadyPaid) && sale.paymentStatus !== 'pago';
       if (Array.isArray(items) && items.length) {
         const subtotal = moneySum(items.map((item: any) => moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0))));
@@ -711,6 +723,16 @@ export class SalesService {
         await this.financialService.settleSale(id, safeDto.paymentMethod || sale.paymentMethod, userId, `sale-edit-paid:${id}`, new Date(), undefined, queryRunner.manager);
         safeDto = { ...safeDto, markedPaid: true };
       }
+      if (reassignedTechnician) {
+        // Transfere a comissão pendente/aprovada da venda: retira do técnico anterior e credita ao novo.
+        await queryRunner.manager
+          .createQueryBuilder()
+          .update(Commission)
+          .set({ technicianId: reassignedTechnician.toId })
+          .where('sale_id = :saleId', { saleId: id })
+          .andWhere('status IN (:...statuses)', { statuses: ['pendente', 'aprovada'] })
+          .execute();
+      }
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -720,6 +742,17 @@ export class SalesService {
     }
     const updated = await this.findOne(id);
     await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, oldData, newData: safeDto });
+    if (reassignedTechnician) {
+      await this.auditService.safeCreate({
+        userId,
+        action: 'sale.technician_reassigned',
+        entity: 'sale',
+        entityId: id,
+        oldData: { technicianId: reassignedTechnician.fromId },
+        newData: { technicianId: reassignedTechnician.toId },
+      });
+      await this.addEvent(id, 'sale.technician_reassigned', updated.status as any, 'Técnico responsável pela venda alterado pelo administrador', userId, reassignedTechnician);
+    }
     return updated;
   }
 

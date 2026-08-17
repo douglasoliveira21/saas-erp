@@ -136,7 +136,7 @@ export class SalesController {
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   update(@Param('id') id: string, @Body() updateSaleDto: any, @Request() req: any) {
-    return this.salesService.update(id, updateSaleDto, req.user.id);
+    return this.salesService.update(id, updateSaleDto, req.user.id, req.user.role);
   }
 
   @Delete(':id')
