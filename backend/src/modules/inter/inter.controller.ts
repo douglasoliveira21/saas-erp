@@ -148,6 +148,7 @@ export class InterController {
 
   @Post('webhook/reprocess/:auditId')
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.reprocess_webhook')
   async reprocessWebhook(@Param('auditId') auditId: string) {
     const log = await this.auditRepo.findOne({ where: { id: auditId } });
@@ -170,6 +171,7 @@ export class InterController {
 
   @Post('cancel-batch')
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.cancel_batch')
   async cancelBatch(@Body() body: any) {
     const codes: string[] = body.codigoSolicitacoes || body.codes || [];
@@ -186,6 +188,7 @@ export class InterController {
 
   @Post('expired/:codigoSolicitacao')
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.handle_expired')
   async handleExpired(@Param('codigoSolicitacao') codigoSolicitacao: string, @Body() body: any) {
     const action = body.action || 'manter';

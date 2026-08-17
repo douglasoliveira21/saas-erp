@@ -13,7 +13,7 @@ export class CommissionsController {
   @Post()
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   create(@Body() createCommissionDto: any, @Request() req: any) {
-    return this.commissionsService.create(createCommissionDto, req.user.id);
+    return this.commissionsService.create(createCommissionDto, req.user.id, req.user.role);
   }
 
   @Post('generate-monthly')
@@ -23,13 +23,15 @@ export class CommissionsController {
   }
 
   @Get()
-  findAll() {
-    return this.commissionsService.findAll();
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  findAll(@Request() req: any) {
+    return this.commissionsService.findAll(req.user.id, req.user.role);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.commissionsService.findOne(id);
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.commissionsService.findOne(id, req.user.id, req.user.role);
   }
 
   @Patch(':id/approve')

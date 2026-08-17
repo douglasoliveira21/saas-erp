@@ -9,6 +9,7 @@ import { MailService } from '../mail/mail.service';
 @Injectable()
 export class ContractBillingService implements OnModuleInit {
   private readonly logger = new Logger(ContractBillingService.name);
+  private running = false;
 
   constructor(
     @InjectRepository(Contract)
@@ -34,7 +35,14 @@ export class ContractBillingService implements OnModuleInit {
   /**
    * Main billing check: finds contracts that need billing 7 days before due date
    */
-  async runBillingCheck(): Promise<{ processed: number; billed: number; errors: number }> {
+  async runBillingCheck(): Promise<{ processed: number; billed: number; errors: number; skipped?: boolean }> {
+    // Evita faturar/gerar boleto em duplicidade caso o timer, o startup e um disparo manual
+    // (POST /contracts/billing/check) se sobreponham enquanto uma execução anterior ainda está rodando.
+    if (this.running) {
+      this.logger.warn('Verificação de cobrança já em execução, ignorando chamada concorrente.');
+      return { processed: 0, billed: 0, errors: 0, skipped: true };
+    }
+    this.running = true;
     this.logger.log('Iniciando verificação de cobrança de contratos...');
     let processed = 0, billed = 0, errors = 0;
 
@@ -89,6 +97,8 @@ export class ContractBillingService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error('Erro na verificação de cobrança: ' + error.message);
+    } finally {
+      this.running = false;
     }
 
     this.logger.log(`Verificação concluída: ${processed} contratos verificados, ${billed} faturados, ${errors} erros`);

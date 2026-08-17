@@ -2,7 +2,7 @@ import {
   LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign,
   UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank,
   ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3,
-  Landmark, Archive, Building2, ShieldCheck, Boxes, Settings,
+  Landmark, Archive, Building2, ShieldCheck, Boxes, Settings, BookOpen,
 } from 'lucide-react'
 
 export interface NavItem { name: string; href: string; icon: LucideIcon; roles: string[] }
@@ -65,5 +65,6 @@ export const navigationSections: NavSection[] = [
     { name: 'Usuários e acessos', href: '/users', icon: UserCog, roles: ['admin'] },
     { name: 'Portal do cliente', href: '/customer-portal', icon: ShieldCheck, roles: ['admin'] },
     { name: 'Configuração de e-mail', href: '/email-settings', icon: Mail, roles: ['admin'] },
+    { name: 'Tutorial e guias', href: '/tutorial', icon: BookOpen, roles: all },
   ]},
 ]

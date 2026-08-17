@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Sale } from './entities/sale.entity';
@@ -225,11 +225,15 @@ export class SalesService {
     }
   }
 
-  async findAll(page?: number, limit?: number): Promise<Sale[] | { data: Sale[]; total: number; page: number; limit: number }> {
+  async findAll(page?: number, limit?: number, requesterId?: string, requesterRole?: string): Promise<Sale[] | { data: Sale[]; total: number; page: number; limit: number }> {
     const qb = this.salesRepository.createQueryBuilder('sale')
       .leftJoinAndSelect('sale.technician', 'technician').leftJoinAndSelect('sale.customer', 'customer')
       .leftJoinAndSelect('sale.items', 'items').leftJoinAndSelect('sale.events', 'events').leftJoinAndSelect('sale.attachments', 'attachments')
       .where('sale.archivedAt IS NULL').orderBy('sale.createdAt', 'DESC');
+    // Técnicos só enxergam as próprias vendas (e o próprio netProfit/comissão), não as de toda a empresa.
+    if (requesterRole === 'tecnico' && requesterId) {
+      qb.andWhere('sale.technicianId = :requesterId', { requesterId });
+    }
     if (!page && !limit) {
       const data = await qb.take(500).getMany();
       await this.applyEffectiveBillingStatus(data);
@@ -329,13 +333,18 @@ export class SalesService {
     };
   }
 
-  async findOne(id: string): Promise<Sale> {
+  async findOne(id: string, requesterId?: string, requesterRole?: string): Promise<Sale> {
     const sale = await this.salesRepository.findOne({
       where: { id },
       relations: ['technician', 'customer', 'items'],
     });
 
     if (!sale) throw new NotFoundException('Venda não encontrada');
+    // Só é aplicado quando o chamador informa quem está pedindo (endpoints de leitura expostos ao técnico);
+    // chamadas internas (approve/cancel/markPaid etc.) não passam requesterRole e continuam sem restrição.
+    if (requesterRole === 'tecnico' && requesterId && sale.technicianId !== requesterId) {
+      throw new ForbiddenException('Você não tem acesso a esta venda');
+    }
     return sale;
   }
 
@@ -719,6 +728,13 @@ export class SalesService {
         if (firstPending[0]) await queryRunner.query(`UPDATE accounts_receivable SET due_date=$1 WHERE sale_id=$2 AND status IN ('pendente','parcial')`, [firstPending[0].due_date, id]);
       }
       await queryRunner.manager.getRepository(Sale).save(sale);
+      if (Array.isArray(items) && items.length) {
+        await this.syncSaleCommission(
+          id,
+          { baseValue: Number(sale.totalAmount), percentage: Number(sale.commissionPercentage || 0), amount: Number(sale.commissionAmount) },
+          queryRunner.manager,
+        );
+      }
       if (shouldMarkPaid) {
         await this.financialService.settleSale(id, safeDto.paymentMethod || sale.paymentMethod, userId, `sale-edit-paid:${id}`, new Date(), undefined, queryRunner.manager);
         safeDto = { ...safeDto, markedPaid: true };
@@ -787,11 +803,29 @@ export class SalesService {
 
   async approveDiscount(id: string, discountAmount: number, userId: string, reason?: string) {
     const sale = await this.findOne(id);
-    sale.discountAmount = Number(discountAmount || 0);
+    const newDiscountAmount = money(discountAmount || 0);
+    if (newDiscountAmount < 0) throw new BadRequestException('Desconto não pode ser negativo');
+    if (newDiscountAmount > Number(sale.subtotal)) throw new BadRequestException('Desconto não pode ser maior que o subtotal da venda');
+
+    // Aprovar desconto precisa recalcular total/comissão/lucro líquido junto,
+    // do contrário esses campos ficam desatualizados em relação ao novo desconto.
+    const items = await this.saleItemsRepository.find({ where: { saleId: id } });
+    const totalCost = moneySum(items.map((item) => moneyMultiply(Number(item.costPrice || 0), Number(item.quantity || 0))));
+    const totalAmount = money(Number(sale.subtotal) - newDiscountAmount);
+    const commissionAmount = moneyMultiply(totalAmount, Number(sale.commissionPercentage || 0) / 100);
+    const netProfit = money(totalAmount - totalCost - Number(sale.taxAmount) - commissionAmount);
+
+    sale.discountAmount = newDiscountAmount;
     sale.discountApprovedBy = userId;
+    sale.totalAmount = totalAmount;
+    sale.commissionAmount = commissionAmount;
+    sale.netProfit = netProfit;
     const saved = await this.salesRepository.save(sale);
+    await this.syncSaleCommission(id, { baseValue: totalAmount, percentage: Number(sale.commissionPercentage || 0), amount: commissionAmount });
     await this.addEvent(id, 'sale.discount_approved', saved.status as any, 'Desconto aprovado', userId, {
-      discountAmount,
+      discountAmount: newDiscountAmount,
+      totalAmount,
+      commissionAmount,
       reason,
     });
     return saved;
@@ -808,6 +842,23 @@ export class SalesService {
     return attachment;
   }
 
+  // Mantém a comissão pendente/aprovada vinculada à venda em sincronia com o valor real da venda,
+  // já que a comissão é o registro que efetivamente paga o técnico (não os campos denormalizados na venda).
+  private async syncSaleCommission(
+    saleId: string,
+    params: { baseValue: number; percentage: number; amount: number },
+    manager?: import('typeorm').EntityManager,
+  ) {
+    const repo = manager ? manager.getRepository(Commission) : this.commissionsRepository;
+    await repo
+      .createQueryBuilder()
+      .update(Commission)
+      .set({ baseValue: params.baseValue, percentage: params.percentage, amount: params.amount })
+      .where('sale_id = :saleId', { saleId })
+      .andWhere('status IN (:...statuses)', { statuses: ['pendente', 'aprovada'] })
+      .execute();
+  }
+
   async getAttachment(saleId: string, attachmentId: string) {
     await this.findOne(saleId);
     const attachment = await this.saleAttachmentRepository.findOne({ where: { id: attachmentId, saleId } });
@@ -815,8 +866,8 @@ export class SalesService {
     return attachment;
   }
 
-  async getEvents(id: string) {
-    await this.findOne(id);
+  async getEvents(id: string, requesterId?: string, requesterRole?: string) {
+    await this.findOne(id, requesterId, requesterRole);
     return this.saleEventRepository.find({ where: { saleId: id }, order: { createdAt: 'ASC' } });
   }
 

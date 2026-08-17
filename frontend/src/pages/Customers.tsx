@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useActionToast } from '../components/ActionToast'
+import { useAuth } from '../contexts/AuthContext'
 import { Plus, Search, Edit, Trash2, X, Check, Loader2 } from 'lucide-react'
 
 interface Customer {
@@ -28,6 +29,7 @@ const emptyForm = { name: '', cpf_cnpj: '', phone: '', email: '', additionalEmai
 
 export function Customers() {
   const { trackAction } = useActionToast()
+  const { isAdmin } = useAuth()
   const canEdit = true // Todos os usuários podem visualizar, editar e adicionar clientes
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -221,7 +223,7 @@ export function Customers() {
                     <td className="table-cell">
                       <div className="flex gap-2">
                         <button onClick={() => openEdit(c)} className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-4 h-4" /></button>
-                        <button onClick={() => remove(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                        {isAdmin && <button onClick={() => remove(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>}
                       </div>
                     </td>
                   )}

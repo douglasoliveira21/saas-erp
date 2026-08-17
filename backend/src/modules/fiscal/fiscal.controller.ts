@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Request, UseInterceptors, UploadedFile, Res, Query, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,6 +26,8 @@ import { getCustomerEmailRecipients, getCustomerEmails } from '../../common/cust
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class FiscalController {
+  private readonly logger = new Logger(FiscalController.name);
+
   constructor(
     private certificateService: CertificateService,
     private nfeService: NfeService,
@@ -82,7 +84,11 @@ export class FiscalController {
         `UPDATE sales SET status = CASE WHEN status = 'pendente' THEN 'nf_emitida' ELSE status END, fiscal_status = 'autorizada', updated_at = NOW() WHERE id = $1`,
         [saleId]
       );
-    } catch {}
+    } catch (error: any) {
+      // Não bloqueia a emissão (a nota já foi autorizada), mas precisa ficar visível — sem isso
+      // a venda pode ficar presa como "pendente" sem ninguém perceber que o NF task não fechou.
+      this.logger.error(`Falha ao concluir tarefa de NF / atualizar venda ${saleId}: ${error?.message}`);
+    }
   }
 
   // === CERTIFICADOS ===
@@ -384,7 +390,10 @@ export class FiscalController {
             { filename: `NFSe_${result.number}.xml`, content: Buffer.from(xmlContent, 'utf-8'), contentType: 'application/xml' },
           ]);
         }
-      } catch {}
+      } catch (error: any) {
+        // Não bloqueia a emissão da NFS-e, mas o cliente pode nunca receber a nota se isso for engolido em silêncio.
+        this.logger.error(`Falha ao enviar NFS-e por email (venda ${body?.saleId}): ${error?.message}`);
+      }
     }
     return result;
   }
@@ -408,7 +417,9 @@ export class FiscalController {
         ],
       );
     } catch (error: any) {
-      // O documento fiscal permanece autorizado; a falha de entrega fica no histórico de e-mails.
+      // O documento fiscal permanece autorizado mesmo se o email falhar, mas a falha precisa ficar
+      // visível nos logs — antes disso o cliente podia nunca receber a NF-e e ninguém saberia.
+      this.logger.error(`Falha ao enviar NF-e autorizada por email (venda ${saleId}, invoice ${invoiceId}): ${error?.message}`);
     }
   }
   private calculateNfseTaxes(serviceData: any): Record<string, any> {

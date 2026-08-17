@@ -38,7 +38,13 @@ const unsafeSecrets = new Set([
 ]);
 
 export function validateProductionSecrets(): void {
-  if (env.server.nodeEnv !== 'production') return;
+  // Só pula a validação quando NODE_ENV está explicitamente configurado como development/test.
+  // Um deploy que esqueça de definir NODE_ENV cairia no default 'development' do env.config e
+  // subiria em produção com JWT_SECRET fraco e CORS liberado sem nenhum aviso — por isso tratamos
+  // "não configurado" (ou qualquer valor inesperado) como produção para fins de validação de segredos.
+  const rawNodeEnv = (process.env.NODE_ENV || '').trim().toLowerCase();
+  const isExplicitlyDev = rawNodeEnv === 'development' || rawNodeEnv === 'test';
+  if (isExplicitlyDev) return;
   const required = ['JWT_SECRET', 'CERT_ENCRYPTION_KEY', 'CREDENTIAL_ENCRYPTION_KEY', 'INTER_WEBHOOK_SECRET'];
   const invalid = required.filter((name) => {
     const value = (process.env[name] || '').trim();

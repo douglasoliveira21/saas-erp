@@ -25,18 +25,21 @@ export class SalesController {
   }
 
   @Get()
-  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
-    return this.salesService.findAll(page ? Number(page) : undefined, limit ? Number(limit) : undefined);
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  findAll(@Query('page') page: string | undefined, @Query('limit') limit: string | undefined, @Request() req: any) {
+    return this.salesService.findAll(page ? Number(page) : undefined, limit ? Number(limit) : undefined, req.user.id, req.user.role);
   }
 
   @Get('last-price/:type/:itemId')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   getLastPrice(@Param('type') type: string, @Param('itemId') itemId: string) {
     return this.salesService.getLastSalePrice(type as 'product' | 'service', itemId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.salesService.findOne(id);
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.findOne(id, req.user.id, req.user.role);
   }
 
   @Patch(':id/approve')
@@ -129,8 +132,9 @@ export class SalesController {
   }
 
   @Get(':id/events')
-  getEvents(@Param('id') id: string) {
-    return this.salesService.getEvents(id);
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  getEvents(@Param('id') id: string, @Request() req: any) {
+    return this.salesService.getEvents(id, req.user.id, req.user.role);
   }
 
   @Patch(':id')

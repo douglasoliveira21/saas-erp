@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Commission } from './entities/commission.entity';
 import { AuditService } from '../audit/audit.service';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { CommissionType } from '../../common/enums/commission-type.enum';
+import { CommissionStatus } from '../../common/enums/commission-status.enum';
+
+const isPrivilegedRole = (role?: string) => role === UserRole.ADMIN || role === UserRole.FINANCEIRO;
 
 @Injectable()
 export class CommissionsService implements OnModuleInit {
@@ -38,12 +43,29 @@ export class CommissionsService implements OnModuleInit {
         if (result.created > 0) {
           this.logger.log(`Comissoes fixas mensais geradas (check periódico): ${result.created}`);
         }
-      } catch {}
+      } catch (e: any) {
+        this.logger.error('Erro ao gerar comissoes fixas (check periódico): ' + e?.message);
+      }
     }, 6 * 3600000);
   }
 
-  async create(createCommissionDto: any, userId?: string): Promise<Commission> {
+  async create(createCommissionDto: any, userId?: string, userRole?: string): Promise<Commission> {
     const dto = { ...createCommissionDto };
+
+    // Técnicos só podem solicitar comissão avulsa para si mesmos, e ela nasce sempre pendente.
+    // Sem isso, qualquer usuário autenticado poderia se auto-atribuir uma comissão já paga,
+    // fixa/recorrente, ou em nome de outro técnico apenas manipulando o corpo da requisição.
+    if (!isPrivilegedRole(userRole)) {
+      dto.technicianId = userId;
+      dto.type = CommissionType.AVULSA;
+      dto.status = CommissionStatus.PENDENTE;
+      dto.isRecurring = false;
+      delete dto.referenceMonth;
+      delete dto.approvedBy;
+      delete dto.approvedAt;
+      delete dto.paidBy;
+      delete dto.paidAt;
+    }
 
     // Se for fixa, marcar como recorrente e definir mes de referencia
     if (dto.type === 'fixa') {
@@ -117,19 +139,25 @@ export class CommissionsService implements OnModuleInit {
     return { created, total };
   }
 
-  async findAll(): Promise<Commission[]> {
+  async findAll(requesterId?: string, requesterRole?: string): Promise<Commission[]> {
+    // Técnicos só podem ver a própria folha de comissão, não a de toda a empresa.
+    const where = !isPrivilegedRole(requesterRole) && requesterId ? { technicianId: requesterId } : {};
     return this.commissionsRepository.find({
+      where,
       relations: ['technician', 'sale'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findOne(id: string): Promise<Commission> {
+  async findOne(id: string, requesterId?: string, requesterRole?: string): Promise<Commission> {
     const commission = await this.commissionsRepository.findOne({
       where: { id },
       relations: ['technician', 'sale'],
     });
     if (!commission) throw new NotFoundException('Comissão não encontrada');
+    if (!isPrivilegedRole(requesterRole) && requesterId && commission.technicianId !== requesterId) {
+      throw new ForbiddenException('Você não tem acesso a esta comissão');
+    }
     return commission;
   }
 
