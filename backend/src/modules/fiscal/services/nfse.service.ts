@@ -15,6 +15,10 @@ import { AuditService } from '../../audit/audit.service';
 export class NfseService {
   private readonly logger = new Logger(NfseService.name);
 
+  // Resolucao CGSN 191/2026 (04/08/2026): obrigatoriedade do Emissor/Ambiente Nacional
+  // NFS-e para optantes do Simples Nacional (ME/EPP) passa a valer em 01/11/2026.
+  private static readonly SN_NATIONAL_MANDATORY_DATE = new Date('2026-11-01T00:00:00-03:00');
+
   constructor(
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
@@ -330,6 +334,10 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const serie = String(config.nfseSeries).padStart(5, '0');
     const nDPS = String(config.nfseNextNumber).padStart(15, '0');
 
+    // opSimpNac: 1=Não optante, 2=MEI, 3=Optante Simples Nacional (exceto MEI)
+    // taxRegime segue o mesmo domínio do CRT da NFe: 1=Simples Nacional, 2=Simples Nacional excesso sublimite, 3=Regime Normal
+    const opSimpNac = config.taxRegime === 3 ? '1' : '3';
+
     // TSIdDPS: DPS + cLocEmi(7) + tpInsc(1:CPF=1,CNPJ=2) + doc(14) + serie(5) + nDPS(15) = 45 chars total
     const nDPSPad = String(config.nfseNextNumber).padStart(15, '0');
     const idDps = 'DPS' + config.cityCode + '2' + cnpj + serie + nDPSPad;
@@ -375,7 +383,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       ? `<IBSCBS><finNFSe>${ibsCbs.purpose}</finNFSe><indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
       : '';
 
-    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>3</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
+    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>${opSimpNac}</opSimpNac>${opSimpNac === '3' ? '<regApTribSN>1</regApTribSN>' : ''}<regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
   }
 
   private escapeXml(value: string): string {
@@ -495,8 +503,16 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada`);
     }
 
-    const normalized = configuredUrl.trim().replace(/\/+$/, '');
-    return /\/NotaNacional$/i.test(normalized) ? normalized : normalized + '/NotaNacional';
+    const normalized = configuredUrl.trim().replace(/\/+$/, '').replace(/\/NotaNacional$/i, '');
+
+    // Resolucao CGSN 191/2026: obrigatoriedade do Ambiente Nacional para optantes do
+    // Simples Nacional foi adiada de 01/09/2026 para 01/11/2026. Ate la, mantemos a
+    // contingencia pelo endpoint municipal do Cidade360 para prestadores do SN.
+    const isSimplesNacional = config.taxRegime !== 3;
+    const nationalMandatory = new Date() >= NfseService.SN_NATIONAL_MANDATORY_DATE;
+    const useNationalEndpoint = !isSimplesNacional || nationalMandatory;
+
+    return useNationalEndpoint ? normalized + '/NotaNacional' : normalized;
   }
 
   private normalizeStatusResponse(response: any, invoice: Invoice): any {
