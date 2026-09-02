@@ -49,6 +49,16 @@ interface FinTask {
   sale: { id: string; customer: { name: string }; totalAmount: number; paymentMethod: string }
 }
 
+interface OverdueCustomer {
+  customerId: string
+  customerName: string
+  customerPhone: string | null
+  overdueCount: number
+  overdueAmount: number
+  oldestDueDate: string
+  maxDaysOverdue: number
+}
+
 const financialTaskLabels: Record<string, string> = {
   emissao_nf: 'NF',
   emissao_boleto: 'Boleto',
@@ -59,6 +69,8 @@ export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [techSummary, setTechSummary] = useState<TechSummary[]>([])
   const [financialTasks, setFinancialTasks] = useState<{ nf: FinTask[]; boleto: FinTask[]; overdue: FinTask[] }>({ nf: [], boleto: [], overdue: [] })
+  const [overdueCustomers, setOverdueCustomers] = useState<OverdueCustomer[]>([])
+  const [showAllOverdueCustomers, setShowAllOverdueCustomers] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTech, setExpandedTech] = useState<string | null>(null)
@@ -91,6 +103,7 @@ export function Dashboard() {
       void Promise.allSettled([
         api.get('/dashboard/technicians-summary', { timeout: 12000, params: { month: commissionMonth } }).then(response => setTechSummary(response.data)),
         api.get('/financial-tasks/today', { timeout: 12000 }).then(response => setFinancialTasks(response.data)),
+        api.get('/dashboard/overdue-customers', { timeout: 12000 }).then(response => setOverdueCustomers(response.data)),
       ]).then(results => results.forEach(result => {
         if (result.status === 'rejected') console.error('Erro ao carregar bloco secundário da dashboard:', result.reason)
       }))
@@ -197,6 +210,57 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Alerta de clientes em atraso */}
+      {(isAdmin || isFinanceiro) && overdueCustomers.length > 0 && (
+        <div className="mb-8">
+          <div className="card border-l-4 border-red-600 p-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+                <span className="font-bold text-red-700">
+                  {overdueCustomers.length} cliente{overdueCustomers.length > 1 ? 's' : ''} com pagamento em atraso
+                </span>
+                <span className="text-sm text-gray-500">
+                  (total R$ {overdueCustomers.reduce((s, c) => s + Number(c.overdueAmount), 0).toFixed(2)})
+                </span>
+              </div>
+              <Link to="/financeiro" className="text-xs text-primary-600 hover:underline font-medium">Ver todos no Financeiro →</Link>
+            </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {(showAllOverdueCustomers ? overdueCustomers : overdueCustomers.slice(0, 5)).map(c => (
+                <div key={c.customerId} className="py-2 flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{c.customerName}</p>
+                    <p className="text-xs text-gray-500">
+                      {c.overdueCount} parcela{c.overdueCount > 1 ? 's' : ''} vencida{c.overdueCount > 1 ? 's' : ''} · até {c.maxDaysOverdue} dia{c.maxDaysOverdue !== 1 ? 's' : ''} de atraso
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-semibold text-red-600">R$ {Number(c.overdueAmount).toFixed(2)}</span>
+                    {c.customerPhone && (
+                      <a
+                        href={`https://wa.me/55${c.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${c.customerName}, identificamos ${c.overdueCount} parcela(s) em atraso no valor de R$ ${Number(c.overdueAmount).toFixed(2)}. Podemos ajudar a regularizar?`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-md hover:bg-green-200 font-medium"
+                        title="Cobrar via WhatsApp"
+                      >
+                        WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {overdueCustomers.length > 5 && (
+              <button onClick={() => setShowAllOverdueCustomers(v => !v)} className="text-xs text-gray-500 hover:text-gray-700 mt-2">
+                {showAllOverdueCustomers ? 'Mostrar menos' : `+${overdueCustomers.length - 5} mais...`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Alertas financeiros do dia */}
       {(isAdmin || isFinanceiro) && (financialTasks.nf.length > 0 || financialTasks.boleto.length > 0 || financialTasks.overdue.length > 0) && (

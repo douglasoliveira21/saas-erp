@@ -160,4 +160,44 @@ export class DashboardService {
 
     return Object.values(techMap).sort((a, b) => b.total - a.total);
   }
+
+  // Clientes com parcelas vencidas e nao pagas, agrupados (uma unica venda parcelada gerando
+  // varias parcelas em atraso deve contar como UM cliente em atraso, nao uma linha por parcela).
+  async getOverdueCustomers(): Promise<{
+    customerId: string;
+    customerName: string;
+    customerPhone: string | null;
+    overdueCount: number;
+    overdueAmount: number;
+    oldestDueDate: string;
+    maxDaysOverdue: number;
+  }[]> {
+    const rows = await this.salesRepository.manager.query(`
+      SELECT
+        c.id AS "customerId",
+        c.name AS "customerName",
+        c.phone AS "customerPhone",
+        COUNT(*)::int AS "overdueCount",
+        SUM(i.value - i.paid_value)::numeric AS "overdueAmount",
+        MIN(i.due_date) AS "oldestDueDate",
+        MAX((CURRENT_DATE - i.due_date))::int AS "maxDaysOverdue"
+      FROM installments i
+      JOIN accounts_receivable a ON a.id = i.account_id
+      JOIN customers c ON c.id = a.customer_id
+      WHERE i.status IN ('pendente', 'vencido')
+        AND i.due_date < CURRENT_DATE
+        AND a.status NOT IN ('cancelado')
+      GROUP BY c.id, c.name, c.phone
+      ORDER BY "overdueAmount" DESC
+    `);
+    return rows.map((r: any) => ({
+      customerId: r.customerId,
+      customerName: r.customerName,
+      customerPhone: r.customerPhone,
+      overdueCount: Number(r.overdueCount),
+      overdueAmount: Number(r.overdueAmount),
+      oldestDueDate: r.oldestDueDate,
+      maxDaysOverdue: Number(r.maxDaysOverdue),
+    }));
+  }
 }

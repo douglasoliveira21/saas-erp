@@ -364,7 +364,10 @@ export class FinancialService implements OnModuleInit {
         status: In(['pendente', 'vencido']),
         dueDate: LessThan(today),
       },
-      relations: ['account'],
+      // account.customer e necessario para a tela mostrar o nome do cliente inadimplente —
+      // sem esse relation, installment.customer sempre vinha undefined (aba "Inadimplentes"
+      // sempre mostrava o nome em branco).
+      relations: ['account', 'account.customer'],
       order: { dueDate: 'ASC' },
     });
 
@@ -376,7 +379,7 @@ export class FinancialService implements OnModuleInit {
       }
     }
 
-    return overdue;
+    return overdue.map(installment => ({ ...installment, customer: installment.account?.customer }));
   }
 
   async repairPaidPaymentIntegrity(source = 'manual'): Promise<{ checked: number; repaired: number; failed: number; details: any[] }> {

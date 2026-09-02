@@ -20,4 +20,10 @@ export class DashboardController {
   getTechniciansSummary(@Query('month') month?: string) {
     return this.dashboardService.getTechniciansSummary(month);
   }
+
+  @Get('overdue-customers')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  getOverdueCustomers() {
+    return this.dashboardService.getOverdueCustomers();
+  }
 }
