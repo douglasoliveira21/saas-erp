@@ -90,6 +90,18 @@ export function Fiscal() {
 
   useEffect(() => { load() }, [])
 
+  // O endpoint filtra por mes no servidor agora — sem isso, trocar o filtro de mes so re-filtrava
+  // no navegador a mesma pagina fixa de notas mais recentes, que podia nunca conter as do mes
+  // anterior se a empresa ja tivesse emitido mais notas que o limite da pagina desde entao.
+  useEffect(() => { if (!loading) loadInvoices() }, [invMonth])
+
+  async function loadInvoices() {
+    try {
+      const invs = await api.get('/fiscal/invoices', { params: { month: invMonth, limit: 100 } })
+      setInvoices(invs.data.data || invs.data)
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar notas') }
+  }
+
   // Detectar parametro ?emit=saleId na URL para pre-selecionar venda
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -104,7 +116,7 @@ export function Fiscal() {
     try {
       const [certs, invs, salesRes, cfgRes] = await Promise.all([
         api.get('/fiscal/certificates'),
-        api.get('/fiscal/invoices'),
+        api.get('/fiscal/invoices', { params: { month: invMonth, limit: 100 } }),
         api.get('/sales'),
         api.get('/fiscal/config').catch(() => ({ data: null })),
       ])

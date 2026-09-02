@@ -183,12 +183,26 @@ export class FiscalController {
   // === NOTAS FISCAIS ===
   @Get('invoices')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  async getInvoices(@Query('page') page = '1', @Query('limit') limit = '50') {
+  async getInvoices(@Query('page') page = '1', @Query('limit') limit = '50', @Query('month') month?: string) {
     const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-    const [data, total] = await this.invoiceRepo.findAndCount({
-      select: ['id', 'type', 'number', 'series', 'accessKey', 'protocolNumber', 'verificationCode', 'status', 'recipientName', 'recipientCnpj', 'totalValue', 'rejectionReason', 'cancelReason', 'issuedAt', 'createdAt', 'saleId', 'environment'],
-      relations: ['sale', 'sale.customer'], order: { createdAt: 'DESC' }, skip: (safePage - 1) * safeLimit, take: safeLimit,
-    });
+    const query = this.invoiceRepo.createQueryBuilder('invoice')
+      .leftJoinAndSelect('invoice.sale', 'sale')
+      .leftJoinAndSelect('sale.customer', 'customer')
+      .select(['invoice.id', 'invoice.type', 'invoice.number', 'invoice.series', 'invoice.accessKey', 'invoice.protocolNumber', 'invoice.verificationCode', 'invoice.status', 'invoice.recipientName', 'invoice.recipientCnpj', 'invoice.totalValue', 'invoice.rejectionReason', 'invoice.cancelReason', 'invoice.issuedAt', 'invoice.createdAt', 'invoice.saleId', 'invoice.environment', 'sale.id', 'customer.id', 'customer.name'])
+      .orderBy('invoice.createdAt', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit);
+
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      // Filtra pela data de emissao (issuedAt), caindo para createdAt quando a nota nao foi
+      // emitida (rejeitada/pendente) — mesmo criterio que a tela usa para exibir a data.
+      // Sem esse filtro no servidor, a tela buscava so as N notas mais recentes por createdAt e
+      // filtrava mes no navegador: se a empresa emitisse mais notas que o limite da pagina desde
+      // entao, as notas de um mes anterior nunca chegavam a ser buscadas.
+      query.andWhere('to_char(COALESCE(invoice.issuedAt, invoice.createdAt), \'YYYY-MM\') = :month', { month });
+    }
+
+    const [data, total] = await query.getManyAndCount();
     return { data, total, page: safePage, limit: safeLimit };
   }
   @Get('invoices/:id')
