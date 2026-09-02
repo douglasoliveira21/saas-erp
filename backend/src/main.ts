@@ -50,7 +50,41 @@ async function bootstrap() {
     await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_purchase_installment ON bills(purchase_id, installment_number) WHERE purchase_id IS NOT NULL`).catch(() => {});
     // contract_billings unique constraint + updated_at column
     await ds.query(`ALTER TABLE contract_billings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
-    await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contract_billings_period ON contract_billings(contract_id, billing_period)`).catch(() => {});
+    // Sem constraint única desde sempre, contract_billings acumulou linhas duplicadas por
+    // (contract_id, billing_period) — o que faz o CREATE UNIQUE INDEX abaixo falhar (violação de
+    // unicidade) e ser engolido pelo .catch() a cada boot, silenciosamente, sem nunca aplicar a
+    // trava. Mescla os duplicados (mantendo o invoice_id/boleto_code mais completo) antes de tentar.
+    await ds.query(`
+      DO $$
+      DECLARE has_dupes boolean;
+      BEGIN
+        SELECT EXISTS (
+          SELECT 1 FROM contract_billings GROUP BY contract_id, billing_period HAVING COUNT(*) > 1
+        ) INTO has_dupes;
+        IF has_dupes THEN
+          CREATE TEMP TABLE cb_merge AS
+          SELECT
+            contract_id,
+            billing_period,
+            (array_agg(id ORDER BY (invoice_id IS NOT NULL) DESC, (boleto_code IS NOT NULL) DESC, created_at DESC))[1] AS keep_id,
+            (array_agg(invoice_id ORDER BY invoice_id IS NULL, created_at DESC))[1] AS merged_invoice_id,
+            (array_agg(boleto_code ORDER BY boleto_code IS NULL, created_at DESC))[1] AS merged_boleto_code
+          FROM contract_billings
+          GROUP BY contract_id, billing_period;
+
+          UPDATE contract_billings cb
+          SET invoice_id = m.merged_invoice_id, boleto_code = m.merged_boleto_code, updated_at = NOW()
+          FROM cb_merge m
+          WHERE cb.id = m.keep_id;
+
+          DELETE FROM contract_billings cb
+          WHERE NOT EXISTS (SELECT 1 FROM cb_merge m WHERE m.keep_id = cb.id);
+
+          DROP TABLE cb_merge;
+        END IF;
+      END $$;
+    `).catch((e) => console.warn('contract_billings dedupe warning:', e.message));
+    await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contract_billings_period ON contract_billings(contract_id, billing_period)`).catch((e) => console.warn('idx_contract_billings_period warning:', e.message));
     // bill_payments table (ensure exists)
     await ds.query(`
       CREATE TABLE IF NOT EXISTS bill_payments (
