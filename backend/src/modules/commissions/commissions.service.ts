@@ -86,9 +86,12 @@ export class CommissionsService implements OnModuleInit {
     return result;
   }
 
-  // Gera comissoes fixas do mes para todos os tecnicos que tem comissao fixa
+  // Gera comissoes fixas de todos os meses (desde a criacao do template ate o mes alvo) para
+  // todos os tecnicos que tem comissao fixa. Antes só checava/gerava o mes alvo isoladamente —
+  // se o backend ficasse fora do ar (ou ninguem clicasse "Gerar Fixas") durante um mes inteiro,
+  // aquele mes ficava permanentemente sem comissao, sem nenhuma forma automatica de recuperar.
   async generateMonthlyFixed(month?: string): Promise<{ created: number; total: number }> {
-    const refMonth = month || new Date().toISOString().slice(0, 7);
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
 
     // Buscar todas as comissoes fixas (template - pegar a mais recente de cada tecnico)
     const fixedTemplates = await this.commissionsRepository
@@ -109,34 +112,56 @@ export class CommissionsService implements OnModuleInit {
     let total = 0;
 
     for (const template of Object.values(byTech)) {
-      // Verificar se ja existe comissao fixa deste mes para este tecnico
-      const existing = await this.commissionsRepository.findOne({
-        where: {
-          technicianId: template.technicianId,
-          type: 'fixa' as any,
-          referenceMonth: refMonth,
-        },
-      });
-
-      if (!existing) {
-        const newCommission = this.commissionsRepository.create({
-          technicianId: template.technicianId,
-          type: 'fixa' as any,
-          description: template.description || 'Comissao fixa mensal',
-          baseValue: template.baseValue,
-          percentage: template.percentage,
-          amount: template.amount,
-          status: 'pendente' as any,
-          isRecurring: true,
-          referenceMonth: refMonth,
+      const months = this.monthsBetween(template.referenceMonth, targetMonth);
+      for (const refMonth of months) {
+        // Verificar se ja existe comissao fixa deste mes para este tecnico
+        const existing = await this.commissionsRepository.findOne({
+          where: {
+            technicianId: template.technicianId,
+            type: 'fixa' as any,
+            referenceMonth: refMonth,
+          },
         });
-        await this.commissionsRepository.save(newCommission);
-        created++;
-        total += Number(template.amount);
+
+        if (!existing) {
+          const newCommission = this.commissionsRepository.create({
+            technicianId: template.technicianId,
+            type: 'fixa' as any,
+            description: template.description || 'Comissao fixa mensal',
+            baseValue: template.baseValue,
+            percentage: template.percentage,
+            amount: template.amount,
+            status: 'pendente' as any,
+            isRecurring: true,
+            referenceMonth: refMonth,
+          });
+          await this.commissionsRepository.save(newCommission);
+          created++;
+          total += Number(template.amount);
+        }
       }
     }
 
     return { created, total };
+  }
+
+  // Lista de meses "YYYY-MM" de start ate end, inclusive. Retorna vazio se start estiver
+  // vazio/invalido ou for posterior a end (ex.: gerar um mes anterior ao template existir).
+  private monthsBetween(start: string, end: string): string[] {
+    // Sem referenceMonth valido no template (dado legado), volta ao comportamento anterior de
+    // so considerar o mes alvo, em vez de nao gerar nada.
+    if (!start || !/^\d{4}-\d{2}$/.test(start) || !/^\d{4}-\d{2}$/.test(end)) return [end];
+    const [startYear, startMonthNum] = start.split('-').map(Number);
+    const [endYear, endMonthNum] = end.split('-').map(Number);
+    const months: string[] = [];
+    let year = startYear;
+    let monthNum = startMonthNum;
+    while (year < endYear || (year === endYear && monthNum <= endMonthNum)) {
+      months.push(`${year}-${String(monthNum).padStart(2, '0')}`);
+      monthNum++;
+      if (monthNum > 12) { monthNum = 1; year++; }
+    }
+    return months;
   }
 
   async findAll(requesterId?: string, requesterRole?: string): Promise<Commission[]> {
