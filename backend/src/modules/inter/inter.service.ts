@@ -503,7 +503,7 @@ export class InterService implements OnModuleInit {
     const cobranca = interData?.cobranca || interData; const boleto = interData?.boleto || {}; const pix = interData?.pix || {};
     const situacao = cobranca?.situacao || interData?.situacao || interData?.status; const localStatus = this.getLocalPaymentStatus(situacao);
     return this.saleRepo.manager.transaction(async (manager) => {
-      const previous = await manager.query(`SELECT sale_id, type, status FROM payments WHERE codigo_solicitacao=$1 FOR UPDATE`, [codigoSolicitacao]);
+      const previous = await manager.query(`SELECT sale_id, type, status, installment_id, value FROM payments WHERE codigo_solicitacao=$1 FOR UPDATE`, [codigoSolicitacao]);
       if (!previous[0]) throw new HttpException('Cobrança local não encontrada', HttpStatus.NOT_FOUND);
       const updated = await manager.query(
         `UPDATE payments
@@ -514,19 +514,26 @@ export class InterService implements OnModuleInit {
              paid_at = CASE WHEN $1::varchar = 'pago' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
              updated_at = NOW()
          WHERE codigo_solicitacao = $5::varchar
-         RETURNING sale_id, type`,
+         RETURNING sale_id, type, installment_id, value`,
         [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao],
       );
-      const saleId = updated[0]?.sale_id; const type = updated[0]?.type;
-      if (saleId) {
+      const saleId = updated[0]?.sale_id; const type = updated[0]?.type; const installmentId = updated[0]?.installment_id; const paymentValue = updated[0]?.value;
+      // Parcela isolada de um boleto parcelado: quitar apenas essa parcela, nunca a venda inteira.
+      const isSplitInstallment = !!installmentId;
+      if (saleId && !isSplitInstallment) {
         const billingStatus = localStatus === 'pago' ? 'pago' : localStatus === 'vencido' ? 'vencido' : localStatus === 'cancelado' ? 'cancelado' : 'emitido';
         await manager.query(`UPDATE sales SET billing_status=$2::varchar, status=CASE WHEN status IN ('pendente','nf_emitida') AND $2::varchar='emitido' THEN 'boleto_emitido' ELSE status END, updated_at=NOW() WHERE id=$1::uuid`, [saleId, billingStatus]);
-        if (localStatus !== 'cancelado') await manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Cobrança emitida via Banco Inter') WHERE sale_id=$1 AND type='emissao_boleto' AND status='pendente'`, [saleId]);
       }
+      if (saleId && localStatus !== 'cancelado') await manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Cobrança emitida via Banco Inter') WHERE sale_id=$1 AND type='emissao_boleto' AND status='pendente'`, [saleId]);
       if (localStatus === 'pago' && saleId) {
         const rawPaidAt = cobranca?.dataPagamento || cobranca?.dataHoraPagamento || interData?.dataPagamento;
         const parsedPaidAt = rawPaidAt ? new Date(rawPaidAt) : new Date();
-        await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt, undefined, manager);
+        const paidAt = Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt;
+        if (isSplitInstallment) {
+          await this.financialService.payInstallment(installmentId, Number(paymentValue), type || 'boleto', null as any, { paidAt: paidAt.toISOString(), idempotencyKey: `inter:${codigoSolicitacao}` }, manager);
+        } else {
+          await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, paidAt, undefined, manager);
+        }
       }
       return { saleId, type, oldStatus: previous[0].status, newStatus: localStatus, changed: previous[0].status !== localStatus, situacao };
     });
@@ -708,7 +715,7 @@ export class InterService implements OnModuleInit {
       };
       if (multa>0) data.multa={codigo:'PERCENTUAL',taxa:multa}; if (mora>0) data.mora={codigo:'TAXAMENSAL',taxa:mora};
       const result=await this.createBoleto(data); const codigo=result.codigoSolicitacao||'';
-      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key]);
+      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key,installment_id) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key,installment.id]);
       await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`,[codigo]);
       try { attachments.push({filename:`boleto-parcela-${installment.number}-de-${sale.installments}.pdf`,content:await this.getBoletoPdf(codigo),contentType:'application/pdf'}); } catch(error:any) { this.logger.error(`Boleto ${installment.number} criado, mas PDF indisponível: ${error?.message||error}`); }
       results.push({...result,installmentId:installment.id,installmentNumber:installment.number,value:Number(installment.value),dueDate});

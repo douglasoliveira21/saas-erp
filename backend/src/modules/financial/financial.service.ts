@@ -134,13 +134,14 @@ export class FinancialService implements OnModuleInit {
     paymentMethod: string,
     userId: string,
     options?: { bankAccountId?: string; paidAt?: string; observations?: string; idempotencyKey?: string },
+    transactionManager?: EntityManager,
   ): Promise<Installment> {
     if (!Number.isFinite(Number(value)) || Number(value) <= 0) throw new BadRequestException('Valor do pagamento deve ser positivo');
     const paidAt = options?.paidAt ? new Date(options.paidAt) : new Date();
     if (Number.isNaN(paidAt.getTime())) throw new BadRequestException('Data de pagamento inválida');
     const period = paidAt.toISOString().slice(0, 7);
 
-    const result = await this.dataSource.transaction(async (manager) => {
+    const execute = async (manager: EntityManager) => {
       const closed = await manager.getRepository(MonthlyClosing).findOne({ where: { period } });
       if (closed) throw new BadRequestException(`Período ${period} já está fechado para edição`);
       const paymentRepo = manager.getRepository(InstallmentPayment);
@@ -175,7 +176,8 @@ export class FinancialService implements OnModuleInit {
       }
       else if (paid > 0) await manager.getRepository(Sale).update(installment.saleId, { paymentStatus: 'parcial' });
       return { installment, oldData, duplicate: false };
-    });
+    };
+    const result = transactionManager ? await execute(transactionManager) : await this.dataSource.transaction(execute);
     if (!result.duplicate) await this.auditService.safeCreate({ userId, action: 'financial.installment_paid', entity: 'installment', entityId: result.installment.id, oldData: result.oldData, newData: { paidValue: result.installment.paidValue, status: result.installment.status, paymentMethod, value, idempotencyKey: options?.idempotencyKey } });
     return result.installment;
   }
@@ -379,22 +381,33 @@ export class FinancialService implements OnModuleInit {
 
   async repairPaidPaymentIntegrity(source = 'manual'): Promise<{ checked: number; repaired: number; failed: number; details: any[] }> {
     const rows = await this.dataSource.query(`
-      SELECT DISTINCT ON (p.sale_id) p.id, p.sale_id, p.type, p.codigo_solicitacao, p.paid_at,
+      SELECT p.id, p.sale_id, p.type, p.codigo_solicitacao, p.paid_at, p.installment_id, p.value,
              s.payment_status, s.billing_status, a.status AS account_status
       FROM payments p
       JOIN sales s ON s.id=p.sale_id
       LEFT JOIN accounts_receivable a ON a.sale_id=p.sale_id
       WHERE p.status='pago'
-        AND (s.payment_status<>'pago' OR s.billing_status<>'pago' OR a.id IS NULL OR a.status<>'pago' OR EXISTS (SELECT 1 FROM installments i WHERE i.account_id=a.id AND (i.status<>'pago' OR i.paid_value<i.value)) OR EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.sale_id=s.id AND fm.category='venda' AND fm.is_forecast=true))
+        AND (
+          -- Pagamento de parcela isolada: só reparar se a própria parcela ainda não reflete o pagamento
+          (p.installment_id IS NOT NULL AND EXISTS (SELECT 1 FROM installments i WHERE i.id=p.installment_id AND (i.status<>'pago' OR i.paid_value<i.value)))
+          OR
+          -- Pagamento de venda inteira (sem parcela isolada): reparar se a venda/conta não refletem o pagamento
+          (p.installment_id IS NULL AND (s.payment_status<>'pago' OR s.billing_status<>'pago' OR a.id IS NULL OR a.status<>'pago' OR EXISTS (SELECT 1 FROM installments i WHERE i.account_id=a.id AND (i.status<>'pago' OR i.paid_value<i.value)) OR EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.sale_id=s.id AND fm.category='venda' AND fm.is_forecast=true)))
+        )
         AND COALESCE(s.operational_status,'')<>'cancelada' AND s.status<>'cancelado'
-      ORDER BY p.sale_id, p.paid_at DESC NULLS LAST, p.updated_at DESC
+      ORDER BY p.paid_at DESC NULLS LAST, p.updated_at DESC
       LIMIT 500
     `);
     let repaired=0, failed=0; const details:any[]=[];
     for (const row of rows) {
       try {
         const paidAt=row.paid_at ? new Date(row.paid_at) : new Date();
-        await this.settleSale(row.sale_id,row.type||'boleto',null as any,`repair:${row.id}`,Number.isNaN(paidAt.getTime())?new Date():paidAt);
+        const resolvedPaidAt = Number.isNaN(paidAt.getTime()) ? new Date() : paidAt;
+        if (row.installment_id) {
+          await this.payInstallment(row.installment_id, Number(row.value), row.type||'boleto', null as any, { paidAt: resolvedPaidAt.toISOString(), idempotencyKey: `repair:${row.id}` });
+        } else {
+          await this.settleSale(row.sale_id,row.type||'boleto',null as any,`repair:${row.id}`,resolvedPaidAt);
+        }
         repaired++; details.push({saleId:row.sale_id,paymentId:row.id,status:'reparado'});
       } catch (error) { failed++; details.push({saleId:row.sale_id,paymentId:row.id,status:'erro',error:error instanceof Error?error.message:String(error)}); }
     }
