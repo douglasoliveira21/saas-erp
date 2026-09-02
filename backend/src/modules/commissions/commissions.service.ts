@@ -86,14 +86,13 @@ export class CommissionsService implements OnModuleInit {
     return result;
   }
 
-  // Gera comissoes fixas de todos os meses (desde a criacao do template ate o mes alvo) para
+  // Gera comissoes fixas de todos os meses (desde a criacao de cada uma ate o mes alvo) para
   // todos os tecnicos que tem comissao fixa. Antes só checava/gerava o mes alvo isoladamente —
   // se o backend ficasse fora do ar (ou ninguem clicasse "Gerar Fixas") durante um mes inteiro,
   // aquele mes ficava permanentemente sem comissao, sem nenhuma forma automatica de recuperar.
   async generateMonthlyFixed(month?: string): Promise<{ created: number; total: number }> {
     const targetMonth = month || new Date().toISOString().slice(0, 7);
 
-    // Buscar todas as comissoes fixas (template - pegar a mais recente de cada tecnico)
     const fixedTemplates = await this.commissionsRepository
       .createQueryBuilder('c')
       .where('c.type = :type', { type: 'fixa' })
@@ -102,28 +101,40 @@ export class CommissionsService implements OnModuleInit {
       .orderBy('c.created_at', 'DESC')
       .getMany();
 
-    // Agrupar por tecnico (pegar apenas a mais recente de cada)
-    const byTech: Record<string, Commission> = {};
+    // Um mesmo tecnico costuma ter VARIAS comissoes fixas independentes (uma por contrato/motivo:
+    // "GLPI", "RODOCAP - Participação de Contrato", etc.) — nao uma unica. Agrupar so por tecnico
+    // e propagar apenas a mais recente perdia todas as outras a partir do mes seguinte. Agrupamos
+    // por tecnico + descricao normalizada (sem diferencas de espaçamento) para tratar cada uma
+    // como sua propria serie recorrente independente.
+    const bySeries: Record<string, { template: Commission; earliestMonth: string }> = {};
     for (const c of fixedTemplates) {
-      if (!byTech[c.technicianId]) byTech[c.technicianId] = c;
+      const key = `${c.technicianId}::${this.normalizeDescription(c.description)}`;
+      const series = bySeries[key];
+      if (!series) {
+        // fixedTemplates vem ordenado created_at DESC, entao o primeiro visto por chave e o
+        // template (o mais recente com esses dados/valor).
+        bySeries[key] = { template: c, earliestMonth: c.referenceMonth };
+      } else if (c.referenceMonth && (!series.earliestMonth || c.referenceMonth < series.earliestMonth)) {
+        series.earliestMonth = c.referenceMonth;
+      }
     }
 
     let created = 0;
     let total = 0;
 
-    for (const template of Object.values(byTech)) {
-      const months = this.monthsBetween(template.referenceMonth, targetMonth);
+    for (const { template, earliestMonth } of Object.values(bySeries)) {
+      const months = this.monthsBetween(earliestMonth || template.referenceMonth, targetMonth);
       for (const refMonth of months) {
-        // Verificar se ja existe comissao fixa deste mes para este tecnico
-        const existing = await this.commissionsRepository.findOne({
-          where: {
-            technicianId: template.technicianId,
-            type: 'fixa' as any,
-            referenceMonth: refMonth,
-          },
-        });
+        // Verificar se ja existe esta serie (tecnico + descricao normalizada) neste mes.
+        const existing = await this.commissionsRepository.query(
+          `SELECT id FROM commissions
+           WHERE technician_id = $1 AND type = 'fixa' AND reference_month = $2
+             AND regexp_replace(lower(trim(description)), '\\s+', ' ', 'g') = regexp_replace(lower(trim($3)), '\\s+', ' ', 'g')
+           LIMIT 1`,
+          [template.technicianId, refMonth, template.description || ''],
+        );
 
-        if (!existing) {
+        if (!existing.length) {
           const newCommission = this.commissionsRepository.create({
             technicianId: template.technicianId,
             type: 'fixa' as any,
@@ -143,6 +154,10 @@ export class CommissionsService implements OnModuleInit {
     }
 
     return { created, total };
+  }
+
+  private normalizeDescription(description: string): string {
+    return (description || '').trim().replace(/\s+/g, ' ').toLowerCase();
   }
 
   // Lista de meses "YYYY-MM" de start ate end, inclusive. Retorna vazio se start estiver
