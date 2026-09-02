@@ -31,15 +31,18 @@ export function Payments() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [monthFilter, setMonthFilter] = useState('')
   const [error, setError] = useState('')
   const [reconciling, setReconciling] = useState(false)
 
-  useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [])
+  useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [monthFilter])
 
   async function load() {
     setLoading(true)
     try {
-      const res = await api.get('/inter/payments', { params: { page: 1, limit: 100 } })
+      const params: any = { page: 1, limit: 100 }
+      if (monthFilter) params.month = monthFilter
+      const res = await api.get('/inter/payments', { params })
       setPayments(res.data.data || res.data)
     } catch { setPayments([]) }
     finally { setLoading(false) }
@@ -161,9 +164,15 @@ export function Payments() {
       </div>
 
       <div className="card mb-6">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input pl-10" placeholder="Buscar por cliente, código..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="flex gap-4 flex-wrap items-end">
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input className="input pl-10" placeholder="Buscar por cliente, código..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Mês (vencimento)</label>
+            <input type="month" className="input w-40" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} />
+          </div>
         </div>
       </div>
 
