@@ -241,13 +241,20 @@ export class ContractBillingService implements OnModuleInit {
       this.logger.error(`Erro ao gerar boleto para contrato ${contract.title}: ${error.message}`);
     }
 
-    // 3. Save billing record
+    // 3. Save billing record (upsert: generateBilling pode ser reprocessado várias vezes no mesmo
+    // período pelo cron de 6h enquanto NF/boleto não estiverem completos, e sem upsert cada
+    // tentativa criava uma linha duplicada — o que fazia getBillingStatusForPeriod's LIMIT 1
+    // sem ORDER BY retornar uma linha antiga/errada de forma não-determinística).
     await this.dataSource.query(
       `INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, invoice_id, boleto_code, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (contract_id, billing_period) DO UPDATE SET
+         invoice_id = COALESCE(EXCLUDED.invoice_id, contract_billings.invoice_id),
+         boleto_code = COALESCE(EXCLUDED.boleto_code, contract_billings.boleto_code),
+         updated_at = NOW()`,
       [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, invoiceId, boletoCode, 'emitido']
     ).catch(async () => {
-      // Table might not exist, create it
+      // Table might not exist yet, or exist without the unique constraint (pre-migration deploy).
       await this.dataSource.query(`
         CREATE TABLE IF NOT EXISTS contract_billings (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -259,12 +266,22 @@ export class ContractBillingService implements OnModuleInit {
           invoice_id UUID,
           boleto_code VARCHAR(100),
           status VARCHAR(20) DEFAULT 'emitido',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      await this.dataSource.query(`DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='uq_contract_billings_contract_period') THEN
+          ALTER TABLE contract_billings ADD CONSTRAINT uq_contract_billings_contract_period UNIQUE (contract_id, billing_period);
+        END IF;
+      END $$`).catch(() => {});
       await this.dataSource.query(
         `INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, invoice_id, boleto_code, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (contract_id, billing_period) DO UPDATE SET
+           invoice_id = COALESCE(EXCLUDED.invoice_id, contract_billings.invoice_id),
+           boleto_code = COALESCE(EXCLUDED.boleto_code, contract_billings.boleto_code),
+           updated_at = NOW()`,
         [contract.id, customer.id, billingPeriod, dueDateStr, monthlyValue, invoiceId, boletoCode, 'emitido']
       );
     });
@@ -355,9 +372,13 @@ export class ContractBillingService implements OnModuleInit {
     const startDate = `${period}-01`;
     const nextMonthStart = new Date(year, month, 1).toISOString().split('T')[0];
 
-    // Check contract_billings first
+    // Check contract_billings first. Order defensively (most complete row first) in case
+    // duplicate rows still exist for this contract+period from before the unique constraint
+    // was added — otherwise an unordered LIMIT 1 could non-deterministically return a stale
+    // duplicate lacking the invoice_id/boleto_code that another row actually has.
     const billingRecord = await this.dataSource.query(
-      `SELECT invoice_id, boleto_code FROM contract_billings WHERE contract_id = $1 AND billing_period = $2 LIMIT 1`,
+      `SELECT invoice_id, boleto_code FROM contract_billings WHERE contract_id = $1 AND billing_period = $2
+       ORDER BY (invoice_id IS NOT NULL) DESC, (boleto_code IS NOT NULL) DESC, updated_at DESC NULLS LAST, created_at DESC LIMIT 1`,
       [contractId, period]
     ).catch(() => []);
 
