@@ -22,16 +22,20 @@ export class FixContractBillingsDuplicates1791900000000 implements MigrationInte
     );
     if (!tableExists.length) return;
 
+    // Prefer the invoice_id whose invoice is actually 'autorizada' over just the most recent
+    // one — a duplicate-emission retry can create a *newer* invoice that later gets cancelled,
+    // while an *older* invoice_id in another duplicate row was the one that actually succeeded.
     await queryRunner.query(`
       CREATE TEMP TABLE cb_merge AS
       SELECT
-        contract_id,
-        billing_period,
-        (array_agg(id ORDER BY (invoice_id IS NOT NULL) DESC, (boleto_code IS NOT NULL) DESC, created_at DESC))[1] AS keep_id,
-        (array_agg(invoice_id ORDER BY invoice_id IS NULL, created_at DESC))[1] AS merged_invoice_id,
-        (array_agg(boleto_code ORDER BY boleto_code IS NULL, created_at DESC))[1] AS merged_boleto_code
-      FROM contract_billings
-      GROUP BY contract_id, billing_period
+        cb.contract_id,
+        cb.billing_period,
+        (array_agg(cb.id ORDER BY (i.status = 'autorizada') DESC NULLS LAST, (cb.invoice_id IS NOT NULL) DESC, (cb.boleto_code IS NOT NULL) DESC, cb.created_at DESC))[1] AS keep_id,
+        (array_agg(cb.invoice_id ORDER BY (i.status = 'autorizada') DESC NULLS LAST, cb.invoice_id IS NULL, cb.created_at DESC))[1] AS merged_invoice_id,
+        (array_agg(cb.boleto_code ORDER BY cb.boleto_code IS NULL, cb.created_at DESC))[1] AS merged_boleto_code
+      FROM contract_billings cb
+      LEFT JOIN invoices i ON i.id = cb.invoice_id
+      GROUP BY cb.contract_id, cb.billing_period
     `);
 
     await queryRunner.query(`

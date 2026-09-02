@@ -56,7 +56,10 @@ async function bootstrap() {
     // Sem constraint única desde sempre, contract_billings acumulou linhas duplicadas por
     // (contract_id, billing_period) — o que faz o CREATE UNIQUE INDEX abaixo falhar (violação de
     // unicidade) e ser engolido pelo .catch() a cada boot, silenciosamente, sem nunca aplicar a
-    // trava. Mescla os duplicados (mantendo o invoice_id/boleto_code mais completo) antes de tentar.
+    // trava. Mescla os duplicados antes de tentar, preferindo o invoice_id cuja nota esteja
+    // 'autorizada' (não apenas o mais recente — uma correção anterior deste mesmo dedupe escolheu
+    // "mais recente" e acabou pegando uma NF cancelada em vez da autorizada mais antiga, porque a
+    // tentativa de reemissão duplicada aconteceu depois).
     await ds.query(`
       DO $$
       DECLARE has_dupes boolean;
@@ -67,13 +70,14 @@ async function bootstrap() {
         IF has_dupes THEN
           CREATE TEMP TABLE cb_merge AS
           SELECT
-            contract_id,
-            billing_period,
-            (array_agg(id ORDER BY (invoice_id IS NOT NULL) DESC, (boleto_code IS NOT NULL) DESC, created_at DESC))[1] AS keep_id,
-            (array_agg(invoice_id ORDER BY invoice_id IS NULL, created_at DESC))[1] AS merged_invoice_id,
-            (array_agg(boleto_code ORDER BY boleto_code IS NULL, created_at DESC))[1] AS merged_boleto_code
-          FROM contract_billings
-          GROUP BY contract_id, billing_period;
+            cb.contract_id,
+            cb.billing_period,
+            (array_agg(cb.id ORDER BY (i.status = 'autorizada') DESC NULLS LAST, (cb.invoice_id IS NOT NULL) DESC, (cb.boleto_code IS NOT NULL) DESC, cb.created_at DESC))[1] AS keep_id,
+            (array_agg(cb.invoice_id ORDER BY (i.status = 'autorizada') DESC NULLS LAST, cb.invoice_id IS NULL, cb.created_at DESC))[1] AS merged_invoice_id,
+            (array_agg(cb.boleto_code ORDER BY cb.boleto_code IS NULL, cb.created_at DESC))[1] AS merged_boleto_code
+          FROM contract_billings cb
+          LEFT JOIN invoices i ON i.id = cb.invoice_id
+          GROUP BY cb.contract_id, cb.billing_period;
 
           UPDATE contract_billings cb
           SET invoice_id = m.merged_invoice_id, boleto_code = m.merged_boleto_code, updated_at = NOW()
