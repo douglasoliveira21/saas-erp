@@ -75,14 +75,13 @@ export class ContractBillingService implements OnModuleInit {
           const issueDay = contract.issueDay || 3;
           if (currentDay !== issueDay) continue; // Not the issue day
 
-          // Check if already billed for this period
+          // Check if already billed for this period — precisa checar o status real da nota/boleto,
+          // não apenas se já existe uma linha em contract_billings, senão uma tentativa que falhou
+          // (NF rejeitada, por exemplo) nunca mais seria reprocessada automaticamente.
           const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
-          const existingBilling = await this.dataSource.query(
-            `SELECT id FROM contract_billings WHERE contract_id = $1 AND billing_period = $2`,
-            [contract.id, billingPeriod]
-          ).catch(() => []);
+          const existingStatus = await this.getBillingStatusForPeriod(contract.id, billingPeriod);
 
-          if (existingBilling.length > 0) {
+          if (existingStatus.hasNf && existingStatus.hasBoleto) {
             this.logger.log(`Contrato ${contract.title} já faturado para ${billingPeriod}`);
             continue;
           }
@@ -126,11 +125,18 @@ export class ContractBillingService implements OnModuleInit {
 
     this.logger.log(`Gerando cobrança para contrato "${contract.title}" - NF: R$ ${monthlyValue.toFixed(2)} - Boleto: R$ ${boletoValue.toFixed(2)}${issRetido ? ` (ISS retido: R$ ${issValue.toFixed(2)})` : ''} - Venc: ${dueDateStr}`);
 
-    let invoiceId: string | null = null;
-    let boletoCode: string | null = null;
+    // Reconsulta o estado real (não a mera existência de uma linha em contract_billings) para
+    // que uma tentativa anterior que falhou (NF rejeitada ou boleto não criado) seja reprocessada
+    // aqui em vez de duplicar a parte que já tinha dado certo.
+    const existingStatus = await this.getBillingStatusForPeriod(contract.id, billingPeriod);
+    let invoiceId: string | null = existingStatus.hasNf ? existingStatus.invoiceId : null;
+    let boletoCode: string | null = existingStatus.hasBoleto ? existingStatus.boletoCode : null;
     let boletoPdf: Buffer | null = null;
 
-    // 1. Try to generate NFS-e
+    // 1. Try to generate NFS-e (pula se já autorizada em tentativa anterior)
+    if (existingStatus.hasNf) {
+      this.logger.log(`NFS-e já autorizada para contrato ${contract.title} no período ${billingPeriod}, pulando emissão.`);
+    } else
     try {
       // Get active certificate
       const certResult = await this.dataSource.query(
@@ -178,7 +184,10 @@ export class ContractBillingService implements OnModuleInit {
       this.logger.error(`Erro ao emitir NFS-e para contrato ${contract.title}: ${error.message}`);
     }
 
-    // 2. Generate Boleto via Inter
+    // 2. Generate Boleto via Inter (pula se já existe um boleto ativo para o período)
+    if (existingStatus.hasBoleto) {
+      this.logger.log(`Boleto já emitido para contrato ${contract.title} no período ${billingPeriod}, pulando geração.`);
+    } else
     try {
       if (!customer.cpfCnpj) throw new Error('Cliente sem CPF/CNPJ');
 
@@ -353,6 +362,17 @@ export class ContractBillingService implements OnModuleInit {
     ).catch(() => []);
 
     if (billingRecord[0]) {
+      // invoice_id só significa "já emitida" se a nota realmente foi autorizada — emit() não
+      // lança exceção quando a prefeitura/Cidade360 rejeita, só marca a invoice como 'rejeitada'
+      // e retorna normalmente, então checar apenas a presença de invoice_id travava reemissão.
+      let hasNf = false;
+      if (billingRecord[0].invoice_id) {
+        const invoiceStatus = await this.dataSource.query(
+          `SELECT status FROM invoices WHERE id = $1 LIMIT 1`,
+          [billingRecord[0].invoice_id]
+        ).catch(() => []);
+        hasNf = invoiceStatus[0]?.status === 'autorizada';
+      }
       let hasBoleto = !!billingRecord[0].boleto_code;
       // Verify the boleto isn't cancelled in payments table
       if (hasBoleto) {
@@ -371,9 +391,9 @@ export class ContractBillingService implements OnModuleInit {
       }
 
       return {
-        hasNf: !!billingRecord[0].invoice_id,
+        hasNf,
         hasBoleto,
-        invoiceId: billingRecord[0].invoice_id || null,
+        invoiceId: hasNf ? billingRecord[0].invoice_id : null,
         boletoCode: hasBoleto ? billingRecord[0].boleto_code : null,
         period,
       };
@@ -485,6 +505,12 @@ export class ContractBillingService implements OnModuleInit {
       recipientCep: customer.cep || '',
       recipientCMun: (customer as any).cityCode || '',
     }, certId);
+
+    if (nfseResult.status !== 'autorizada') {
+      // emit() não lança exceção em rejeição (só em falha de rede/config), então sem essa checagem
+      // a chamada retornava "sucesso" e ainda gravava contract_billings como emitido/travado.
+      throw new Error(`Falha ao emitir NFS-e: ${nfseResult.rejectionReason || 'status ' + nfseResult.status}`);
+    }
 
     // Update or create contract_billings record for this period
     await this.dataSource.query(`
