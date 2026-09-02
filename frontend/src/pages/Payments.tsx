@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Download, Search, RefreshCw, CreditCard, Eye, XCircle } from 'lucide-react'
+import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2 } from 'lucide-react'
 import { useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 
@@ -92,6 +92,18 @@ export function Payments() {
       setError(error.response?.data?.message || 'Erro ao cancelar boleto')
     }
   }
+  async function deletePayment(payment: Payment) {
+    if (!await confirmAction({ title: 'Excluir da lista', message: 'Remove este pagamento cancelado da tela. Isso não afeta nenhum registro financeiro real, apenas limpa a lista.', confirmLabel: 'Excluir', danger: true })) return
+    try {
+      await runOperation(
+        () => api.delete(`/inter/payments/${payment.id}`),
+        { title: 'Excluindo', processingMessage: 'Removendo pagamento cancelado.', successMessage: 'Removido da lista.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao excluir' },
+      )
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao excluir')
+    }
+  }
   async function reconcileInter() {
     setReconciling(true)
     setError('')
@@ -102,6 +114,21 @@ export function Payments() {
       setError(e.response?.data?.message || 'Erro ao conciliar pagamentos')
     } finally {
       setReconciling(false)
+    }
+  }
+
+  async function clearCancelled() {
+    const cancelledCount = payments.filter(p => p.status === 'cancelado').length
+    if (cancelledCount === 0) return
+    if (!await confirmAction({ title: 'Limpar cancelados', message: `Remove ${cancelledCount} pagamento(s) cancelado(s) da tela. Isso não afeta nenhum registro financeiro real, apenas limpa a lista.`, confirmLabel: 'Limpar', danger: true })) return
+    try {
+      await runOperation(
+        () => api.delete('/inter/payments/cancelled'),
+        { title: 'Limpando cancelados', processingMessage: 'Removendo pagamentos cancelados.', successMessage: (response: any) => `${response.data.deleted} pagamento(s) removido(s).`, errorMessage: (error: any) => error.response?.data?.message || 'Erro ao limpar' },
+      )
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao limpar cancelados')
     }
   }
 
@@ -121,6 +148,11 @@ export function Payments() {
           <p className="text-sm text-gray-500 mt-1">Boletos e PIX emitidos via Banco Inter</p>
         </div>
         <div className="flex gap-2">
+          {payments.some(p => p.status === 'cancelado') && (
+            <button onClick={clearCancelled} className="btn btn-secondary flex items-center gap-2 text-red-600" title="Remove os pagamentos cancelados da tela">
+              <Trash2 className="w-4 h-4" /> Limpar Cancelados
+            </button>
+          )}
           <button onClick={reconcileInter} disabled={reconciling} className="btn btn-secondary flex items-center gap-2">
             <RefreshCw className={'w-4 h-4 ' + (reconciling ? 'animate-spin' : '')} /> Conciliar Inter
           </button>
@@ -187,6 +219,9 @@ export function Payments() {
                       <button onClick={() => checkStatus(p.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
                       {p.linhaDigitavel && (
                         <button onClick={() => { navigator.clipboard.writeText(p.linhaDigitavel!).then(() => trackAction('Copiando...', Promise.resolve(), 'Linha digitável copiada!')) }} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Copiar linha digitável"><CreditCard className="w-4 h-4" /></button>
+                      )}
+                      {p.status === 'cancelado' && (
+                        <button onClick={() => deletePayment(p)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir da lista"><Trash2 className="w-4 h-4" /></button>
                       )}
                     </div>
                   </td>

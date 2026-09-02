@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Param,
   Body,
   Query,
@@ -58,6 +59,31 @@ export class InterController {
     const count = await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments`);
     return { data: payments, total: Number(count[0]?.total || 0), page: safePage, limit: safeLimit };
   }
+
+  /**
+   * DELETE /api/inter/payments/cancelled
+   * Remove de uma vez todos os pagamentos ja cancelados (limpeza visual em lote).
+   * Precisa vir antes de DELETE /payments/:id para nao ser interpretado como um id.
+   */
+  @Delete('payments/cancelled')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async deleteAllCancelledPayments(@Req() req: Request) {
+    return this.interService.deleteAllCancelledPayments((req as any).user?.id);
+  }
+
+  /**
+   * DELETE /api/inter/payments/:id
+   * Remove da tela um pagamento ja cancelado (limpeza visual, nao afeta pagamentos ativos/pagos).
+   */
+  @Delete('payments/:id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async deletePayment(@Param('id') id: string, @Req() req: Request) {
+    await this.interService.deletePayment(id, (req as any).user?.id);
+    return { success: true };
+  }
+
   /**
    * POST /api/inter/generate/:saleId
    * Gera boleto ou PIX para uma venda.

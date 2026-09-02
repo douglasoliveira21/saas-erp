@@ -334,6 +334,33 @@ export class InterService implements OnModuleInit {
     await this.httpRequest('PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { Authorization: `Bearer ${tokenRes.access_token}`, 'Content-Type': 'application/json' });
     await this.saleRepo.manager.query(`UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1`, [txid]);
   }
+
+  // Remove da lista da tela de Pagamentos um boleto/pix ja cancelado, so para limpar a poluicao
+  // visual — nunca apaga um pagamento ativo/pago, ja que isso apagaria historico financeiro real.
+  async deletePayment(id: string, userId?: string): Promise<void> {
+    const rows = await this.saleRepo.manager.query(`SELECT id, status, codigo_solicitacao, type, value, customer_name FROM payments WHERE id=$1`, [id]);
+    const payment = rows[0];
+    if (!payment) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
+    if (payment.status !== 'cancelado') {
+      throw new HttpException('Apenas pagamentos cancelados podem ser excluídos', HttpStatus.BAD_REQUEST);
+    }
+    await this.saleRepo.manager.query(`DELETE FROM payments WHERE id=$1`, [id]);
+    await this.auditInter('inter.payment_deleted', id, {
+      userId,
+      codigoSolicitacao: payment.codigo_solicitacao,
+      type: payment.type,
+      value: payment.value,
+      customerName: payment.customer_name,
+    });
+  }
+
+  // Remove de uma vez todos os pagamentos ja cancelados, para o caso de ja haver varios acumulados.
+  async deleteAllCancelledPayments(userId?: string): Promise<{ deleted: number }> {
+    const result = await this.saleRepo.manager.query(`DELETE FROM payments WHERE status='cancelado' RETURNING id`);
+    const deleted = result.length;
+    if (deleted > 0) await this.auditInter('inter.payments_bulk_deleted', null, { userId, deleted });
+    return { deleted };
+  }
   onModuleInit() {
     const enabled = process.env.INTER_AUTO_RECONCILE !== 'false';
     if (!enabled) return;
