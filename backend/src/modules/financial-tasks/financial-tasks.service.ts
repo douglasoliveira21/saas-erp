@@ -10,7 +10,7 @@ export class FinancialTasksService {
     private tasksRepository: Repository<FinancialTask>,
   ) {}
 
-  private async reconcileIssuedBoletoTasks(): Promise<void> {
+  private async reconcileIssuedTasks(): Promise<void> {
     await this.tasksRepository.query(
       `UPDATE sales s
        SET status = 'boleto_emitido', updated_at = NOW()
@@ -39,6 +39,25 @@ export class FinancialTasksService {
              AND p.type = 'boleto'
              AND p.status IN ('a_receber', 'pago', 'vencido')
              AND COALESCE(p.codigo_solicitacao, '') <> ''
+         )`,
+    );
+
+    // Mesma reconciliacao para NF: ao contrario do boleto, a tarefa "emissao_nf" so era marcada
+    // concluida em pontos especificos do codigo que lembravam de fazer isso (endpoint de emissao,
+    // job de sincronizacao fiscal). Qualquer outro caminho que emitisse a NF (ou uma reemissao
+    // apos rejeicao) deixava a pendencia presa no dashboard mesmo com a nota ja autorizada.
+    await this.tasksRepository.query(
+      `UPDATE financial_tasks ft
+       SET status = 'concluido',
+           completed_at = COALESCE(ft.completed_at, NOW()),
+           observations = COALESCE(ft.observations, 'Nota fiscal ja autorizada')
+       WHERE ft.type = 'emissao_nf'
+         AND ft.status = 'pendente'
+         AND EXISTS (
+           SELECT 1
+           FROM invoices i
+           WHERE i.sale_id = ft.sale_id
+             AND i.status = 'autorizada'
          )`,
     );
   }
@@ -90,7 +109,7 @@ export class FinancialTasksService {
 
   async getTodayTasks(): Promise<{ nf: FinancialTask[]; boleto: FinancialTask[]; overdue: FinancialTask[] }> {
     const today = new Date().toISOString().split('T')[0];
-    await this.reconcileIssuedBoletoTasks();
+    await this.reconcileIssuedTasks();
     const pending = await this.findPending();
 
     return {
