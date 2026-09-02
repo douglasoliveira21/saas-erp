@@ -15,10 +15,6 @@ import { AuditService } from '../../audit/audit.service';
 export class NfseService {
   private readonly logger = new Logger(NfseService.name);
 
-  // Resolucao CGSN 191/2026 (04/08/2026): obrigatoriedade do Emissor/Ambiente Nacional
-  // NFS-e para optantes do Simples Nacional (ME/EPP) passa a valer em 01/11/2026.
-  private static readonly SN_NATIONAL_MANDATORY_DATE = new Date('2026-11-01T00:00:00-03:00');
-
   constructor(
     @InjectRepository(Invoice)
     private invoiceRepository: Repository<Invoice>,
@@ -503,16 +499,14 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada`);
     }
 
+    // A API do Cidade360 (inclusive a instancia de Contagem) so expoe rotas sob /NotaNacional/*
+    // (confirmado no swagger do provedor) mesmo antes da obrigatoriedade do Ambiente Nacional
+    // valer para optantes do Simples em 01/11/2026 (Resolucao CGSN 191/2026) — nao existe um
+    // endpoint "municipal" alternativo para rotear, entao sempre usamos /NotaNacional aqui.
+    // O que muda para o Simples Nacional nesse periodo de transicao e o conteudo do DPS
+    // (ex.: opSimpNac), nao a URL da API.
     const normalized = configuredUrl.trim().replace(/\/+$/, '').replace(/\/NotaNacional$/i, '');
-
-    // Resolucao CGSN 191/2026: obrigatoriedade do Ambiente Nacional para optantes do
-    // Simples Nacional foi adiada de 01/09/2026 para 01/11/2026. Ate la, mantemos a
-    // contingencia pelo endpoint municipal do Cidade360 para prestadores do SN.
-    const isSimplesNacional = config.taxRegime !== 3;
-    const nationalMandatory = new Date() >= NfseService.SN_NATIONAL_MANDATORY_DATE;
-    const useNationalEndpoint = !isSimplesNacional || nationalMandatory;
-
-    return useNationalEndpoint ? normalized + '/NotaNacional' : normalized;
+    return normalized + '/NotaNacional';
   }
 
   private normalizeStatusResponse(response: any, invoice: Invoice): any {
