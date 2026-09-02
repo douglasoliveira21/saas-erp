@@ -6,7 +6,7 @@ import { DollarSign, CreditCard, AlertTriangle, TrendingUp, Calendar, Search, Ch
 type Tab = 'dashboard' | 'accounts' | 'installments' | 'flow' | 'card-fees' | 'overdue'
 
 interface DashboardData { totalVendido: number; totalRecebido: number; totalPendente: number; totalInadimplente: number; ticketMedio: number }
-interface Account { id: string; customer: { id: string; name: string }; sale?: { id: string }; totalValue: number; paidValue: number; status: string; paymentMethod: string; createdAt: string; installments?: Installment[] }
+interface Account { id: string; customer: { id: string; name: string }; sale?: { id: string; observations?: string }; description?: string; invoiceNumber?: number | null; totalValue: number; paidValue: number; status: string; paymentMethod: string; createdAt: string; dueDate: string; installments?: Installment[] }
 interface Installment { id: string; accountId: string; number: number; value: number; paidValue: number; dueDate: string; paidAt: string | null; status: string; paymentMethod: string; customer?: { name: string } }
 interface Movement { id: string; type: string; category: string; description: string; value: number; date: string; isForecast: boolean }
 interface FlowData { forecast: { receitas: number }; realized: { receitas: number; despesas: number; estornos: number; saldo: number } }
@@ -366,11 +366,13 @@ export function Financial() {
                 <thead>
                   <tr>
                     <th className="table-header">Cliente</th>
+                    <th className="table-header">Descrição</th>
+                    <th className="table-header">Nota Fiscal</th>
                     <th className="table-header">Valor Total</th>
                     <th className="table-header">Pago</th>
                     <th className="table-header">Forma Pgto</th>
                     <th className="table-header">Status</th>
-                    <th className="table-header">Data</th>
+                    <th className="table-header">Vencimento</th>
                     <th className="table-header">Ações</th>
                   </tr>
                 </thead>
@@ -378,11 +380,13 @@ export function Financial() {
                   {paginate(accounts).map(acc => (
                     <tr key={acc.id}>
                       <td className="table-cell font-medium">{acc.customer?.name || '-'}</td>
+                      <td className="table-cell text-sm text-gray-600 dark:text-gray-400 max-w-[220px] truncate" title={acc.sale?.observations || acc.description || ''}>{acc.sale?.observations || acc.description || '-'}</td>
+                      <td className="table-cell text-sm">{acc.invoiceNumber ? `#${acc.invoiceNumber}` : '-'}</td>
                       <td className="table-cell">{formatCurrency(acc.totalValue)}</td>
                       <td className="table-cell">{formatCurrency(acc.paidValue)}</td>
                       <td className="table-cell">{paymentMethods[acc.paymentMethod] || acc.paymentMethod}</td>
                       <td className="table-cell"><span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (statusColors[acc.status] || '')}>{statusLabels[acc.status] || acc.status}</span></td>
-                      <td className="table-cell">{formatDate(acc.createdAt)}</td>
+                      <td className="table-cell">{formatDate(acc.dueDate)}</td>
                       <td className="table-cell">
                         <div className="flex gap-1">
                           {acc.status !== 'pago' && acc.status !== 'cancelado' && acc.installments?.[0] && (
@@ -395,7 +399,7 @@ export function Financial() {
                       </td>
                     </tr>
                   ))}
-                  {accounts.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-gray-500">Nenhuma conta encontrada</td></tr>}
+                  {accounts.length === 0 && <tr><td colSpan={9} className="table-cell text-center text-gray-500">Nenhuma conta encontrada</td></tr>}
                 </tbody>
               </table>
               {totalPages(accounts) > 1 && (

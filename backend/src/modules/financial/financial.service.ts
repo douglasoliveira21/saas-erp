@@ -449,6 +449,7 @@ export class FinancialService implements OnModuleInit {
     const query = this.accountRepo.createQueryBuilder('account')
       .leftJoinAndSelect('account.customer', 'customer')
       .leftJoinAndSelect('account.installmentsList', 'installments')
+      .leftJoinAndSelect('account.sale', 'sale')
       .orderBy('account.createdAt', 'DESC');
 
     if (filters?.status) {
@@ -467,8 +468,22 @@ export class FinancialService implements OnModuleInit {
       query.andWhere('account.paymentMethod = :paymentMethod', { paymentMethod: filters.paymentMethod });
     }
 
-    if (filters?.page || filters?.limit) { const page = Math.max(filters.page || 1, 1); const limit = Math.min(Math.max(filters.limit || 50, 1), 100); return query.skip((page-1)*limit).take(limit).getManyAndCount().then(([data,total]) => ({ data,total,page,limit })); }
-    return query.take(500).getMany();
+    if (filters?.page || filters?.limit) { const page = Math.max(filters.page || 1, 1); const limit = Math.min(Math.max(filters.limit || 50, 1), 100); return query.skip((page-1)*limit).take(limit).getManyAndCount().then(async ([data,total]) => ({ data: await this.attachInvoiceNumbers(data), total, page, limit })); }
+    return this.attachInvoiceNumbers(await query.take(500).getMany());
+  }
+
+  private async attachInvoiceNumbers(accounts: AccountReceivable[]): Promise<AccountReceivable[]> {
+    const saleIds = accounts.map(a => a.saleId).filter(Boolean);
+    if (!saleIds.length) return accounts;
+    const invoices = await this.dataSource.query(
+      `SELECT DISTINCT ON (sale_id) sale_id, number, series, type FROM invoices WHERE sale_id = ANY($1) AND status='autorizada' ORDER BY sale_id, issued_at DESC NULLS LAST, created_at DESC`,
+      [saleIds],
+    );
+    const invoiceBySale = new Map(invoices.map((i: any) => [i.sale_id, i]));
+    return accounts.map(account => {
+      const invoice: any = invoiceBySale.get(account.saleId);
+      return { ...account, invoiceNumber: invoice?.number ?? null, invoiceType: invoice?.type ?? null } as AccountReceivable & { invoiceNumber: number | null; invoiceType: string | null };
+    });
   }
 
   async findAccountBySale(saleId: string) {
