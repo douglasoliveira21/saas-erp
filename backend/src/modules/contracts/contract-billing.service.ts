@@ -10,6 +10,25 @@ import { MailService } from '../mail/mail.service';
 export class ContractBillingService implements OnModuleInit {
   private readonly logger = new Logger(ContractBillingService.name);
   private running = false;
+  // Serializa emissão de NF/boleto por contrato+período: sem isso, o cron de 6h (generateBilling)
+  // e um clique manual (manualNfse/manualBoleto) podem rodar ao mesmo tempo, ambos verem
+  // "ainda não emitido" via getBillingStatusForPeriod, e ambos emitirem uma NFS-e real na
+  // prefeitura para o mesmo período — nota fiscal emitida não é desfazível silenciosamente.
+  private billingLocks = new Map<string, Promise<void>>();
+
+  private async withBillingLock<T>(contractId: string, billingPeriod: string, fn: () => Promise<T>): Promise<T> {
+    const key = `${contractId}:${billingPeriod}`;
+    const previous = this.billingLocks.get(key) || Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>(resolve => { release = resolve; });
+    this.billingLocks.set(key, previous.then(() => next));
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
 
   constructor(
     @InjectRepository(Contract)
@@ -108,6 +127,10 @@ export class ContractBillingService implements OnModuleInit {
    * Generate NFS-e + Boleto for a contract
    */
   async generateBilling(contract: Contract, dueDate: Date, billingPeriod: string): Promise<any> {
+    return this.withBillingLock(contract.id, billingPeriod, () => this.generateBillingImpl(contract, dueDate, billingPeriod));
+  }
+
+  private async generateBillingImpl(contract: Contract, dueDate: Date, billingPeriod: string): Promise<any> {
     const customer = contract.customer;
     if (!customer) throw new Error('Contrato sem cliente vinculado');
 
@@ -491,6 +514,13 @@ export class ContractBillingService implements OnModuleInit {
     const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
     const description = contract.description || contract.title || 'Prestação de serviços de TI';
 
+    // A checagem "já emitida?" + a emissão real precisam ser atômicas em relação ao cron de
+    // faturamento automático (generateBilling), senão os dois podem ver "não emitido" ao mesmo
+    // tempo e emitir duas NFS-e reais para o mesmo período.
+    return this.withBillingLock(contractId, billingPeriod, () => this.manualNfseImpl(contract, contractId, billingPeriod, dueDate, monthlyValue, description));
+  }
+
+  private async manualNfseImpl(contract: Contract, contractId: string, billingPeriod: string, dueDate: Date, monthlyValue: number, description: string): Promise<any> {
     // Check if NFS-e already exists for this period (prevent duplicate)
     const existingStatus = await this.getBillingStatusForPeriod(contractId, billingPeriod);
     if (existingStatus.hasNf) {
@@ -579,6 +609,13 @@ export class ContractBillingService implements OnModuleInit {
     const dueDateStr = dueDate.toISOString().split('T')[0];
     const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
 
+    // A checagem "já emitido?" + a emissão real precisam ser atômicas em relação ao cron de
+    // faturamento automático (generateBilling), senão os dois podem ver "não emitido" ao mesmo
+    // tempo e gerar dois boletos reais para o mesmo período.
+    return this.withBillingLock(contractId, billingPeriod, () => this.manualBoletoImpl(contract, customer, contractId, billingPeriod, dueDate, dueDateStr, monthlyValue));
+  }
+
+  private async manualBoletoImpl(contract: Contract, customer: any, contractId: string, billingPeriod: string, dueDate: Date, dueDateStr: string, monthlyValue: number): Promise<any> {
     // Check if Boleto already exists for this period (prevent duplicate)
     const existingStatus = await this.getBillingStatusForPeriod(contractId, billingPeriod);
     if (existingStatus.hasBoleto) {

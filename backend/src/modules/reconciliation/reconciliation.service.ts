@@ -174,20 +174,26 @@ export class ReconciliationService {
 
   // Manual reconcile
   async manualReconcile(statementId: string, movementId: string, userId: string): Promise<BankStatement> {
-    const initialStatement = await this.statementsRepo.findOne({ where: { id: statementId } });
-    if (!initialStatement) throw new BadRequestException('Lançamento do extrato não encontrado');
-    const initialRows = await this.dataSource.query(`SELECT id,type,value,is_forecast,sale_id FROM financial_movements WHERE id=$1`, [movementId]);
-    const initialMovement = initialRows[0]; if (!initialMovement) throw new BadRequestException('Movimento financeiro não encontrado');
-    if (initialStatement.type === 'credito' && initialMovement.sale_id && initialMovement.is_forecast) await this.financialService.settleSale(initialMovement.sale_id, initialStatement.category === 'pix' ? 'pix' : 'transferencia', userId, `bank:${initialStatement.bankAccount || 'unknown'}:${initialStatement.transactionId || initialStatement.id}`, new Date(initialStatement.date + 'T12:00:00'));
+    // Tudo em uma única transação: validar tipo/valor ANTES de chamar settleSale (que quita a
+    // venda inteira) e passar o mesmo manager para ele, para que um erro de validação (ex.:
+    // operador escolhe o movimento errado) não deixe uma venda indevidamente quitada enquanto o
+    // extrato em si falha ao ser marcado como conciliado — settleSale rodava antes em sua própria
+    // transação e já tinha efeito commitado quando a checagem de valor/tipo abaixo rejeitava.
     return this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(BankStatement);
       const stmt = await repo.findOne({ where: { id: statementId }, lock: { mode: 'pessimistic_write' } });
       if (!stmt || stmt.status.startsWith('conciliado')) throw new BadRequestException('Lançamento inexistente ou já conciliado');
       if (await repo.findOne({ where: { matchedMovementId: movementId } })) throw new BadRequestException('Movimento financeiro já conciliado');
-      const movement = (await manager.query(`SELECT id,type,value FROM financial_movements WHERE id=$1`, [movementId]))[0];
+      const movement = (await manager.query(`SELECT id,type,value,is_forecast,sale_id FROM financial_movements WHERE id=$1 FOR UPDATE`, [movementId]))[0];
       const sameType = (stmt.type === 'credito') === (movement?.type === 'receita');
       if (!movement || !sameType || Math.abs(Number(stmt.amount)-Number(movement.value)) > 0.01) throw new BadRequestException('Tipo ou valor do extrato diverge do movimento');
-      stmt.status = 'conciliado_manual'; stmt.matchedMovementId = movementId; stmt.matchScore = 100; stmt.reconciledBy = userId; stmt.reconciledAt = new Date(); return repo.save(stmt);
+
+      if (stmt.type === 'credito' && movement.sale_id && movement.is_forecast) {
+        await this.financialService.settleSale(movement.sale_id, stmt.category === 'pix' ? 'pix' : 'transferencia', userId, `bank:${stmt.bankAccount || 'unknown'}:${stmt.transactionId || stmt.id}`, new Date(stmt.date + 'T12:00:00'), undefined, manager);
+      }
+
+      stmt.status = 'conciliado_manual'; stmt.matchedMovementId = movementId; stmt.matchScore = 100; stmt.reconciledBy = userId; stmt.reconciledAt = new Date();
+      return repo.save(stmt);
     });
   }
   // Undo reconciliation

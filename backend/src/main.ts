@@ -46,8 +46,11 @@ async function bootstrap() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `).catch(() => {});
-    // Unique constraint for idempotency
-    await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_purchase_installment ON bills(purchase_id, installment_number) WHERE purchase_id IS NOT NULL`).catch(() => {});
+    // Unique constraint for idempotency. Logged (not silently swallowed) because
+    // purchases.service.ts relies on this index actually existing to prevent duplicate bills —
+    // the exact same silent-failure pattern found in idx_contract_billings_period below bit us
+    // once already; if this ever fails (e.g. pre-existing duplicate bills), we want to know.
+    await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_purchase_installment ON bills(purchase_id, installment_number) WHERE purchase_id IS NOT NULL`).catch((e) => console.warn('idx_bills_purchase_installment warning:', e.message));
     // contract_billings unique constraint + updated_at column
     await ds.query(`ALTER TABLE contract_billings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     // Sem constraint única desde sempre, contract_billings acumulou linhas duplicadas por
