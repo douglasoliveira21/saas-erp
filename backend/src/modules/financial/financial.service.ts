@@ -458,11 +458,15 @@ export class FinancialService implements OnModuleInit {
     if (filters?.customerId) {
       query.andWhere('account.customerId = :customerId', { customerId: filters.customerId });
     }
+    // Filtra pela data de vencimento (dueDate), nao pela data de criacao — a coluna "Vencimento"
+    // exibida na tela e o dueDate, entao filtrar por createdAt fazia contas com vencimento no mes
+    // selecionado ficarem de fora (e mostrava contas de outros meses) sempre que a conta tivesse
+    // sido criada num mes diferente do seu proprio vencimento (ex.: parcelamento de venda antiga).
     if (filters?.startDate) {
-      query.andWhere('account.createdAt >= :startDate', { startDate: filters.startDate });
+      query.andWhere('account.dueDate >= :startDate', { startDate: filters.startDate });
     }
     if (filters?.endDate) {
-      query.andWhere('account.createdAt <= :endDate', { endDate: filters.endDate + 'T23:59:59' });
+      query.andWhere('account.dueDate <= :endDate', { endDate: filters.endDate });
     }
     if (filters?.paymentMethod) {
       query.andWhere('account.paymentMethod = :paymentMethod', { paymentMethod: filters.paymentMethod });

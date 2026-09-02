@@ -255,6 +255,24 @@ export function Financial() {
       {activeTab !== 'card-fees' && (
         <div className="card mb-6">
           <div className="flex gap-4 flex-wrap items-end">
+            {activeTab === 'accounts' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Mês (vencimento)</label>
+                <input
+                  type="month"
+                  className="input w-40"
+                  value={dateFrom.slice(0, 7)}
+                  onChange={e => {
+                    const month = e.target.value
+                    if (!month) return
+                    const [y, m] = month.split('-').map(Number)
+                    setDateFrom(`${y}-${String(m).padStart(2, '0')}-01`)
+                    const last = new Date(y, m, 0)
+                    setDateTo(`${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`)
+                  }}
+                />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">De</label>
               <input type="date" className="input w-40" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
