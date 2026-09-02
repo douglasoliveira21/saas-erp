@@ -631,7 +631,12 @@ export class SalesService {
           <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
             <tr><td style="padding: 8px; color: #6b7280;">Valor:</td><td style="padding: 8px; font-weight: bold; color: #059669;">R$ ${Number(sale.totalAmount).toFixed(2)}</td></tr>
             <tr><td style="padding: 8px; color: #6b7280;">Cliente:</td><td style="padding: 8px;">${customer.name || ''}</td></tr>
+            ${sale.observations ? `<tr><td style="padding: 8px; color: #6b7280; vertical-align: top;">Descrição:</td><td style="padding: 8px; white-space: pre-line;">${sale.observations}</td></tr>` : ''}
           </table>
+          ${sale.items?.length ? `
+          <p style="color: #4b5563;">Itens da venda:</p>
+          <ul style="color: #4b5563;">${sale.items.map((item: any) => `<li>${item.quantity}x ${item.name} — R$ ${Number(item.totalPrice).toFixed(2)}</li>`).join('')}</ul>
+          ` : ''}
           <p style="color: #4b5563;">Arquivos enviados:</p>
           <ul style="color: #4b5563;">${attachmentNames.map(name => `<li>${name}</li>`).join('')}</ul>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
