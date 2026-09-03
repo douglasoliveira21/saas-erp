@@ -21,8 +21,32 @@ export class ServiceOrder {
   @Column({ name: 'service_type', length: 120 })
   serviceType: string;
 
-  @Column({ type: 'text' })
-  description: string;
+  // Informações do produto/equipamento atendido
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  equipment: string;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  brand: string;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  model: string;
+
+  @Column({ name: 'serial_number', type: 'varchar', length: 80, nullable: true })
+  serialNumber: string;
+
+  @Column({ type: 'text', nullable: true })
+  accessories: string;
+
+  // O que o cliente relatou/pediu ao abrir a OS
+  @Column({ name: 'customer_report', type: 'text' })
+  customerReport: string;
+
+  // Avaliação do técnico e o serviço que será executado
+  @Column({ type: 'text', nullable: true })
+  diagnosis: string;
+
+  @Column({ type: 'text', nullable: true })
+  observations: string;
 
   @Column({ name: 'status_key', length: 40, default: 'iniciando' })
   statusKey: string;

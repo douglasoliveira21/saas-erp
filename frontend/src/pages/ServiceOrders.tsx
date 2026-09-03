@@ -13,7 +13,7 @@ interface Order {
   customer?: { id: string; name: string }
   technician?: { id: string; name: string }
   serviceType: string
-  description: string
+  customerReport: string
   statusKey: string
   openedAt: string
   completedAt: string | null
@@ -161,7 +161,7 @@ export function ServiceOrders() {
               </div>
               <p className="font-semibold text-gray-900 dark:text-white">{order.customer?.name || 'Cliente não informado'}</p>
               <p className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300"><Wrench className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{order.serviceType}</p>
-              <p className="line-clamp-2 text-xs text-gray-500">{order.description}</p>
+              <p className="line-clamp-2 text-xs text-gray-500">{order.customerReport}</p>
               <div className="mt-1 flex items-center justify-between text-xs text-gray-400">
                 <span className="flex items-center gap-1"><UserIcon className="h-3.5 w-3.5" aria-hidden="true" />{order.technician?.name || 'Sem atendente'}</span>
                 <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" aria-hidden="true" />{new Date(order.openedAt).toLocaleDateString('pt-BR')}</span>

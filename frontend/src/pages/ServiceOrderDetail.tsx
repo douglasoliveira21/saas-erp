@@ -10,15 +10,26 @@ interface Status { id: string; key: string; label: string; color: string; sortOr
 interface Technician { id: string; name: string; active?: boolean }
 interface Attachment { id: string; type: string; filename: string; mimeType: string; createdAt: string }
 interface Event { id: string; type: string; statusKey: string | null; description: string; createdAt: string }
+interface Customer {
+  id: string; name: string; cpfCnpj?: string; phone?: string; email?: string
+  address?: string; city?: string; uf?: string; neighborhood?: string; cep?: string
+}
 interface Order {
   id: string
   number: number
   customerId: string
-  customer?: { id: string; name: string; phone?: string; email?: string }
+  customer?: Customer
   technicianId: string | null
   technician?: { id: string; name: string }
   serviceType: string
-  description: string
+  equipment: string | null
+  brand: string | null
+  model: string | null
+  serialNumber: string | null
+  accessories: string | null
+  customerReport: string
+  diagnosis: string | null
+  observations: string | null
   statusKey: string
   openedAt: string
   startedAt: string | null
@@ -53,7 +64,11 @@ export function ServiceOrderDetail() {
   const [loading, setLoading] = useState(true)
 
   const [editing, setEditing] = useState(false)
-  const [editForm, setEditForm] = useState({ technicianId: '', serviceType: '', description: '' })
+  const [editForm, setEditForm] = useState({
+    technicianId: '', serviceType: '',
+    equipment: '', brand: '', model: '', serialNumber: '', accessories: '',
+    customerReport: '', diagnosis: '', observations: '',
+  })
   const [savingInfo, setSavingInfo] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
 
@@ -80,7 +95,12 @@ export function ServiceOrderDetail() {
       setStatuses(s.data)
       setTechnicians(t.data.filter((u: any) => u.active))
       setEvents(e.data)
-      setEditForm({ technicianId: o.data.technicianId || '', serviceType: o.data.serviceType, description: o.data.description })
+      setEditForm({
+        technicianId: o.data.technicianId || '', serviceType: o.data.serviceType,
+        equipment: o.data.equipment || '', brand: o.data.brand || '', model: o.data.model || '',
+        serialNumber: o.data.serialNumber || '', accessories: o.data.accessories || '',
+        customerReport: o.data.customerReport, diagnosis: o.data.diagnosis || '', observations: o.data.observations || '',
+      })
       setConclusionDescription(o.data.conclusionDescription || '')
       setPartsCost(String(o.data.partsCost ?? 0))
       setLaborCost(String(o.data.laborCost ?? 0))
@@ -108,7 +128,14 @@ export function ServiceOrderDetail() {
       const res = await api.patch(`/service-orders/${order.id}`, {
         technicianId: editForm.technicianId || null,
         serviceType: editForm.serviceType,
-        description: editForm.description,
+        equipment: editForm.equipment,
+        brand: editForm.brand,
+        model: editForm.model,
+        serialNumber: editForm.serialNumber,
+        accessories: editForm.accessories,
+        customerReport: editForm.customerReport,
+        diagnosis: editForm.diagnosis,
+        observations: editForm.observations,
       })
       setOrder(res.data)
       setEditing(false)
@@ -251,18 +278,28 @@ export function ServiceOrderDetail() {
         </div>
       </div>
 
-      {/* Dados do cliente e serviço */}
+      {/* Dados do cliente */}
+      <div className="card space-y-3 p-4">
+        <h2 className="font-semibold text-gray-900 dark:text-white">Cliente</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div><span className="text-xs text-gray-500">Nome</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.name}</p></div>
+          <div><span className="text-xs text-gray-500">Documento</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.cpfCnpj || '-'}</p></div>
+          <div><span className="text-xs text-gray-500">Telefone</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.phone || '-'}</p></div>
+          <div><span className="text-xs text-gray-500">Email</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.email || '-'}</p></div>
+          <div><span className="text-xs text-gray-500">Cidade/UF</span><p className="font-medium text-gray-900 dark:text-white">{[order.customer?.city, order.customer?.uf].filter(Boolean).join('/') || '-'}</p></div>
+          <div><span className="text-xs text-gray-500">CEP</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.cep || '-'}</p></div>
+          {order.customer?.address && <div className="sm:col-span-2"><span className="text-xs text-gray-500">Endereço</span><p className="font-medium text-gray-900 dark:text-white">{order.customer.address}{order.customer.neighborhood ? ` - ${order.customer.neighborhood}` : ''}</p></div>}
+        </div>
+      </div>
+
+      {/* Ordem de serviço */}
       <div className="card space-y-4 p-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900 dark:text-white">Cliente e serviço</h2>
+          <h2 className="font-semibold text-gray-900 dark:text-white">Ordem de serviço</h2>
           {!editing && !isClosed && <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>Editar</Button>}
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div><span className="text-xs text-gray-500">Cliente</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.name}</p></div>
-          <div><span className="text-xs text-gray-500">Contato</span><p className="font-medium text-gray-900 dark:text-white">{order.customer?.phone || order.customer?.email || '-'}</p></div>
-        </div>
         {editing ? (
-          <div className="space-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+          <div className="space-y-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Atendente responsável</label>
               <select className="input" value={editForm.technicianId} onChange={e => setEditForm({ ...editForm, technicianId: e.target.value })}>
@@ -274,9 +311,43 @@ export function ServiceOrderDetail() {
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de serviço</label>
               <input className="input" value={editForm.serviceType} onChange={e => setEditForm({ ...editForm, serviceType: e.target.value })} />
             </div>
+
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 pt-2 border-t border-gray-100 dark:border-gray-700">Informações do produto</h3>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Equipamento</label>
+                <input className="input" value={editForm.equipment} onChange={e => setEditForm({ ...editForm, equipment: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Marca</label>
+                <input className="input" value={editForm.brand} onChange={e => setEditForm({ ...editForm, brand: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Modelo</label>
+                <input className="input" value={editForm.model} onChange={e => setEditForm({ ...editForm, model: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Número de série</label>
+                <input className="input" value={editForm.serialNumber} onChange={e => setEditForm({ ...editForm, serialNumber: e.target.value })} />
+              </div>
+            </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Descrição</label>
-              <textarea className="input" rows={4} value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Acessórios entregues</label>
+              <input className="input" value={editForm.accessories} onChange={e => setEditForm({ ...editForm, accessories: e.target.value })} />
+            </div>
+
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 pt-2 border-t border-gray-100 dark:border-gray-700">Relato, diagnóstico e observações</h3>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Relato do cliente</label>
+              <textarea className="input" rows={3} value={editForm.customerReport} onChange={e => setEditForm({ ...editForm, customerReport: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Diagnóstico e serviço a ser prestado</label>
+              <textarea className="input" rows={3} value={editForm.diagnosis} onChange={e => setEditForm({ ...editForm, diagnosis: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Observações</label>
+              <textarea className="input" rows={2} value={editForm.observations} onChange={e => setEditForm({ ...editForm, observations: e.target.value })} />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEditing(false)}>Cancelar</Button>
@@ -284,10 +355,27 @@ export function ServiceOrderDetail() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2">
-            <div><span className="text-xs text-gray-500">Atendente responsável</span><p className="font-medium text-gray-900 dark:text-white">{order.technician?.name || 'A definir'}</p></div>
-            <div><span className="text-xs text-gray-500">Tipo de serviço</span><p className="font-medium text-gray-900 dark:text-white">{order.serviceType}</p></div>
-            <div className="sm:col-span-2"><span className="text-xs text-gray-500">Descrição</span><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{order.description}</p></div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div><span className="text-xs text-gray-500">Atendente responsável</span><p className="font-medium text-gray-900 dark:text-white">{order.technician?.name || 'A definir'}</p></div>
+              <div><span className="text-xs text-gray-500">Tipo de serviço</span><p className="font-medium text-gray-900 dark:text-white">{order.serviceType}</p></div>
+            </div>
+
+            {(order.equipment || order.brand || order.model || order.serialNumber || order.accessories) && (
+              <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 dark:border-gray-700 sm:grid-cols-2">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 sm:col-span-2">Informações do produto</h3>
+                {order.equipment && <div><span className="text-xs text-gray-500">Equipamento</span><p className="font-medium text-gray-900 dark:text-white">{order.equipment}</p></div>}
+                {(order.brand || order.model) && <div><span className="text-xs text-gray-500">Marca/Modelo</span><p className="font-medium text-gray-900 dark:text-white">{[order.brand, order.model].filter(Boolean).join(' / ')}</p></div>}
+                {order.serialNumber && <div><span className="text-xs text-gray-500">Número de série</span><p className="font-medium text-gray-900 dark:text-white">{order.serialNumber}</p></div>}
+                {order.accessories && <div className="sm:col-span-2"><span className="text-xs text-gray-500">Acessórios entregues</span><p className="font-medium text-gray-900 dark:text-white">{order.accessories}</p></div>}
+              </div>
+            )}
+
+            <div className="space-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+              <div><span className="text-xs text-gray-500">Relato do cliente</span><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{order.customerReport}</p></div>
+              {order.diagnosis && <div><span className="text-xs text-gray-500">Diagnóstico e serviço a ser prestado</span><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{order.diagnosis}</p></div>}
+              {order.observations && <div><span className="text-xs text-gray-500">Observações</span><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{order.observations}</p></div>}
+            </div>
           </div>
         )}
       </div>

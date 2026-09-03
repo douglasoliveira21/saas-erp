@@ -99,14 +99,34 @@ export class ServiceOrderPdfService {
     field('Nome / Razão Social', order.customer?.name);
     twoColumns(['CPF/CNPJ', order.customer?.cpfCnpj], ['Telefone', order.customer?.phone]);
     twoColumns(['Email', order.customer?.email], ['Cidade/UF', [order.customer?.city, order.customer?.uf].filter(Boolean).join('/')]);
+    twoColumns(['Bairro', order.customer?.neighborhood], ['CEP', order.customer?.cep]);
     if (order.customer?.address) field('Endereço', order.customer.address);
+
+    if (order.equipment || order.brand || order.model || order.serialNumber || order.accessories) {
+      sectionTitle('Informações do produto');
+      twoColumns(['Equipamento', order.equipment], ['Marca/Modelo', [order.brand, order.model].filter(Boolean).join(' / ')]);
+      if (order.serialNumber) field('Número de série', order.serialNumber);
+      if (order.accessories) field('Acessórios entregues', order.accessories);
+    }
 
     sectionTitle('Serviço');
     twoColumns(['Tipo de serviço', order.serviceType], ['Atendente responsável', order.technician?.name]);
     twoColumns(['Abertura', dateFmt(order.openedAt)], ['Início', order.startedAt ? dateFmt(order.startedAt) : '-']);
     doc.moveDown(0.2);
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#6b7280').text('DESCRIÇÃO DO SERVIÇO SOLICITADO:');
-    doc.font('Helvetica').fontSize(9.5).fillColor('#111827').text(order.description || '-', { width: CONTENT_WIDTH });
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#6b7280').text('RELATO DO CLIENTE:');
+    doc.font('Helvetica').fontSize(9.5).fillColor('#111827').text(order.customerReport || '-', { width: CONTENT_WIDTH });
+
+    if (order.diagnosis) {
+      doc.moveDown(0.4);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#6b7280').text('DIAGNÓSTICO E SERVIÇO A SER PRESTADO:');
+      doc.font('Helvetica').fontSize(9.5).fillColor('#111827').text(order.diagnosis, { width: CONTENT_WIDTH });
+    }
+
+    if (order.observations) {
+      doc.moveDown(0.4);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#6b7280').text('OBSERVAÇÕES:');
+      doc.font('Helvetica').fontSize(9.5).fillColor('#111827').text(order.observations, { width: CONTENT_WIDTH });
+    }
 
     if (order.conclusionDescription || order.completedAt) {
       sectionTitle('Conclusão');

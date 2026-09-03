@@ -103,7 +103,7 @@ export class ServiceOrdersService {
     if (filters.customerId) qb.andWhere('o.customerId = :customerId', { customerId: filters.customerId });
     if (filters.technicianId) qb.andWhere('o.technicianId = :technicianId', { technicianId: filters.technicianId });
     if (filters.search) {
-      qb.andWhere('(customer.name ILIKE :search OR o.serviceType ILIKE :search OR o.description ILIKE :search OR CAST(o.number AS TEXT) LIKE :searchNumber)', {
+      qb.andWhere('(customer.name ILIKE :search OR o.serviceType ILIKE :search OR o.customerReport ILIKE :search OR o.equipment ILIKE :search OR CAST(o.number AS TEXT) LIKE :searchNumber)', {
         search: `%${filters.search}%`,
         searchNumber: `%${filters.search}%`,
       });
@@ -123,7 +123,7 @@ export class ServiceOrdersService {
   async create(dto: any, userId?: string): Promise<ServiceOrder> {
     if (!dto.customerId) throw new BadRequestException('Selecione o cliente');
     if (!dto.serviceType) throw new BadRequestException('Informe o tipo de serviço');
-    if (!dto.description) throw new BadRequestException('Descreva o serviço a ser realizado');
+    if (!dto.customerReport) throw new BadRequestException('Registre o relato do cliente');
 
     const statuses = await this.findAllStatuses(true);
     const defaultStatus = statuses.find((s) => s.key === 'iniciando') || statuses[0];
@@ -133,7 +133,14 @@ export class ServiceOrdersService {
       customerId: dto.customerId,
       technicianId: dto.technicianId || null,
       serviceType: String(dto.serviceType).trim(),
-      description: String(dto.description).trim(),
+      equipment: dto.equipment ? String(dto.equipment).trim() : null,
+      brand: dto.brand ? String(dto.brand).trim() : null,
+      model: dto.model ? String(dto.model).trim() : null,
+      serialNumber: dto.serialNumber ? String(dto.serialNumber).trim() : null,
+      accessories: dto.accessories ? String(dto.accessories).trim() : null,
+      customerReport: String(dto.customerReport).trim(),
+      diagnosis: dto.diagnosis ? String(dto.diagnosis).trim() : null,
+      observations: dto.observations ? String(dto.observations).trim() : null,
       statusKey,
       createdBy: userId,
     });
@@ -142,7 +149,7 @@ export class ServiceOrdersService {
     const full = await this.findOne(saved.id);
     await this.notifyCustomer(
       full,
-      `Olá, ${full.customer?.name || ''}! Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi aberta.\n\n*Serviço:* ${full.serviceType}\n*Descrição:* ${full.description}\n\nVocê receberá atualizações por aqui conforme o andamento.`,
+      `Olá, ${full.customer?.name || ''}! Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi aberta.\n\n*Serviço:* ${full.serviceType}\n*Relato:* ${full.customerReport}\n\nVocê receberá atualizações por aqui conforme o andamento.`,
     );
     return full;
   }
@@ -154,7 +161,14 @@ export class ServiceOrdersService {
     if (dto.customerId !== undefined) order.customerId = dto.customerId;
     if (dto.technicianId !== undefined) order.technicianId = dto.technicianId || null;
     if (dto.serviceType !== undefined) order.serviceType = String(dto.serviceType).trim();
-    if (dto.description !== undefined) order.description = String(dto.description).trim();
+    if (dto.equipment !== undefined) order.equipment = dto.equipment ? String(dto.equipment).trim() : null;
+    if (dto.brand !== undefined) order.brand = dto.brand ? String(dto.brand).trim() : null;
+    if (dto.model !== undefined) order.model = dto.model ? String(dto.model).trim() : null;
+    if (dto.serialNumber !== undefined) order.serialNumber = dto.serialNumber ? String(dto.serialNumber).trim() : null;
+    if (dto.accessories !== undefined) order.accessories = dto.accessories ? String(dto.accessories).trim() : null;
+    if (dto.customerReport !== undefined) order.customerReport = String(dto.customerReport).trim();
+    if (dto.diagnosis !== undefined) order.diagnosis = dto.diagnosis ? String(dto.diagnosis).trim() : null;
+    if (dto.observations !== undefined) order.observations = dto.observations ? String(dto.observations).trim() : null;
 
     if (dto.statusKey !== undefined && dto.statusKey !== previousStatus) {
       const statuses = await this.findAllStatuses(true);
