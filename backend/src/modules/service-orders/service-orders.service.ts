@@ -7,6 +7,7 @@ import { ServiceOrderStatus } from './entities/service-order-status.entity';
 import { ServiceOrderAttachment } from './entities/service-order-attachment.entity';
 import { ServiceOrderEvent } from './entities/service-order-event.entity';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ServiceOrderPdfService } from './service-order-pdf.service';
 
 const ATTACHMENT_TYPES = ['foto_antes', 'foto_depois', 'documento', 'geral'];
 
@@ -18,6 +19,7 @@ export class ServiceOrdersService {
     @InjectRepository(ServiceOrderAttachment) private attachmentsRepository: Repository<ServiceOrderAttachment>,
     @InjectRepository(ServiceOrderEvent) private eventsRepository: Repository<ServiceOrderEvent>,
     private whatsappService: WhatsappService,
+    private pdfService: ServiceOrderPdfService,
   ) {}
 
   // Notificação por WhatsApp nunca pode travar a operação principal da OS — se a instância
@@ -31,6 +33,28 @@ export class ServiceOrdersService {
       await this.whatsappService.sendText(phone, message, { relatedEntity: 'service_order', relatedId: order.id });
     } catch {
       // já logado pelo WhatsappService; não deve impedir a OS de prosseguir.
+    }
+  }
+
+  // Mesma notificação de texto, mas anexando o PDF da OS (com a galeria antes/depois) — usado só
+  // na conclusão, quando o registro fotográfico já está completo.
+  private async notifyCustomerWithPdf(order: ServiceOrder, message: string): Promise<void> {
+    try {
+      if (!(await this.whatsappService.shouldNotifyServiceOrders())) return;
+      const phone = order.customer?.phone;
+      if (!phone) return;
+      await this.whatsappService.sendText(phone, message, { relatedEntity: 'service_order', relatedId: order.id });
+      const pdf = await this.pdfService.generate(order.id);
+      await this.whatsappService.sendMedia(
+        phone,
+        pdf,
+        'application/pdf',
+        `OS-${String(order.number).padStart(5, '0')}.pdf`,
+        '',
+        { relatedEntity: 'service_order', relatedId: order.id },
+      );
+    } catch {
+      // já logado pelo WhatsappService; não deve impedir a conclusão da OS.
     }
   }
 
@@ -221,9 +245,9 @@ export class ServiceOrdersService {
     });
     const full = await this.findOne(saved.id);
     const totalCost = Number(full.totalCost || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    await this.notifyCustomer(
+    await this.notifyCustomerWithPdf(
       full,
-      `Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi concluída! ✅\n\n*O que foi feito:* ${full.conclusionDescription}\n*Valor total:* ${totalCost}\n\nObrigado pela confiança!`,
+      `Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi concluída! ✅\n\n*O que foi feito:* ${full.conclusionDescription}\n*Valor total:* ${totalCost}\n\nSegue em anexo o PDF completo da OS, com as fotos de antes e depois.\n\nObrigado pela confiança!`,
     );
     return full;
   }
