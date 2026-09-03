@@ -123,8 +123,29 @@ export class MultiTenantFoundation1793000000000 implements MigrationInterface {
       const exists = await q.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [`public.${table}`]);
       if (!exists[0]?.exists) continue; // tabela ainda não existe neste ambiente (ex.: deploy novo) — nada a migrar
 
+      // "financial_movements" tem triggers que bloqueiam UPDATE em lançamentos já realizados
+      // (protect_realized_financial_movement) ou em período fechado (trg_financial_closed_period)
+      // — corretas para uso normal, mas impediriam até este backfill de uma coluna de metadado.
+      // Desligamos as duas só durante este UPDATE específico.
+      const movementTriggers = ['trg_protect_realized_financial_movement', 'trg_financial_closed_period'];
+      const disabledTriggers: string[] = [];
+      if (table === 'financial_movements') {
+        for (const trigger of movementTriggers) {
+          const triggerExists = await q.query(`SELECT 1 FROM pg_trigger WHERE tgname = $1`, [trigger]);
+          if (triggerExists.length) {
+            await q.query(`ALTER TABLE "${table}" DISABLE TRIGGER ${trigger}`);
+            disabledTriggers.push(trigger);
+          }
+        }
+      }
+
       await q.query(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS "tenant_id" uuid`);
       await q.query(`UPDATE "${table}" SET "tenant_id" = $1 WHERE "tenant_id" IS NULL`, [tenantId]);
+
+      for (const trigger of disabledTriggers) {
+        await q.query(`ALTER TABLE "${table}" ENABLE TRIGGER ${trigger}`);
+      }
+
       await q.query(`ALTER TABLE "${table}" ALTER COLUMN "tenant_id" SET DEFAULT '${tenantId}'`);
       await q.query(`ALTER TABLE "${table}" ALTER COLUMN "tenant_id" SET NOT NULL`);
 
