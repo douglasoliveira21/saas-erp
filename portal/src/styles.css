@@ -54,8 +54,23 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif;transition:background .2s,color .2s}
 button,input,select,textarea{font:inherit}
-.auth{min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at top left,var(--primary-soft-bg),var(--bg) 55%)}
+.auth-split{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
+.auth-visual{position:relative;overflow:hidden;background:#03060d url('/auth-skyline.svg') left bottom/cover no-repeat;color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:48px}
+.auth-visual::before{content:'';position:absolute;inset:0;background:linear-gradient(0deg,#02040ae0 0%,#02040a66 30%,#02040a33 55%,#02040a99 100%);z-index:0}
+.auth-visual-brand,.auth-visual-copy{position:relative;z-index:1}
+.auth-visual-brand{display:flex;align-items:center;gap:12px}
+.auth-visual-logo{width:130px;height:auto;object-fit:contain}
+.auth-visual-brand span{font-size:15px;font-weight:700;letter-spacing:.02em;padding-left:12px;border-left:1px solid #ffffff40}
+.auth-visual-copy h1{font-size:30px;line-height:1.28;margin:0 0 14px;max-width:440px}
+.auth-visual-copy>p{color:#c3cfe6;font-size:14px;max-width:420px;margin:0 0 32px}
+.auth-features{list-style:none;margin:0;padding:0;display:grid;gap:20px;max-width:440px}
+.auth-features li{display:flex;gap:14px;align-items:flex-start}
+.auth-feature-icon{font-size:20px;background:#ffffff14;border-radius:12px;width:42px;height:42px;display:grid;place-items:center;flex-shrink:0}
+.auth-features strong{display:block;font-size:14px;margin-bottom:2px}
+.auth-features p{margin:0;color:#a9b7d1;font-size:12.5px;line-height:1.5}
+.auth-form-side{display:grid;place-items:center;padding:32px;background:var(--bg)}
 .auth-card{width:min(440px,calc(100% - 32px));background:var(--card-bg);border:1px solid var(--card-border);border-radius:24px;padding:32px;box-shadow:0 24px 70px #3f2a8d1a}
+@media(max-width:900px){.auth-split{grid-template-columns:1fr}.auth-visual{display:none}}
 .brand{display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center;margin-bottom:28px}
 .brand-logo{display:block;width:150px;height:68px;object-fit:contain;object-position:center}
 .brand h1{font-size:19px;margin:0}
