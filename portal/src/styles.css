@@ -73,13 +73,16 @@ button,input,select,textarea{font:inherit}
 .error,.success{padding:10px 12px;border-radius:10px;font-size:13px}
 .error{background:var(--error-bg);color:var(--error-text)}
 .success{background:var(--success-bg);color:var(--success-text)}
-.shell{display:grid;grid-template-columns:245px 1fr;min-height:100vh}
-.side{background:var(--sidebar-bg);color:#fff;padding:26px 18px}
-.side .brand{margin-left:0;padding:4px 0 18px}
-.nav{display:grid;gap:6px}
-.nav button{border:0;background:transparent;color:var(--sidebar-text);padding:11px 13px;border-radius:10px;text-align:left;cursor:pointer}
+.shell-top{min-height:100vh;display:flex;flex-direction:column}
+.topnav{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:24px;flex-wrap:wrap;background:var(--sidebar-bg);color:#fff;padding:10px 22px;box-shadow:0 4px 18px #00000030}
+.topnav .brand{flex-direction:row;align-items:center;text-align:left;gap:10px;margin-bottom:0}
+.topnav .brand-logo{width:110px;height:auto;object-fit:contain}
+.topnav .brand h1{font-size:15px;white-space:nowrap}
+.topnav .brand p{display:none}
+.nav{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+.nav button{border:0;background:transparent;color:var(--sidebar-text);padding:9px 13px;border-radius:10px;text-align:left;cursor:pointer;white-space:nowrap;font-size:13px}
 .nav button.active,.nav button:hover{background:var(--sidebar-hover);color:#fff}
-.content{padding:32px;max-width:1400px;width:100%}
+.content{padding:32px;max-width:1400px;width:100%;margin:0 auto}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}
 .top h2{margin:0}
 .muted{color:var(--muted);font-size:13px}
@@ -100,8 +103,8 @@ button,input,select,textarea{font:inherit}
 .skeleton-text{height:13px;margin:6px 0}
 .skeleton-card{height:96px}
 @keyframes skeleton-pulse{0%{background-position:200% 0}100%{background-position:-200% 0}}
-@media(max-width:850px){.shell{display:block}.side{position:static}.nav{grid-template-columns:repeat(3,1fr)}.content{padding:18px}.grid{grid-template-columns:1fr 1fr}.span2{grid-column:span 2}}
-@media(max-width:520px){.grid,.form-grid{grid-template-columns:1fr}.span2,.full{grid-column:1}.nav{grid-template-columns:1fr 1fr}.auth-card{padding:24px}}
+@media(max-width:850px){.topnav{padding:10px 16px;gap:12px}.topnav .brand-logo{width:88px}.content{padding:18px}.grid{grid-template-columns:1fr 1fr}.span2{grid-column:span 2}}
+@media(max-width:520px){.grid,.form-grid{grid-template-columns:1fr}.span2,.full{grid-column:1}.auth-card{padding:24px}}
 
 .code-input{text-align:center;font-size:24px;font-weight:700;letter-spacing:8px}
 .timeline{display:grid;gap:12px}
