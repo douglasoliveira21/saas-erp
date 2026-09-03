@@ -126,6 +126,15 @@ export class GlpiService implements OnModuleInit {
     if (!id) throw new Error('GLPI não retornou o identificador do chamado');
     return { id };
   }
+  // Adiciona uma resposta publica (acompanhamento) a um chamado ja existente — permite o cliente
+  // continuar a conversa sem precisar abrir um chamado novo.
+  async addTicketFollowup(ticketId: number, content: string, requesterName?: string): Promise<void> {
+    const config = await this.getConfig();
+    const session = await this.initSession(config);
+    const text = requesterName ? `${content}\n\n— ${requesterName} (via portal do cliente)` : content;
+    await this.glpiWrite(`/Ticket/${ticketId}/ITILFollowup`, session, config, { content: text, is_private: 0 });
+  }
+
   // Sobe um anexo (foto/documento) direto pro GLPI e vincula ao chamado — segue o fluxo padrao da
   // API REST do GLPI: primeiro cria o Document (multipart, com um "uploadManifest" descrevendo
   // qual campo do form e o arquivo), depois cria um Document_Item ligando esse documento ao

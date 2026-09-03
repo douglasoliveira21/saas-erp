@@ -73,6 +73,36 @@ export class CustomerPortalService {
     await this.users.save(user);
     return { message: 'E-mail confirmado. Seu acesso ao portal está liberado.' };
   }
+  // Reaproveita os mesmos campos de verificacao usados no cadastro (codigo por e-mail com
+  // expiracao) em vez de criar uma tabela nova so pra recuperacao de senha do portal.
+  async forgotPassword(emailValue: string) {
+    const email = String(emailValue || '').trim().toLowerCase();
+    const user = await this.users.findOne({ where: { email } });
+    // Nao revela se o e-mail existe ou nao — mensagem generica sempre, evita enumeracao de contas.
+    if (!user || user.status !== 'active') return { message: 'Se o e-mail existir, enviamos um código de recuperação.' };
+    const code = String(crypto.randomInt(100000, 1000000));
+    user.verificationCodeHash = crypto.createHash('sha256').update(code).digest('hex');
+    user.verificationExpiresAt = new Date(Date.now() + 15 * 60000);
+    await this.users.save(user);
+    await this.mail.sendMail(email, 'Recuperação de senha - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para redefinir a senha do Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos. Se você não solicitou isso, ignore este e-mail.</p>`);
+    return { message: 'Se o e-mail existir, enviamos um código de recuperação.' };
+  }
+
+  async resetPasswordWithCode(emailValue: string, codeValue: string, newPassword: string) {
+    const email = String(emailValue || '').trim().toLowerCase();
+    if (String(newPassword || '').length < 8) throw new BadRequestException('A nova senha deve ter pelo menos 8 caracteres');
+    const codeHash = crypto.createHash('sha256').update(String(codeValue || '').trim()).digest('hex');
+    const user = await this.users.findOne({ where: { email } });
+    if (!user || user.status !== 'active' || !user.verificationCodeHash || user.verificationCodeHash !== codeHash)
+      throw new BadRequestException('Código inválido');
+    if (!user.verificationExpiresAt || user.verificationExpiresAt < new Date())
+      throw new BadRequestException('Código expirado. Solicite um novo.');
+    user.password = await bcrypt.hash(newPassword, 12);
+    user.verificationCodeHash = null; user.verificationExpiresAt = null;
+    await this.users.save(user);
+    return { message: 'Senha redefinida com sucesso. Você já pode entrar com a nova senha.' };
+  }
+
   async login(email: string, password: string) {
     const user = await this.users.findOne({ where: { email: String(email || '').trim().toLowerCase() }, relations: ['customer'] });
     if (!user || !await bcrypt.compare(password || '', user.password)) throw new UnauthorizedException('Credenciais inválidas');
@@ -191,7 +221,10 @@ export class CustomerPortalService {
     return result;
   }
 
-  async ticketDetails(actor: any, glpiTicketId: number) {
+  // Confere que o usuario do portal (dono do chamado, ou qualquer usuario da empresa se nao for
+  // role "user") tem acesso a esse chamado, e devolve o entityId + registro local (se existir) —
+  // usado tanto pra ver detalhes quanto pra responder um chamado.
+  private async resolveTicketAccess(actor: any, glpiTicketId: number): Promise<{ entityId: number; localTicket: PortalTicket | null }> {
     let entityId: number | null = null;
     let localTicket: PortalTicket | null = null;
     if (actor.role === 'user') {
@@ -204,12 +237,36 @@ export class CustomerPortalService {
       entityId = synced?.glpiEntityId || localTicket?.glpiEntityId || null;
       if (!entityId) throw new NotFoundException('Chamado não encontrado para esta empresa');
     }
+    return { entityId, localTicket };
+  }
+
+  async ticketDetails(actor: any, glpiTicketId: number) {
+    const { entityId, localTicket } = await this.resolveTicketAccess(actor, glpiTicketId);
     const [details, customer] = await Promise.all([this.glpi.getPortalTicketDetails(glpiTicketId, entityId), this.customers.findOne({ where: { id: actor.customerId } })]);
     return {
       ...details,
       company: customer ? { id: customer.id, name: customer.name, document: customer.cpfCnpj } : null,
       requester: localTicket?.requester ? { name: localTicket.requester.name, email: localTicket.requester.email, phone: localTicket.requester.phone, department: localTicket.requester.department } : details.requester,
     };
+  }
+
+  // Adiciona uma resposta (acompanhamento publico) a um chamado ja aberto, com anexos opcionais —
+  // sem isso, a unica forma do cliente continuar uma conversa era abrir um chamado novo.
+  async replyToTicket(actor: any, glpiTicketId: number, content: string, files?: Array<{ buffer: Buffer; originalname: string; mimetype: string }>) {
+    await this.resolveTicketAccess(actor, glpiTicketId);
+    const text = String(content || '').trim();
+    if (!text) throw new BadRequestException('Escreva uma mensagem');
+    const user = await this.users.findOne({ where: { id: actor.sub } });
+    await this.glpi.addTicketFollowup(glpiTicketId, text, user?.name);
+    const attachmentErrors: string[] = [];
+    for (const file of files || []) {
+      try {
+        await this.glpi.uploadTicketDocument(glpiTicketId, file.buffer, file.originalname, file.mimetype);
+      } catch (error: any) {
+        attachmentErrors.push(`${file.originalname}: ${error.message}`);
+      }
+    }
+    return { success: true, attachmentErrors: attachmentErrors.length ? attachmentErrors : undefined };
   }
   async dashboard(actor: any) {
     const tickets = await this.listTickets(actor), month = new Date().toISOString().slice(0, 7);
@@ -224,7 +281,7 @@ export class CustomerPortalService {
 
   async documents(actor: any) {
     if (!['admin','finance'].includes(actor.role)) throw new ForbiddenException();
-    const receivables = await this.dataSource.query(`WITH documents AS (SELECT ar.id "accountId",ar.description,ar.total_value,ar.pending_value,ar.status,ar.due_date,p.id "paymentId",p.type,p.codigo_solicitacao code,p.status "paymentStatus",p.value "paymentValue",p.due_date "paymentDueDate",ROW_NUMBER() OVER (PARTITION BY ar.id ORDER BY p.due_date,p.created_at,p.id) "installmentNumber",COUNT(p.id) OVER (PARTITION BY ar.id) "installmentCount" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id AND COALESCE(LOWER(p.status),'') NOT IN ('rejeitado','rejeitada','cancelado','cancelada','erro','falha') WHERE ar.customer_id=$1 AND COALESCE(LOWER(ar.status),'') NOT IN ('cancelado','cancelada','rejeitado','rejeitada','erro')) SELECT CASE WHEN "paymentId" IS NULL THEN "accountId" ELSE "paymentId" END id,CASE WHEN "installmentCount">1 THEN description||' - Parcela '||"installmentNumber"||'/'||"installmentCount" ELSE description END description,COALESCE("paymentValue",total_value) "totalValue",CASE WHEN "paymentId" IS NULL THEN pending_value ELSE COALESCE("paymentValue",0) END "pendingValue",status,COALESCE("paymentDueDate",due_date) "dueDate","paymentId",type,code,"paymentStatus" FROM documents ORDER BY COALESCE("paymentDueDate",due_date) DESC LIMIT 100`, [actor.customerId]);
+    const receivables = await this.dataSource.query(`WITH documents AS (SELECT ar.id "accountId",ar.description,ar.total_value,ar.pending_value,ar.status,ar.due_date,p.id "paymentId",p.type,p.codigo_solicitacao code,p.status "paymentStatus",p.value "paymentValue",p.due_date "paymentDueDate",p.pix_copia_e_cola "pixCopiaECola",p.linha_digitavel "linhaDigitavel",ROW_NUMBER() OVER (PARTITION BY ar.id ORDER BY p.due_date,p.created_at,p.id) "installmentNumber",COUNT(p.id) OVER (PARTITION BY ar.id) "installmentCount" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id AND COALESCE(LOWER(p.status),'') NOT IN ('rejeitado','rejeitada','cancelado','cancelada','erro','falha') WHERE ar.customer_id=$1 AND COALESCE(LOWER(ar.status),'') NOT IN ('cancelado','cancelada','rejeitado','rejeitada','erro')) SELECT CASE WHEN "paymentId" IS NULL THEN "accountId" ELSE "paymentId" END id,CASE WHEN "installmentCount">1 THEN description||' - Parcela '||"installmentNumber"||'/'||"installmentCount" ELSE description END description,COALESCE("paymentValue",total_value) "totalValue",CASE WHEN "paymentId" IS NULL THEN pending_value ELSE COALESCE("paymentValue",0) END "pendingValue",status,COALESCE("paymentDueDate",due_date) "dueDate","paymentId",type,code,"paymentStatus","pixCopiaECola","linhaDigitavel" FROM documents ORDER BY COALESCE("paymentDueDate",due_date) DESC LIMIT 100`, [actor.customerId]);
     const invoices = await this.dataSource.query(`SELECT i.id,i.type,i.number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 AND COALESCE(LOWER(i.status),'') NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
     const contracts = await this.contracts.find({ where: { customerId: actor.customerId }, order: { createdAt: 'DESC' } });
     return { receivables, invoices, contracts };

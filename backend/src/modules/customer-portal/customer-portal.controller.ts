@@ -17,6 +17,8 @@ export class CustomerPortalController {
   @Post('public/company') company(@Body() body: any) { return this.service.findCompany(body.cnpj); }
   @Post('public/register') register(@Body() body: any) { return this.service.selfRegister(body); }
   @Post('public/verify-email') verifyEmail(@Body() body: any) { return this.service.verifyEmail(body.email, body.code); }
+  @Post('public/forgot-password') forgotPassword(@Body() body: any) { return this.service.forgotPassword(body.email); }
+  @Post('public/reset-password') resetPassword(@Body() body: any) { return this.service.resetPasswordWithCode(body.email, body.code, body.password); }
   @Post('public/login') async login(@Body() body: any, @Response({ passthrough: true }) response: ExpressResponse) {
     const result = await this.service.login(body.email, body.password);
     response.cookie('portal_token', result.accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 604800000, path: '/api/portal' });
@@ -35,6 +37,11 @@ export class CustomerPortalController {
   @Get('form') @UseGuards(PortalAuthGuard) form(@Request() req) { return this.service.getForm(req.portalUser.customerId); }
   @Get('tickets') @UseGuards(PortalAuthGuard) tickets(@Request() req) { return this.service.listTickets(req.portalUser); }
   @Get('tickets/:glpiId') @UseGuards(PortalAuthGuard) ticketDetails(@Request() req, @Param('glpiId') glpiId: string) { return this.service.ticketDetails(req.portalUser, Number(glpiId)); }
+  @Post('tickets/:glpiId/followup') @UseGuards(PortalAuthGuard)
+  @UseInterceptors(FilesInterceptor('files', 5, { limits: { fileSize: 15 * 1024 * 1024 } }))
+  replyToTicket(@Request() req, @Param('glpiId') glpiId: string, @Body('content') content: string, @UploadedFiles() files: any[]) {
+    return this.service.replyToTicket(req.portalUser, Number(glpiId), content, files);
+  }
   @Post('tickets') @UseGuards(PortalAuthGuard)
   @UseInterceptors(FilesInterceptor('files', 5, { limits: { fileSize: 15 * 1024 * 1024 } }))
   createTicket(@Request() req, @Body() body: any, @UploadedFiles() files: any[]) {
