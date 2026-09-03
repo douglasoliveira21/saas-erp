@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Outlet } from 'react-router-dom'
-import { ShieldCheck, Building2, PackageCheck, LogOut, MapPin, Landmark } from 'lucide-react'
+import { ShieldCheck, Building2, PackageCheck, LogOut, MapPin, Landmark, UserCircle } from 'lucide-react'
 import { getSuperAdminToken, setSuperAdminToken } from '../../services/superAdminApi'
 
 export function SuperAdminLayout() {
@@ -26,6 +26,7 @@ export function SuperAdminLayout() {
           <NavLink to="/super-admin/plans" className={linkClass}><PackageCheck className="h-4 w-4" aria-hidden="true" />Planos</NavLink>
           <NavLink to="/super-admin/municipalities" className={linkClass}><MapPin className="h-4 w-4" aria-hidden="true" />Municípios</NavLink>
           <NavLink to="/super-admin/banks" className={linkClass}><Landmark className="h-4 w-4" aria-hidden="true" />Bancos</NavLink>
+          <NavLink to="/super-admin/account" className={linkClass}><UserCircle className="h-4 w-4" aria-hidden="true" />Minha conta</NavLink>
           <button onClick={logout} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800">
             <LogOut className="h-4 w-4" aria-hidden="true" />Sair
           </button>

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -23,5 +23,17 @@ export class SuperAdminAuthService {
       access_token: this.jwtService.sign(payload),
       admin: { id: admin.id, name: admin.name, email: admin.email },
     };
+  }
+
+  async changePassword(adminId: string, currentPassword: string, newPassword: string): Promise<{ success: true }> {
+    const admin = await this.superAdminsRepository.findOne({ where: { id: adminId } });
+    if (!admin) throw new UnauthorizedException();
+    const valid = await bcrypt.compare(currentPassword || '', admin.password);
+    if (!valid) throw new BadRequestException('Senha atual incorreta');
+    if (!newPassword || newPassword.length < 8) throw new BadRequestException('A nova senha deve ter pelo menos 8 caracteres');
+    if (await bcrypt.compare(newPassword, admin.password)) throw new BadRequestException('A nova senha deve ser diferente da atual');
+    const hash = await bcrypt.hash(newPassword, 12);
+    await this.superAdminsRepository.update(admin.id, { password: hash });
+    return { success: true };
   }
 }

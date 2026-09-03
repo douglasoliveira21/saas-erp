@@ -16,4 +16,10 @@ export class SuperAdminAuthController {
   me(@Request() req: any) {
     return req.user;
   }
+
+  @UseGuards(SuperAdminJwtAuthGuard)
+  @Post('change-password')
+  changePassword(@Request() req: any, @Body() body: { currentPassword: string; newPassword: string }) {
+    return this.authService.changePassword(req.user.id, body.currentPassword, body.newPassword);
+  }
 }
