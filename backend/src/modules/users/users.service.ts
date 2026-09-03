@@ -108,4 +108,28 @@ export class UsersService {
       order: { name: 'ASC' },
     });
   }
+
+  // ==================== Usado pelo painel do super admin ====================
+  // Sempre confere tenantId junto do id, para um super admin nunca conseguir editar/remover
+  // por engano um usuário de um tenant diferente do que está vendo na tela.
+
+  async findAllByTenant(tenantId: string): Promise<User[]> {
+    return this.usersRepository.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+  }
+
+  private async findOneInTenant(tenantId: string, id: string): Promise<User> {
+    const user = await this.usersRepository.findOne({ where: { id, tenantId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado neste cliente');
+    return user;
+  }
+
+  async updateInTenant(tenantId: string, id: string, dto: UpdateUserDto): Promise<User> {
+    await this.findOneInTenant(tenantId, id);
+    return this.update(id, dto);
+  }
+
+  async removeInTenant(tenantId: string, id: string): Promise<void> {
+    await this.findOneInTenant(tenantId, id);
+    return this.remove(id);
+  }
 }

@@ -7,6 +7,33 @@ import { Plan } from './entities/plan.entity';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 
+// Mesma lista de MultiTenantFoundation (1793000000000) + "payments" (adicionada depois, em
+// 1793400000000). "tenant_bank_configs" fica de fora de propósito: sua FK já é ON DELETE CASCADE,
+// então some sozinha quando a linha do tenant é removida no passo final.
+const TENANT_SCOPED_TABLES = [
+  'users', 'customers', 'products', 'services', 'vehicles', 'suppliers', 'quotes',
+  'sales', 'sale_items', 'sale_events', 'sale_attachments',
+  'commissions', 'contracts',
+  'service_orders', 'service_order_statuses', 'service_order_attachments', 'service_order_events',
+  'crm_opportunities',
+  'financial_movements', 'installments', 'installment_payments', 'accounts_receivable',
+  'accounts_payable', 'bank_accounts', 'card_fees', 'customer_credits', 'monthly_closings',
+  'chart_accounts', 'cost_centers', 'financial_tasks',
+  'invoices', 'certificates', 'fiscal_events', 'fiscal_config',
+  'glpi_config', 'glpi_tickets', 'sla_monthly_snapshots',
+  'whatsapp_config', 'whatsapp_message_logs',
+  'inter_webhook_events',
+  'email_configs', 'email_delivery_logs',
+  'purchases', 'purchase_items', 'purchase_quotes', 'purchase_attachments',
+  'bills', 'routes', 'route_legs',
+  'stock_movements', 'stock_inventories',
+  'bank_statements',
+  'audit_logs',
+  'portal_users', 'portal_tickets', 'portal_ticket_forms',
+  'auth_sessions', 'password_resets',
+  'payments',
+];
+
 function slugify(value: string): string {
   return value
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -98,6 +125,54 @@ export class TenantsService {
     return { tenant: await this.findOne(tenant.id), adminEmail: dto.adminEmail.trim().toLowerCase(), tempPassword };
   }
 
+  // Resumo para o dashboard do painel do super admin: contagem de tenants por status, usuários
+  // totais, MRR estimado (planos mensais somados + planos anuais divididos por 12) só de tenants
+  // ativos, distribuição por plano, e o crescimento (tenants criados) dos últimos 6 meses.
+  async getDashboard() {
+    const tenants = await this.tenantsRepository.find({ relations: ['plan'] });
+    const byStatus = { ativo: 0, suspenso: 0, cancelado: 0 } as Record<string, number>;
+    let mrr = 0;
+    const planCounts = new Map<string, { name: string; count: number }>();
+    for (const tenant of tenants) {
+      byStatus[tenant.status] = (byStatus[tenant.status] || 0) + 1;
+      if (tenant.plan) {
+        const key = tenant.plan.id;
+        const entry = planCounts.get(key) || { name: tenant.plan.name, count: 0 };
+        entry.count += 1;
+        planCounts.set(key, entry);
+        if (tenant.status === 'ativo') {
+          const price = Number(tenant.plan.price || 0);
+          mrr += tenant.plan.billingCycle === 'anual' ? price / 12 : price;
+        }
+      }
+    }
+
+    const userCountRow = await this.tenantsRepository.manager.query(`SELECT COUNT(*)::int AS total FROM users WHERE archived_at IS NULL`);
+    const totalUsers = Number(userCountRow[0]?.total || 0);
+
+    const monthlyGrowth = await this.tenantsRepository.manager.query(
+      `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*)::int AS count
+       FROM tenants
+       WHERE created_at >= date_trunc('month', now()) - interval '5 months'
+       GROUP BY 1 ORDER BY 1`,
+    );
+
+    const recentTenants = [...tenants]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5)
+      .map((t) => ({ id: t.id, name: t.name, status: t.status, planName: t.plan?.name || null, createdAt: t.createdAt }));
+
+    return {
+      totalTenants: tenants.length,
+      byStatus,
+      totalUsers,
+      mrr: Math.round(mrr * 100) / 100,
+      planDistribution: Array.from(planCounts.values()),
+      monthlyGrowth,
+      recentTenants,
+    };
+  }
+
   async update(id: string, dto: { name?: string; document?: string; planId?: string; status?: string }) {
     const tenant = await this.findOne(id);
     if (dto.planId !== undefined) {
@@ -115,5 +190,50 @@ export class TenantsService {
     }
     await this.tenantsRepository.save(tenant);
     return this.findOne(id);
+  }
+
+  // Exclusão permanente do tenant e de TODOS os seus dados de negócio. Irreversível.
+  //
+  // Não dá pra confiar numa ordem fixa de tabelas para evitar violação de FK (o grafo de
+  // referências entre ~50 tabelas tem exceções — ex.: installments pode referenciar
+  // accounts_receivable, que por sua vez referencia sales). Em vez de mapear isso à mão, cada
+  // tabela é tentada dentro de um SAVEPOINT; quem falhar por FK volta pro fim da fila e é
+  // tentado de novo na próxima passada, até sobrar só o que realmente não tem mais dependente.
+  // Tudo dentro de uma única transação: ou tudo é apagado, ou nada é (rollback total em caso de
+  // ficar preso, sem deixar o tenant pela metade).
+  async remove(id: string, confirmName: string): Promise<{ success: true }> {
+    const tenant = await this.findOne(id);
+    if (!confirmName || confirmName !== tenant.name) {
+      throw new BadRequestException('Confirmação inválida: digite exatamente o nome do cliente para excluir.');
+    }
+
+    await this.tenantsRepository.manager.transaction(async (manager) => {
+      let pending = [...TENANT_SCOPED_TABLES];
+      let lastError = '';
+      for (let pass = 0; pending.length && pass < TENANT_SCOPED_TABLES.length + 2; pass++) {
+        const stillPending: string[] = [];
+        for (const table of pending) {
+          const exists = await manager.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [`public.${table}`]);
+          if (!exists[0]?.exists) continue; // tabela não existe neste ambiente
+
+          await manager.query(`SAVEPOINT tenant_delete`);
+          try {
+            await manager.query(`DELETE FROM "${table}" WHERE tenant_id = $1`, [id]);
+            await manager.query(`RELEASE SAVEPOINT tenant_delete`);
+          } catch (error: any) {
+            await manager.query(`ROLLBACK TO SAVEPOINT tenant_delete`);
+            lastError = error.message;
+            stillPending.push(table);
+          }
+        }
+        pending = stillPending;
+      }
+      if (pending.length) {
+        throw new BadRequestException(`Não foi possível remover os dados do cliente (tabelas presas: ${pending.join(', ')}). Último erro: ${lastError}`);
+      }
+      await manager.query(`DELETE FROM "tenants" WHERE id = $1`, [id]);
+    });
+
+    return { success: true };
   }
 }

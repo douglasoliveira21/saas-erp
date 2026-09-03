@@ -23,6 +23,8 @@ import { MunicipalitiesController } from './municipalities.controller';
 import { BanksService } from './banks.service';
 import { BanksController } from './banks.controller';
 import { CatalogsController } from './catalogs.controller';
+import { SuperAdminsService } from './super-admins.service';
+import { SuperAdminsController } from './super-admins.controller';
 
 @Module({
   imports: [
@@ -34,8 +36,8 @@ import { CatalogsController } from './catalogs.controller';
       signOptions: { expiresIn: '12h' },
     }),
   ],
-  controllers: [SuperAdminAuthController, TenantsController, PlansController, MunicipalitiesController, BanksController, CatalogsController],
-  providers: [SuperAdminAuthService, SuperAdminJwtStrategy, SuperAdminJwtAuthGuard, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService],
+  controllers: [SuperAdminAuthController, TenantsController, PlansController, MunicipalitiesController, BanksController, CatalogsController, SuperAdminsController],
+  providers: [SuperAdminAuthService, SuperAdminJwtStrategy, SuperAdminJwtAuthGuard, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService, SuperAdminsService],
   exports: [TypeOrmModule, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService],
 })
 export class PlatformModule {}

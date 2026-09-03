@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, X, Copy } from 'lucide-react'
+import { Plus, X, Copy, Users, Trash2, KeyRound, Ban, CheckCircle2 } from 'lucide-react'
 import { superAdminApi } from '../../services/superAdminApi'
 
 interface Plan { id: string; name: string }
@@ -7,6 +7,7 @@ interface Tenant {
   id: string; name: string; slug: string; document: string | null; status: string
   planId: string | null; plan?: Plan; userCount: number; createdAt: string
 }
+interface TenantUser { id: string; name: string; email: string; role: string; active: boolean }
 
 const statusColors: Record<string, string> = {
   ativo: 'bg-green-500/20 text-green-300',
@@ -15,6 +16,141 @@ const statusColors: Record<string, string> = {
 }
 
 const emptyForm = { name: '', document: '', planId: '', adminName: '', adminEmail: '' }
+
+function TenantUsersModal({ tenant, onClose }: { tenant: Tenant; onClose: () => void }) {
+  const [users, setUsers] = useState<TenantUser[] | null>(null)
+  const [error, setError] = useState('')
+  const [resetTarget, setResetTarget] = useState<TenantUser | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+
+  async function load() {
+    try {
+      const { data } = await superAdminApi.get(`/tenants/${tenant.id}/users`)
+      setUsers(data)
+    } catch {
+      setError('Erro ao carregar usuários')
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function toggleActive(user: TenantUser) {
+    await superAdminApi.patch(`/tenants/${tenant.id}/users/${user.id}`, { active: !user.active })
+    load()
+  }
+
+  async function removeUser(user: TenantUser) {
+    if (!confirm(`Remover o usuário "${user.name}" (${user.email})?`)) return
+    await superAdminApi.delete(`/tenants/${tenant.id}/users/${user.id}`)
+    load()
+  }
+
+  async function resetPassword() {
+    if (!resetTarget || newPassword.length < 6) { setError('A nova senha deve ter pelo menos 6 caracteres'); return }
+    try {
+      await superAdminApi.patch(`/tenants/${tenant.id}/users/${resetTarget.id}`, { password: newPassword })
+      setResetTarget(null); setNewPassword(''); setError('')
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao trocar senha')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-gray-900 p-6 text-white">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Usuários de {tenant.name}</h2>
+          <button onClick={onClose}><X className="h-5 w-5 text-gray-400" /></button>
+        </div>
+        {error && <div className="mb-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
+
+        {resetTarget && (
+          <div className="mb-4 space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm text-amber-200">Nova senha para <strong>{resetTarget.email}</strong>:</p>
+            <div className="flex gap-2">
+              <input type="text" className="flex-1 rounded-lg border border-gray-700 bg-gray-800 p-2 text-sm" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+              <button onClick={resetPassword} className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-gray-900">Salvar</button>
+              <button onClick={() => { setResetTarget(null); setNewPassword('') }} className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800">Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {!users ? (
+          <p className="text-gray-400">Carregando...</p>
+        ) : users.length === 0 ? (
+          <p className="text-gray-500">Nenhum usuário cadastrado neste cliente.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-gray-800">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-950 text-left text-xs uppercase text-gray-500">
+                <tr><th className="p-2">Nome</th><th className="p-2">Email</th><th className="p-2">Papel</th><th className="p-2">Status</th><th className="p-2" /></tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {users.map(user => (
+                  <tr key={user.id}>
+                    <td className="p-2">{user.name}</td>
+                    <td className="p-2 text-gray-400">{user.email}</td>
+                    <td className="p-2 text-gray-400">{user.role}</td>
+                    <td className="p-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${user.active ? 'bg-green-500/20 text-green-300' : 'bg-gray-700 text-gray-300'}`}>{user.active ? 'Ativo' : 'Suspenso'}</span>
+                    </td>
+                    <td className="p-2">
+                      <div className="flex justify-end gap-1">
+                        <button title="Trocar senha" onClick={() => { setResetTarget(user); setNewPassword('') }} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"><KeyRound className="h-4 w-4" /></button>
+                        <button title={user.active ? 'Suspender' : 'Reativar'} onClick={() => toggleActive(user)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white">
+                          {user.active ? <Ban className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                        </button>
+                        <button title="Remover" onClick={() => removeUser(user)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DeleteTenantModal({ tenant, onClose, onDeleted }: { tenant: Tenant; onClose: () => void; onDeleted: () => void }) {
+  const [confirmName, setConfirmName] = useState('')
+  const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  async function doDelete() {
+    setDeleting(true); setError('')
+    try {
+      await superAdminApi.delete(`/tenants/${tenant.id}`, { data: { confirmName } })
+      onDeleted()
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao excluir cliente')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-red-500/40 bg-gray-900 p-6 text-white">
+        <h2 className="mb-2 text-lg font-semibold text-red-300">Excluir cliente permanentemente</h2>
+        <p className="mb-4 text-sm text-gray-300">
+          Isso apaga <strong>todos os dados</strong> de "{tenant.name}" (vendas, financeiro, usuários, ordens de serviço, etc). Não pode ser desfeito.
+        </p>
+        {error && <div className="mb-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
+        <label className="mb-1 block text-sm text-gray-300">Digite o nome do cliente para confirmar:</label>
+        <input className="mb-4 w-full rounded-lg border border-gray-700 bg-gray-800 p-2" value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={tenant.name} />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-300 hover:bg-gray-800">Cancelar</button>
+          <button onClick={doDelete} disabled={deleting || confirmName !== tenant.name} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40">
+            {deleting ? 'Excluindo...' : 'Excluir definitivamente'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function SuperAdminTenants() {
   const [tenants, setTenants] = useState<Tenant[]>([])
@@ -25,6 +161,8 @@ export function SuperAdminTenants() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<{ adminEmail: string; tempPassword: string } | null>(null)
+  const [usersModalTenant, setUsersModalTenant] = useState<Tenant | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null)
 
   async function load() {
     setLoading(true)
@@ -107,6 +245,7 @@ export function SuperAdminTenants() {
                 <th className="p-3">Plano</th>
                 <th className="p-3">Usuários</th>
                 <th className="p-3">Criado em</th>
+                <th className="p-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -131,6 +270,12 @@ export function SuperAdminTenants() {
                   </td>
                   <td className="p-3">{tenant.userCount}</td>
                   <td className="p-3 text-xs text-gray-500">{new Date(tenant.createdAt).toLocaleDateString('pt-BR')}</td>
+                  <td className="p-3">
+                    <div className="flex justify-end gap-1">
+                      <button title="Gerenciar usuários" onClick={() => setUsersModalTenant(tenant)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"><Users className="h-4 w-4" /></button>
+                      <button title="Excluir cliente" onClick={() => setDeleteTarget(tenant)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -184,6 +329,15 @@ export function SuperAdminTenants() {
             </div>
           </div>
         </div>
+      )}
+
+      {usersModalTenant && <TenantUsersModal tenant={usersModalTenant} onClose={() => setUsersModalTenant(null)} />}
+      {deleteTarget && (
+        <DeleteTenantModal
+          tenant={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => { setDeleteTarget(null); load() }}
+        />
       )}
     </div>
   )

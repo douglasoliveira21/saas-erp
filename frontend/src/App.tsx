@@ -59,6 +59,8 @@ const SuperAdminPlans = lazy(() => import('./pages/super-admin/SuperAdminPlans')
 const SuperAdminMunicipalities = lazy(() => import('./pages/super-admin/SuperAdminMunicipalities').then(module => ({ default: module.SuperAdminMunicipalities })))
 const SuperAdminBanks = lazy(() => import('./pages/super-admin/SuperAdminBanks').then(module => ({ default: module.SuperAdminBanks })))
 const SuperAdminAccount = lazy(() => import('./pages/super-admin/SuperAdminAccount').then(module => ({ default: module.SuperAdminAccount })))
+const SuperAdminAdmins = lazy(() => import('./pages/super-admin/SuperAdminAdmins').then(module => ({ default: module.SuperAdminAdmins })))
+const SuperAdminDashboard = lazy(() => import('./pages/super-admin/SuperAdminDashboard').then(module => ({ default: module.SuperAdminDashboard })))
 
 function PageLoader() {
   const [delayed, setDelayed] = useState(false)
@@ -89,11 +91,13 @@ function App() {
                 tenant (services/superAdminApi.ts) — fora da árvore do PrivateRoute/AuthProvider. */}
             <Route path="/super-admin/login" element={<SuperAdminLogin />} />
             <Route path="/super-admin" element={<SuperAdminLayout />}>
-              <Route index element={<Navigate to="/super-admin/tenants" replace />} />
+              <Route index element={<Navigate to="/super-admin/dashboard" replace />} />
+              <Route path="dashboard" element={<SuperAdminDashboard />} />
               <Route path="tenants" element={<SuperAdminTenants />} />
               <Route path="plans" element={<SuperAdminPlans />} />
               <Route path="municipalities" element={<SuperAdminMunicipalities />} />
               <Route path="banks" element={<SuperAdminBanks />} />
+              <Route path="admins" element={<SuperAdminAdmins />} />
               <Route path="account" element={<SuperAdminAccount />} />
             </Route>
             <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
