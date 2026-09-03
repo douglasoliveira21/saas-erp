@@ -56,7 +56,8 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,san
 button,input,select,textarea{font:inherit}
 .auth-split{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
 .auth-visual{position:relative;overflow:hidden;background:#03060d url('/auth-bg.jpg') left bottom/cover no-repeat;color:#fff;display:flex;flex-direction:column;align-items:center;padding:56px 48px;text-align:center}
-.auth-visual::before{content:'';position:absolute;inset:0;background:linear-gradient(0deg,#02040ae8 0%,#02040a70 30%,#02040a35 55%,#02040a92 100%);z-index:0}
+.auth-visual::before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,#020409e6 0%,#020409cc 45%,#020409d9 100%);z-index:0}
+.auth-visual-brand,.auth-visual-copy{text-shadow:0 2px 12px #000000b0}
 .auth-visual-brand,.auth-visual-copy{position:relative;z-index:1}
 .auth-visual-brand{display:flex;align-items:center;justify-content:center;gap:12px}
 .auth-visual-logo{width:130px;height:auto;object-fit:contain}
