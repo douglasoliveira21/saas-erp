@@ -178,7 +178,11 @@ button,input,select,textarea{font:inherit}
 .timeline-item>p{margin:0;white-space:pre-wrap;line-height:1.6}
 @media(max-width:850px){.requester-panel{grid-template-columns:1fr 1fr}.company-field{grid-column:span 2}.ticket-detail-header,.timeline-heading{align-items:flex-start}.timeline-author{align-items:flex-start;flex-wrap:wrap}.timeline-author time{width:100%;padding-left:44px}}
 @media(max-width:520px){.requester-panel{grid-template-columns:1fr}.company-field{grid-column:span 1}}
-.header-user{display:flex;align-items:center;gap:16px;text-align:right}
+.topnav-user{display:flex;align-items:center;gap:14px;margin-left:auto;flex-wrap:wrap}
+.topnav-account{display:grid;text-align:right;line-height:1.3}
+.topnav-account strong{font-size:13px;color:#fff}
+.topnav-account span{font-size:11px;color:var(--sidebar-text)}
+.topnav-user .link{color:#fff;font-weight:600}
 .notify-button{border:1px solid var(--card-border);background:var(--primary-soft-bg);color:var(--primary-soft-text);border-radius:10px;padding:8px 11px;font-size:11px;font-weight:700;cursor:pointer}
 .notify-button.enabled{background:var(--status-ok-bg);border-color:var(--status-ok-text);color:var(--status-ok-text)}
-@media(max-width:650px){.header-user{gap:8px}.notify-button{font-size:0}.notify-button::first-letter{font-size:16px}}
+@media(max-width:650px){.topnav-user{gap:8px}.notify-button{font-size:0}.notify-button::first-letter{font-size:16px}}
