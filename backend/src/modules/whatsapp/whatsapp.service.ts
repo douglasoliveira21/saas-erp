@@ -101,6 +101,13 @@ export class WhatsappService {
   async getQrCode(): Promise<{ base64: string | null; pairingCode?: string }> {
     await this.ensureInstance();
     const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
+    // Quando o WhatsApp cai (desconecta do celular), o socket Baileys da instancia fica preso
+    // num estado "fechado" que faz /instance/connect sozinho nao gerar um QR valido pra
+    // reconectar a MESMA instancia — a Evolution API precisa de um logout explicito antes pra
+    // limpar essa sessao presa. Sem isso, a unica forma de reconectar seria apagar e recriar a
+    // instancia inteira (perdendo o historico dela). O erro do logout e ignorado de proposito:
+    // numa instancia que nunca conectou (primeiro QR) ele so retorna "nao conectado" ou similar.
+    await this.request('DELETE', `/instance/logout/${instanceName}`, apiUrl, apiKey).catch(() => {});
     const response = await this.request('GET', `/instance/connect/${instanceName}`, apiUrl, apiKey);
     let base64 = response?.base64 || response?.qrcode?.base64 || null;
     if (base64 && !base64.startsWith('data:image')) base64 = `data:image/png;base64,${base64}`;
