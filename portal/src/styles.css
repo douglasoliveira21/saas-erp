@@ -89,6 +89,7 @@ button,input,select,textarea{font:inherit}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:18px;padding:20px;box-shadow:0 7px 25px var(--card-shadow)}
 .metric strong{font-size:26px;display:block;margin-top:8px}
+.metric-hint{display:block;color:var(--muted3);font-size:11px;margin-top:6px;line-height:1.4}
 .span2{grid-column:span 2}
 .table-wrap{overflow:auto}
 .table{width:100%;border-collapse:collapse}
@@ -186,3 +187,21 @@ button,input,select,textarea{font:inherit}
 .notify-button{border:1px solid var(--card-border);background:var(--primary-soft-bg);color:var(--primary-soft-text);border-radius:10px;padding:8px 11px;font-size:11px;font-weight:700;cursor:pointer}
 .notify-button.enabled{background:var(--status-ok-bg);border-color:var(--status-ok-text);color:var(--status-ok-text)}
 @media(max-width:650px){.topnav-user{gap:8px}.notify-button{font-size:0}.notify-button::first-letter{font-size:16px}}
+@media(max-width:420px){
+  .topnav{padding:8px 12px;gap:8px}
+  .topnav .brand-logo{width:72px}
+  .content{padding:14px}
+  .card{padding:15px}
+  .top{margin-bottom:18px}
+  .auth-card{padding:18px}
+  .table th,.table td{padding:9px 8px;font-size:12px}
+  .doc-actions{min-width:0;justify-content:flex-start}
+  .ticket-detail-header{flex-direction:column}
+  .ticket-detail-header button{align-self:flex-start}
+  .reply-form{margin:0 12px 12px;padding:14px}
+  .ticket-description{margin:16px 12px}
+  .timeline-heading{padding:0 12px 12px}
+  .ticket-detail .timeline{padding:0 12px 12px}
+  .doc-heading,.contract-grid{padding:14px}
+  .topnav-account{display:none}
+}
