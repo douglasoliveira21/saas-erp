@@ -81,9 +81,20 @@ export class WhatsappService {
     return json;
   }
 
-  // Cria a instância na Evolution API caso ainda não exista (idempotente: erro de "já existe" é ignorado).
+  // Cria a instância na Evolution API caso ainda não exista.
   private async ensureInstance(): Promise<void> {
     const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
+    // Primeiro confirma se a instância já existe (endpoint de consulta, que costuma ser permitido
+    // pra qualquer chave). Só chama /instance/create quando ela realmente não existe — chamar
+    // create toda vez, mesmo pra uma instância já existente, faz reconectar depender de uma
+    // permissão (criar instância) que a chave configurada pode nem ter, mesmo sem nunca precisar
+    // criar nada de novo. Antes disso causava "Forbidden" ao tentar gerar QR de uma instância
+    // que já existia, porque o create sempre rodava primeiro.
+    const alreadyExists = await this.request('GET', `/instance/connectionState/${instanceName}`, apiUrl, apiKey)
+      .then(() => true)
+      .catch(() => false);
+    if (alreadyExists) return;
+
     try {
       await this.request('POST', '/instance/create', apiUrl, apiKey, {
         instanceName,
