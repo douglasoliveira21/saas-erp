@@ -212,7 +212,15 @@ export function WhatsappSettings() {
           )}
           <Button variant="secondary" onClick={() => generateQrCode()} loading={loadingQr}><QrCode className="h-4 w-4" aria-hidden="true" />Gerar QR Code</Button>
           {qrCode && qrCountdown !== null && (
-            <p className="text-xs text-gray-400">Atualiza automaticamente em {qrCountdown}s</p>
+            <div className="w-64">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                <div
+                  className="h-full rounded-full bg-primary-500 transition-all duration-1000 ease-linear"
+                  style={{ width: `${(qrCountdown / QR_TTL_SECONDS) * 100}%` }}
+                />
+              </div>
+              <p className="mt-1 text-center text-xs text-gray-400">Atualiza automaticamente em {qrCountdown}s</p>
+            </div>
           )}
         </div>
       </div>
