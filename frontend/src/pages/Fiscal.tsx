@@ -71,6 +71,7 @@ export function Fiscal() {
   const [nfeModelo, setNfeModelo] = useState('55')
   const [nfeTpNF, setNfeTpNF] = useState('1')
   const [nfeTpPag, setNfeTpPag] = useState('01')
+  const [entryDestination, setEntryDestination] = useState<'product' | 'expense'>('product')
   const [nfeAmbiente, setNfeAmbiente] = useState(1)
 
   // Visualizacao
@@ -633,6 +634,23 @@ export function Fiscal() {
                           <p className="text-xs text-gray-500">Faça upload do XML recebido do fornecedor para preenchimento automático</p>
                         </div>
                       </div>
+                      <div className="flex flex-col gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs font-medium text-gray-600">O que fazer com os itens desta nota?</p>
+                        <label className="flex items-start gap-2 text-sm cursor-pointer">
+                          <input type="radio" name="entryDestination" className="mt-1" checked={entryDestination === 'product'} onChange={() => setEntryDestination('product')} />
+                          <span>
+                            <span className="font-medium text-gray-700">Converter em produto interno para revenda</span>
+                            <span className="block text-xs text-gray-500">Cadastra/atualiza os itens no estoque de produtos</span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 text-sm cursor-pointer">
+                          <input type="radio" name="entryDestination" className="mt-1" checked={entryDestination === 'expense'} onChange={() => setEntryDestination('expense')} />
+                          <span>
+                            <span className="font-medium text-gray-700">Lançar somente como despesa</span>
+                            <span className="block text-xs text-gray-500">Não mexe no estoque, só registra o valor total como despesa no financeiro</span>
+                          </span>
+                        </label>
+                      </div>
                       <input
                         type="file"
                         accept=".xml"
@@ -662,6 +680,8 @@ export function Fiscal() {
                             // Extrair valor total
                             const icmsTot = doc.querySelector('ICMSTot')
                             const vNF = icmsTot?.querySelector('vNF')?.textContent || ''
+                            const nNF = doc.querySelector('ide nNF')?.textContent || ''
+                            const dhEmi = doc.querySelector('ide dhEmi')?.textContent || doc.querySelector('ide dEmi')?.textContent || ''
 
                             // Extrair itens
                             const dets = doc.querySelectorAll('det')
@@ -698,26 +718,46 @@ export function Fiscal() {
                             if (parsedItems.length > 0) {
                               (window as any).__nfeImportedItems = parsedItems
 
-                              // Importar produtos automaticamente no cadastro
-                              try {
-                                const importPayload = parsedItems.map((item: any) => ({
-                                  name: item.name,
-                                  code: item.code,
-                                  quantity: item.quantity || 1,
-                                  purchasePrice: item.unitPrice || 0,
-                                  ncm: item.ncm || null,
-                                  cfop: item.cfop || null,
-                                  cest: item.cest || null,
-                                  unit: item.unit || 'UN',
-                                  supplier: emitName || 'Importação XML',
-                                }))
-                                const importRes = await api.post('/products/import', { products: importPayload })
-                                const { imported, skipped } = importRes.data
-                                setSuccess(`XML importado! ${imported} produto(s) cadastrado(s), ${skipped} atualizado(s). Redirecionando para Produtos...`)
-                                setTimeout(() => { window.location.href = '/products' }, 2000)
-                              } catch (importErr) {
-                                setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Erro ao cadastrar produtos automaticamente - faça manualmente.`)
-                                setTimeout(() => setSuccess(''), 5000)
+                              if (entryDestination === 'expense') {
+                                // Não mexe no estoque: só registra o valor total como despesa
+                                try {
+                                  const emissionDate = dhEmi ? dhEmi.slice(0, 10) : new Date().toISOString().split('T')[0]
+                                  await api.post('/financial/movements', {
+                                    type: 'despesa',
+                                    category: 'compra_mercadoria',
+                                    description: `NF-e${nNF ? ' nº ' + nNF : ''} de ${emitName || 'fornecedor'} (${parsedItems.length} ite${parsedItems.length === 1 ? 'm' : 'ns'})`,
+                                    value: parseFloat(vNF || '0'),
+                                    date: emissionDate,
+                                    isForecast: false,
+                                  })
+                                  setSuccess(`XML importado! Despesa de R$ ${parseFloat(vNF || '0').toFixed(2)} lançada no financeiro.`)
+                                  setTimeout(() => { window.location.href = '/financial' }, 2000)
+                                } catch (expenseErr) {
+                                  setSuccess(`XML importado! Erro ao lançar a despesa automaticamente - faça manualmente em Financeiro.`)
+                                  setTimeout(() => setSuccess(''), 5000)
+                                }
+                              } else {
+                                // Importar produtos automaticamente no cadastro
+                                try {
+                                  const importPayload = parsedItems.map((item: any) => ({
+                                    name: item.name,
+                                    code: item.code,
+                                    quantity: item.quantity || 1,
+                                    purchasePrice: item.unitPrice || 0,
+                                    ncm: item.ncm || null,
+                                    cfop: item.cfop || null,
+                                    cest: item.cest || null,
+                                    unit: item.unit || 'UN',
+                                    supplier: emitName || 'Importação XML',
+                                  }))
+                                  const importRes = await api.post('/products/import', { products: importPayload })
+                                  const { imported, skipped } = importRes.data
+                                  setSuccess(`XML importado! ${imported} produto(s) cadastrado(s), ${skipped} atualizado(s). Redirecionando para Produtos...`)
+                                  setTimeout(() => { window.location.href = '/products' }, 2000)
+                                } catch (importErr) {
+                                  setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Erro ao cadastrar produtos automaticamente - faça manualmente.`)
+                                  setTimeout(() => setSuccess(''), 5000)
+                                }
                               }
                             } else {
                               setSuccess(`XML importado! Nenhum item encontrado.`)
