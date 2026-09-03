@@ -165,7 +165,7 @@ export function ServiceOrderForm() {
       <div className="card space-y-3">
         <h2 className="font-semibold text-gray-900 dark:text-white">Foto do antes *</h2>
         <p className="text-xs text-gray-500">Obrigatório: registre o estado inicial do equipamento/local antes de iniciar o serviço.</p>
-        <input type="file" multiple accept="image/*" className="input" onChange={e => setBeforePhotos(e.target.files)} />
+        <input type="file" multiple accept="image/*" capture="environment" className="input" onChange={e => setBeforePhotos(e.target.files)} />
         {beforePhotos && beforePhotos.length > 0 && (
           <p className="text-xs text-gray-500">{beforePhotos.length} arquivo(s) selecionado(s)</p>
         )}

@@ -407,7 +407,7 @@ export function ServiceOrderDetail() {
               <Button variant="secondary" size="sm" disabled={locked} loading={uploadingType === type} onClick={() => fileInputs[type as keyof typeof fileInputs].current?.click()}>
                 <Upload className="h-4 w-4" aria-hidden="true" />Enviar
               </Button>
-              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden disabled={locked} accept={type === 'documento' ? undefined : 'image/*'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
+              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden disabled={locked} accept={type === 'documento' ? undefined : 'image/*'} capture={type === 'documento' ? undefined : 'environment'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
             </div>
             {locked ? (
               <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Envie as fotos de "Depois" depois de concluir a ordem de serviço.</p>
@@ -504,7 +504,7 @@ export function ServiceOrderDetail() {
               ) : (
                 <p className="text-xs text-gray-500">Obrigatório: registre o resultado final antes de confirmar a conclusão.</p>
               )}
-              <input type="file" multiple accept="image/*" className="input mt-1" onChange={e => setAfterPhotos(e.target.files)} />
+              <input type="file" multiple accept="image/*" capture="environment" className="input mt-1" onChange={e => setAfterPhotos(e.target.files)} />
               {afterPhotos && afterPhotos.length > 0 && <p className="mt-1 text-xs text-gray-500">{afterPhotos.length} arquivo(s) selecionado(s)</p>}
             </div>
             <div className="flex justify-end gap-2">
