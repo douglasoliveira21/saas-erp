@@ -22,6 +22,9 @@ server {
 
     # Proxy API requests to backend
     location /api {
+        # Default nginx limit is 1MB, which silently 413's any photo/document upload
+        # (sale/contract/service-order attachments allow up to 20MB per file via multer).
+        client_max_body_size 50m;
         set $backend "${BACKEND_URL}";
         proxy_pass $backend;
         proxy_http_version 1.1;
