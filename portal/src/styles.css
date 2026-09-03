@@ -55,8 +55,8 @@
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif;transition:background .2s,color .2s}
 button,input,select,textarea{font:inherit}
 .auth-split{min-height:100vh;display:grid;grid-template-columns:1fr 1fr}
-.auth-visual{position:relative;overflow:hidden;background:#03060d url('/auth-skyline.svg') left bottom/cover no-repeat;color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:48px}
-.auth-visual::before{content:'';position:absolute;inset:0;background:linear-gradient(0deg,#02040ae0 0%,#02040a66 30%,#02040a33 55%,#02040a99 100%);z-index:0}
+.auth-visual{position:relative;overflow:hidden;background:#03060d url('/auth-bg.jpg') left bottom/cover no-repeat;color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:48px}
+.auth-visual::before{content:'';position:absolute;inset:0;background:linear-gradient(0deg,#02040ae0 0%,#02040a55 30%,#02040a22 55%,#02040a88 100%);z-index:0}
 .auth-visual-brand,.auth-visual-copy{position:relative;z-index:1}
 .auth-visual-brand{display:flex;align-items:center;gap:12px}
 .auth-visual-logo{width:130px;height:auto;object-fit:contain}
