@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Request, Response, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Request, Response, Res, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response as ExpressResponse } from 'express';
 import { CustomerPortalService } from './customer-portal.service';
 import { PortalAuthGuard } from './portal-auth.guard';
@@ -34,7 +35,11 @@ export class CustomerPortalController {
   @Get('form') @UseGuards(PortalAuthGuard) form(@Request() req) { return this.service.getForm(req.portalUser.customerId); }
   @Get('tickets') @UseGuards(PortalAuthGuard) tickets(@Request() req) { return this.service.listTickets(req.portalUser); }
   @Get('tickets/:glpiId') @UseGuards(PortalAuthGuard) ticketDetails(@Request() req, @Param('glpiId') glpiId: string) { return this.service.ticketDetails(req.portalUser, Number(glpiId)); }
-  @Post('tickets') @UseGuards(PortalAuthGuard) createTicket(@Request() req, @Body() body: any) { return this.service.createTicket(req.portalUser, body); }
+  @Post('tickets') @UseGuards(PortalAuthGuard)
+  @UseInterceptors(FilesInterceptor('files', 5, { limits: { fileSize: 15 * 1024 * 1024 } }))
+  createTicket(@Request() req, @Body() body: any, @UploadedFiles() files: any[]) {
+    return this.service.createTicket(req.portalUser, body, files);
+  }
   @Get('documents') @UseGuards(PortalAuthGuard) documents(@Request() req) { return this.service.documents(req.portalUser); }
   @Get('documents/boletos/:id/pdf') @UseGuards(PortalAuthGuard)
   async boletoPdf(@Request() req, @Param('id') id: string, @Res() res: ExpressResponse) {

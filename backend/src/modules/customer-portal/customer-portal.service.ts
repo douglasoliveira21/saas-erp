@@ -143,7 +143,7 @@ export class CustomerPortalService {
     return this.forms.save(form);
   }
 
-  async createTicket(actor: any, body: any) {
+  async createTicket(actor: any, body: any, files?: Array<{ buffer: Buffer; originalname: string; mimetype: string }>) {
     const user = await this.users.findOne({ where: { id: actor.sub }, relations: ['customer'] });
     if (!user || user.status !== 'active') throw new UnauthorizedException();
     if (!user.customer.glpiEntityId) throw new BadRequestException('Empresa sem entidade GLPI vinculada');
@@ -154,11 +154,22 @@ export class CustomerPortalService {
       requesterName: user.name, requesterEmail: user.email, title, description,
       type: Number(body.type) === 2 ? 2 : 1, urgency: Math.min(5, Math.max(1, Number(body.urgency) || 3)),
     });
-    return this.tickets.save(this.tickets.create({
+    // Anexos sao enviados depois do chamado ja existir (o GLPI precisa do id do Ticket pra
+    // vincular o Document). Erro num anexo nao impede o chamado de ter sido aberto — so avisa.
+    const attachmentErrors: string[] = [];
+    for (const file of files || []) {
+      try {
+        await this.glpi.uploadTicketDocument(result.id, file.buffer, file.originalname, file.mimetype);
+      } catch (error: any) {
+        attachmentErrors.push(`${file.originalname}: ${error.message}`);
+      }
+    }
+    const saved = await this.tickets.save(this.tickets.create({
       customerId: user.customerId, portalUserId: user.id, glpiTicketId: result.id,
       glpiEntityId: user.customer.glpiEntityId, title, description,
       type: Number(body.type) === 2 ? 2 : 1, urgency: Number(body.urgency) || 3, formData: body.formData || {},
     }));
+    return { ...saved, attachmentErrors: attachmentErrors.length ? attachmentErrors : undefined };
   }
 
   async listTickets(actor: any) {

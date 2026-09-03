@@ -126,6 +126,29 @@ export class GlpiService implements OnModuleInit {
     if (!id) throw new Error('GLPI não retornou o identificador do chamado');
     return { id };
   }
+  // Sobe um anexo (foto/documento) direto pro GLPI e vincula ao chamado — segue o fluxo padrao da
+  // API REST do GLPI: primeiro cria o Document (multipart, com um "uploadManifest" descrevendo
+  // qual campo do form e o arquivo), depois cria um Document_Item ligando esse documento ao
+  // chamado. Cada arquivo e uma chamada independente (chamada de fora, uma por vez), pra um
+  // anexo com erro nao derrubar os outros.
+  async uploadTicketDocument(ticketId: number, buffer: Buffer, filename: string, mimeType: string): Promise<void> {
+    const config = await this.getConfig();
+    const session = await this.initSession(config);
+    const form = new FormData();
+    form.append('uploadManifest', JSON.stringify({ input: { name: filename, _filename: ['file0'] } }));
+    form.append('file0', new Blob([new Uint8Array(buffer)], { type: mimeType || 'application/octet-stream' }), filename);
+    const res = await fetch(config.apiUrl + '/Document', {
+      method: 'POST',
+      headers: { 'App-Token': config.appToken, 'Session-Token': session },
+      body: form,
+    });
+    if (!res.ok) throw new Error('Erro ao enviar anexo ao GLPI: ' + await res.text());
+    const doc = await res.json();
+    const docId = Number(doc?.id);
+    if (!docId) throw new Error('GLPI não retornou o identificador do documento enviado');
+    await this.glpiWrite('/Document_Item', session, config, { documents_id: docId, itemtype: 'Ticket', items_id: ticketId });
+  }
+
   async getPortalTicketDetails(ticketId: number, expectedEntityId: number): Promise<any> {
     const config = await this.getConfig();
     const session = await this.initSession(config);
