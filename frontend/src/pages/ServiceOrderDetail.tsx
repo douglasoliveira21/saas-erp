@@ -383,19 +383,24 @@ export function ServiceOrderDetail() {
       {/* Anexos */}
       {attachmentGroups.map(([type, title, hint]) => {
         const items = order.attachments.filter(a => a.type === type)
+        // Fotos de "Depois" só liberam depois que a OS é concluída — evita registrar o "depois"
+        // no meio do serviço, antes de realmente terminar.
+        const locked = type === 'foto_depois' && !isClosed
         return (
           <div key={type} className="card space-y-3 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-gray-900 dark:text-white">{title}</h2>
-                <p className="text-xs text-gray-500">{hint}</p>
+                <p className="text-xs text-gray-500">{locked ? 'Disponível após concluir a OS (clique em "Concluir OS" acima).' : hint}</p>
               </div>
-              <Button variant="secondary" size="sm" loading={uploadingType === type} onClick={() => fileInputs[type as keyof typeof fileInputs].current?.click()}>
+              <Button variant="secondary" size="sm" disabled={locked} loading={uploadingType === type} onClick={() => fileInputs[type as keyof typeof fileInputs].current?.click()}>
                 <Upload className="h-4 w-4" aria-hidden="true" />Enviar
               </Button>
-              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden accept={type === 'documento' ? undefined : 'image/*'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
+              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden disabled={locked} accept={type === 'documento' ? undefined : 'image/*'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
             </div>
-            {items.length === 0 ? (
+            {locked ? (
+              <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Envie as fotos de "Depois" depois de concluir a ordem de serviço.</p>
+            ) : items.length === 0 ? (
               <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Nenhum arquivo enviado</p>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -481,7 +486,7 @@ export function ServiceOrderDetail() {
               </div>
             </div>
             <p className="text-sm text-gray-500">Total: <strong className="text-gray-900 dark:text-white">{money(Number(partsCost || 0) + Number(laborCost || 0))}</strong></p>
-            <p className="text-xs text-gray-400">Dica: envie as fotos de "Depois" acima antes de concluir, para fechar o registro de antes/depois.</p>
+            <p className="text-xs text-gray-400">Após confirmar, a seção "Fotos - Depois" será liberada para você registrar o resultado final.</p>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setConcludeOpen(false)}>Cancelar</Button>
               <Button onClick={submitConclusion} loading={concluding}><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Confirmar conclusão</Button>
