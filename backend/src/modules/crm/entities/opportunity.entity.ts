@@ -15,6 +15,8 @@ export class Opportunity {
  @Column({name:'expected_close_date',type:'date',nullable:true}) expectedCloseDate:string;
  @Column({name:'lost_reason',type:'text',nullable:true}) lostReason:string;
  @Column({type:'text',nullable:true}) notes:string;
+ @Column({type:'varchar',length:30,nullable:true}) source:string;
+ @Column({type:'jsonb',default:()=>"'[]'::jsonb"}) tags:string[];
  @Column({name:'owner_id',type:'uuid',nullable:true}) ownerId:string;
  @CreateDateColumn({name:'created_at'}) createdAt:Date;
  @UpdateDateColumn({name:'updated_at'}) updatedAt:Date;
