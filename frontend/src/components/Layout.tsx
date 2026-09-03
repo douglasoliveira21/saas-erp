@@ -86,8 +86,12 @@ export function Layout() {
     if (current?.expandable) setOpenSections({ [current.id]: true })
   }, [location.pathname])
 
+  // Item sem `module` nunca é escondido por plano (ver comentário em navigation.ts). Quando
+  // planModules vem undefined (sessão antiga sem esse campo, ou usuário sem tenant) tratamos
+  // como "sem restrição" — evita esconder o menu inteiro por causa de um campo ausente.
+  const planModules = user?.planModules
   const filteredSections = navigationSections
-    .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '')) }))
+    .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '') && (!i.module || !planModules || planModules.includes(i.module))) }))
     .filter(s => s.items.length > 0)
 
   function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {

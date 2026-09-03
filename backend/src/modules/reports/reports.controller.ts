@@ -4,13 +4,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('reports')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('sales')
+  @RequireModule('reports')
   getSalesReport(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -23,6 +26,7 @@ export class ReportsController {
 
   @Get('dre')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @RequireModule('dre')
   getDre(@Query('year') year?: string, @Query('month') month?: string) {
     return this.reportsService.getDre(
       year ? parseInt(year) : new Date().getFullYear(),

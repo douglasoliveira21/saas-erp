@@ -10,10 +10,12 @@ import { PasswordReset } from './entities/password-reset.entity';
 import { AuthSession } from './entities/auth-session.entity';
 import { env } from '../../config/env.config';
 import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
     UsersModule,
+    PlatformModule,
     PassportModule,
     TypeOrmModule.forFeature([PasswordReset, AuthSession]),
     JwtModule.register({

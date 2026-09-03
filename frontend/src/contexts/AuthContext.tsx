@@ -6,6 +6,8 @@ interface User {
   name: string
   email: string
   role: 'admin' | 'financeiro' | 'tecnico'
+  tenantId?: string
+  planModules?: string[]
 }
 
 interface AuthContextData {

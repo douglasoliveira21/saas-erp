@@ -14,9 +14,10 @@ import { CustomerPortalController } from './customer-portal.controller';
 import { CustomerPortalService } from './customer-portal.service';
 import { PortalAuthGuard } from './portal-auth.guard';
 import { PortalNotificationsService } from './portal-notifications.service';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PortalUser, PortalTicketForm, PortalTicket, Customer, Contract, GlpiTicket]), AuthModule, GlpiModule, InterModule, FiscalModule],
+  imports: [TypeOrmModule.forFeature([PortalUser, PortalTicketForm, PortalTicket, Customer, Contract, GlpiTicket]), AuthModule, GlpiModule, InterModule, FiscalModule, PlatformModule],
   controllers: [CustomerPortalController],
   providers: [CustomerPortalService, PortalAuthGuard, PortalNotificationsService],
 })

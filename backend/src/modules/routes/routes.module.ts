@@ -5,11 +5,13 @@ import { RoutesController } from './routes.controller';
 import { Route } from './entities/route.entity';
 import { RouteLeg } from './entities/route-leg.entity';
 import { VehiclesModule } from '../vehicles/vehicles.module';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Route, RouteLeg]),
     VehiclesModule,
+    PlatformModule,
   ],
   controllers: [RoutesController],
   providers: [RoutesService],

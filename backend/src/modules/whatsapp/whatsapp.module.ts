@@ -5,9 +5,10 @@ import { WhatsappMessageLog } from './entities/whatsapp-message-log.entity';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappJobsService } from './whatsapp-jobs.service';
 import { WhatsappController } from './whatsapp.controller';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WhatsappConfig, WhatsappMessageLog])],
+  imports: [TypeOrmModule.forFeature([WhatsappConfig, WhatsappMessageLog]), PlatformModule],
   providers: [WhatsappService, WhatsappJobsService],
   controllers: [WhatsappController],
   exports: [WhatsappService],

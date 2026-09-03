@@ -18,6 +18,9 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId: string;
+
   @Column({ length: 255 })
   name: string;
 

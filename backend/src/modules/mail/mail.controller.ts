@@ -4,9 +4,12 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { MailService } from './mail.service';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('mail')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('email_settings')
 export class MailController {
   constructor(private readonly mailService: MailService) {}
 

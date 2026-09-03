@@ -9,6 +9,7 @@ import { LoginDto } from './dto/login.dto';
 import { PasswordReset } from './entities/password-reset.entity';
 import { AuthSession } from './entities/auth-session.entity';
 import { MailService } from '../mail/mail.service';
+import { TenantsService } from '../platform/tenants.service';
 
 type ClientInfo = { ip?: string; userAgent?: string; deviceName?: string };
 
@@ -20,6 +21,7 @@ export class AuthService {
 
   constructor(
     private usersService: UsersService, private jwtService: JwtService, private mailService: MailService,
+    private tenantsService: TenantsService,
     @InjectRepository(PasswordReset) private resetRepository: Repository<PasswordReset>,
     @InjectRepository(AuthSession) private sessionRepository: Repository<AuthSession>,
   ) {}
@@ -49,8 +51,12 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + 7 * 86400000);
     const session = await this.sessionRepository.save(this.sessionRepository.create({ userId: user.id, deviceName: client.deviceName || this.describeDevice(client.userAgent), userAgent: client.userAgent, ipAddress: client.ip, lastSeenAt: new Date(), expiresAt }));
     await this.usersService.update(user.id, { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } as any);
-    const payload = { sub: user.id, sid: session.id, email: user.email, role: user.role, permissions: user.permissions || [] };
-    return { access_token: this.jwtService.sign(payload), user: { id: user.id, name: user.name, email: user.email, role: user.role, permissions: user.permissions || [] } };
+    const payload = { sub: user.id, sid: session.id, email: user.email, role: user.role, tenantId: user.tenantId, permissions: user.permissions || [] };
+    // Mesma resolução de módulos do plano que o JwtStrategy faz em requisições subsequentes —
+    // sem isso, a resposta do login (usada para popular o AuthContext na hora) ficaria
+    // inconsistente com a sessão restaurada depois de um F5 (/auth/session), que já passa por lá.
+    const planModules = user.tenantId ? await this.tenantsService.getEnabledModules(user.tenantId) : [];
+    return { access_token: this.jwtService.sign(payload), user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId, planModules, permissions: user.permissions || [] } };
   }
 
   private describeDevice(agent = '') {

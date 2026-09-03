@@ -2,8 +2,6 @@ import { Injectable, Logger, HttpException, HttpStatus, OnModuleInit } from '@ne
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as https from 'https';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as crypto from 'crypto';
 import { Sale } from '../sales/entities/sale.entity';
 import { FinancialService } from '../financial/financial.service';
@@ -11,6 +9,8 @@ import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
 import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
 import { getCustomerEmailRecipients } from '../../common/customer-emails';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { BankCredentialsService, InterCredentials } from './bank-credentials.service';
 
 interface TokenCache {
   accessToken: string;
@@ -20,9 +20,11 @@ interface TokenCache {
 @Injectable()
 export class InterService implements OnModuleInit {
   private readonly logger = new Logger(InterService.name);
-  private tokenCache: TokenCache | null = null;
-  private agent: https.Agent;
-  private readonly baseUrl: string;
+  // Cacheados por tenant (chave = tenantId, ou 'env' quando um tenant usa o fallback de
+  // variáveis de ambiente global) — cada tenant com credenciais próprias tem seu próprio
+  // agente mTLS e cache de token OAuth, isolados dos demais.
+  private readonly tokenCache = new Map<string, TokenCache>();
+  private readonly agentCache = new Map<string, https.Agent>();
   private reconciliationRunning = false;
 
   constructor(
@@ -33,27 +35,22 @@ export class InterService implements OnModuleInit {
     private readonly financialService: FinancialService,
     private readonly mailService: MailService,
     private readonly auditService: AuditService,
-  ) {
-    const environment = process.env.INTER_ENVIRONMENT || 'sandbox';
-    this.baseUrl = environment === 'production'
+    private readonly tenantContext: TenantContextService,
+    private readonly bankCredentials: BankCredentialsService,
+  ) {}
+
+  private baseUrlFor(environment: 'sandbox' | 'production'): string {
+    return environment === 'production'
       ? 'https://cdpj.partners.bancointer.com.br'
       : 'https://cdpj-sandbox.partners.bancointer.com.br';
+  }
 
-    try {
-      const certPath = path.resolve(process.env.INTER_CERT_PATH || './certs/inter.crt');
-      const keyPath = path.resolve(process.env.INTER_KEY_PATH || './certs/inter.key');
-
-      this.agent = new https.Agent({
-        cert: fs.readFileSync(certPath),
-        key: fs.readFileSync(keyPath),
-        rejectUnauthorized: true,
-      });
-
-      this.logger.log(`Inter API inicializada - Ambiente: ${environment}`);
-    } catch (e) {
-      this.logger.warn('Certificado Inter nao encontrado: ' + e.message);
-      this.agent = new https.Agent();
-    }
+  private getAgentFor(creds: InterCredentials, cacheKey: string): https.Agent {
+    let agent = this.agentCache.get(cacheKey);
+    if (agent) return agent;
+    agent = new https.Agent({ cert: creds.cert, key: creds.key, rejectUnauthorized: true });
+    this.agentCache.set(cacheKey, agent);
+    return agent;
   }
 
   private formatInterDueDate(value: any, fieldName = 'Data de vencimento'): string {
@@ -78,14 +75,15 @@ export class InterService implements OnModuleInit {
     const pad = (part: number) => String(part).padStart(2, '0');
     return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
   }
-  private httpRequest(method: string, urlPath: string, body?: any, headers?: Record<string, string>): Promise<any> {
+
+  private httpRequest(method: string, urlPath: string, body: any, headers: Record<string, string>, baseUrl: string, agent: https.Agent): Promise<any> {
     return new Promise((resolve, reject) => {
-      const url = new URL(this.baseUrl + urlPath);
+      const url = new URL(baseUrl + urlPath);
       const options: https.RequestOptions = {
         hostname: url.hostname,
         path: url.pathname + url.search,
         method,
-        agent: this.agent,
+        agent,
         headers: {
           ...headers,
         },
@@ -116,39 +114,37 @@ export class InterService implements OnModuleInit {
   }
 
   /**
-   * Obtém access token via OAuth2 client_credentials com mTLS.
-   * Token é cacheado até expirar.
+   * Obtém access token via OAuth2 client_credentials com mTLS, usando as credenciais efetivas
+   * do tenant informado (ou do contexto da requisição atual, quando omitido). Token é cacheado
+   * por tenant+escopo até expirar.
    */
-  async getAccessToken(): Promise<string> {
-    // Retorna token cacheado se ainda válido (com margem de 60s)
-    if (this.tokenCache && Date.now() < this.tokenCache.expiresAt - 60000) {
-      return this.tokenCache.accessToken;
+  private async requestToken(tenantId: string | null, scope: string): Promise<{ token: string; creds: InterCredentials }> {
+    const creds = await this.bankCredentials.getEffectiveCredentials(tenantId);
+    const cacheKey = `${tenantId || 'env'}::${scope}`;
+    const cached = this.tokenCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt - 60000) {
+      return { token: cached.accessToken, creds };
     }
-    // Limpar cache para forçar novo token
-    this.tokenCache = null;
 
     this.logger.log('Solicitando novo access token ao Banco Inter...');
 
     try {
+      const agent = this.getAgentFor(creds, tenantId || 'env');
+      const baseUrl = this.baseUrlFor(creds.environment);
       const params = new URLSearchParams();
-      params.append('client_id', process.env.INTER_CLIENT_ID);
-      params.append('client_secret', process.env.INTER_CLIENT_SECRET);
-      params.append('scope', 'boleto-cobranca.write boleto-cobranca.read');
+      params.append('client_id', creds.clientId);
+      params.append('client_secret', creds.clientSecret);
+      params.append('scope', scope);
       params.append('grant_type', 'client_credentials');
 
       const response = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), {
         'Content-Type': 'application/x-www-form-urlencoded',
-      });
+      }, baseUrl, agent);
 
       const { access_token, expires_in } = response;
-
-      this.tokenCache = {
-        accessToken: access_token,
-        expiresAt: Date.now() + (expires_in * 1000),
-      };
-
+      this.tokenCache.set(cacheKey, { accessToken: access_token, expiresAt: Date.now() + (expires_in * 1000) });
       this.logger.log('Access token obtido com sucesso');
-      return access_token;
+      return { token: access_token, creds };
     } catch (error) {
       this.logger.error('Erro ao obter access token: ' + (error.response?.data?.message || error.message));
       throw new HttpException(
@@ -156,6 +152,18 @@ export class InterService implements OnModuleInit {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
+  }
+
+  // Atalho: resolve token + baseUrl/agent do tenant e já executa a chamada à API do Inter.
+  private async callInter(tenantId: string | null, scope: string, method: string, urlPath: string, body?: any, extraHeaders?: Record<string, string>): Promise<any> {
+    const { token, creds } = await this.requestToken(tenantId, scope);
+    const baseUrl = this.baseUrlFor(creds.environment);
+    const agent = this.getAgentFor(creds, tenantId || 'env');
+    return this.httpRequest(method, urlPath, body, { Authorization: `Bearer ${token}`, ...extraHeaders }, baseUrl, agent);
+  }
+
+  private currentTenantId(): string | null {
+    return this.tenantContext.getTenantId();
   }
 
   /**
@@ -183,13 +191,11 @@ export class InterService implements OnModuleInit {
       linha5?: string;
     };
   }) {
-    const token = await this.getAccessToken();
-
+    const tenantId = this.currentTenantId();
     this.logger.log(`Criando boleto - seuNumero: ${data.seuNumero}, valor: ${data.valorNominal}`);
 
     try {
-      const response = await this.httpRequest('POST', '/cobranca/v3/cobrancas', data, {
-        Authorization: `Bearer ${token}`,
+      const response = await this.callInter(tenantId, 'boleto-cobranca.write boleto-cobranca.read', 'POST', '/cobranca/v3/cobrancas', data, {
         'Content-Type': 'application/json',
       });
 
@@ -198,7 +204,7 @@ export class InterService implements OnModuleInit {
     } catch (error) {
       const errorDetail = JSON.stringify(error.data || error.message || error);
       this.logger.error('Erro ao criar boleto - Resposta completa: ' + errorDetail);
-      
+
       // Se já existe boleto com mesmos dados, retornar o código existente
       const detail = error.data?.detail || '';
       const existingMatch = detail.match(/código de solicitação: ([a-f0-9-]+)/);
@@ -206,7 +212,7 @@ export class InterService implements OnModuleInit {
         this.logger.log('Boleto já existe, retornando código existente: ' + existingMatch[1]);
         return { codigoSolicitacao: existingMatch[1], message: 'Boleto já emitido anteriormente' };
       }
-      
+
       const violations = error.data?.violacoes || error.data?.violations || [];
       const violationMsg = violations.map((v: any) => `${v.razao || v.reason || ''}: ${v.propriedade || v.property || ''}`).join('; ');
       throw new HttpException(
@@ -219,16 +225,12 @@ export class InterService implements OnModuleInit {
   /**
    * Consulta boleto via GET /cobranca/v3/cobrancas/{codigoSolicitacao}
    */
-  async getBoleto(codigoSolicitacao: string) {
-    const token = await this.getAccessToken();
-
+  async getBoleto(codigoSolicitacao: string, tenantId?: string | null) {
+    const resolvedTenantId = tenantId !== undefined ? tenantId : this.currentTenantId();
     this.logger.log(`Consultando boleto: ${codigoSolicitacao}`);
 
     try {
-      const response = await this.httpRequest('GET', `/cobranca/v3/cobrancas/${codigoSolicitacao}`, null, {
-        Authorization: `Bearer ${token}`,
-      });
-
+      const response = await this.callInter(resolvedTenantId, 'boleto-cobranca.write boleto-cobranca.read', 'GET', `/cobranca/v3/cobrancas/${codigoSolicitacao}`);
       return response;
     } catch (error) {
       this.logger.error('Erro ao consultar boleto: ' + (error.data?.message || error));
@@ -247,27 +249,21 @@ export class InterService implements OnModuleInit {
    * A API de Cobranca v3 usa o codigoSolicitacao como identificador da baixa.
    */
   async cancelBoleto(codigoSolicitacao: string, motivoCancelamento = 'ACERTOS'): Promise<any> {
+    const tenantId = this.currentTenantId();
     this.logger.log(`Cancelando boleto no Banco Inter: ${codigoSolicitacao}`);
 
     // Retry loop for EM_PROCESSAMENTO state
     const maxAttempts = 4;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const token = await this.getAccessToken();
       try {
-        const response = await this.httpRequest(
-          'POST',
-          `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`,
-          { motivoCancelamento },
-          {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        );
+        const response = await this.callInter(tenantId, 'boleto-cobranca.write boleto-cobranca.read', 'POST', `/cobranca/v3/cobrancas/${codigoSolicitacao}/cancelar`, { motivoCancelamento }, {
+          'Content-Type': 'application/json',
+        });
 
         await this.saleRepo.manager.query(
-          `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+          `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''} RETURNING sale_id)
            UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-          [codigoSolicitacao],
+          tenantId ? [codigoSolicitacao, tenantId] : [codigoSolicitacao],
         );
 
         await this.auditInter('inter.boleto_cancelado', null, {
@@ -293,16 +289,16 @@ export class InterService implements OnModuleInit {
         this.logger.error('Erro ao cancelar boleto no Banco Inter: ' + errorDetail);
 
         try {
-          const boleto = await this.getBoleto(codigoSolicitacao);
+          const boleto = await this.getBoleto(codigoSolicitacao, tenantId);
           const cobranca = boleto?.cobranca || boleto;
           const situacao = cobranca?.situacao || boleto?.situacao || boleto?.status;
           if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
             let localSyncPending = false;
             try {
               await this.saleRepo.manager.query(
-                `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1 RETURNING sale_id)
+                `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''} RETURNING sale_id)
                  UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-                [codigoSolicitacao],
+                tenantId ? [codigoSolicitacao, tenantId] : [codigoSolicitacao],
               );
               await this.auditInter('inter.boleto_cancelado_confirmado', null, { codigoSolicitacao, motivoCancelamento, boleto });
             } catch (syncError) {
@@ -329,16 +325,22 @@ export class InterService implements OnModuleInit {
   }
 
   async cancelPix(txid: string): Promise<void> {
-    const params = new URLSearchParams(); params.append('client_id', process.env.INTER_CLIENT_ID); params.append('client_secret', process.env.INTER_CLIENT_SECRET); params.append('scope', 'pix.write'); params.append('grant_type', 'client_credentials');
-    const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), { 'Content-Type': 'application/x-www-form-urlencoded' });
-    await this.httpRequest('PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { Authorization: `Bearer ${tokenRes.access_token}`, 'Content-Type': 'application/json' });
-    await this.saleRepo.manager.query(`UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1`, [txid]);
+    const tenantId = this.currentTenantId();
+    await this.callInter(tenantId, 'pix.write', 'PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { 'Content-Type': 'application/json' });
+    await this.saleRepo.manager.query(
+      `UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
+      tenantId ? [txid, tenantId] : [txid],
+    );
   }
 
   // Remove da lista da tela de Pagamentos um boleto/pix ja cancelado, so para limpar a poluicao
   // visual — nunca apaga um pagamento ativo/pago, ja que isso apagaria historico financeiro real.
   async deletePayment(id: string, userId?: string): Promise<void> {
-    const rows = await this.saleRepo.manager.query(`SELECT id, status, codigo_solicitacao, type, value, customer_name FROM payments WHERE id=$1`, [id]);
+    const tenantId = this.currentTenantId();
+    const rows = await this.saleRepo.manager.query(
+      `SELECT id, status, codigo_solicitacao, type, value, customer_name FROM payments WHERE id=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
+      tenantId ? [id, tenantId] : [id],
+    );
     const payment = rows[0];
     if (!payment) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
     if (payment.status !== 'cancelado') {
@@ -356,7 +358,11 @@ export class InterService implements OnModuleInit {
 
   // Remove de uma vez todos os pagamentos ja cancelados, para o caso de ja haver varios acumulados.
   async deleteAllCancelledPayments(userId?: string): Promise<{ deleted: number }> {
-    const result = await this.saleRepo.manager.query(`DELETE FROM payments WHERE status='cancelado' RETURNING id`);
+    const tenantId = this.currentTenantId();
+    const result = await this.saleRepo.manager.query(
+      `DELETE FROM payments WHERE status='cancelado'${tenantId ? ' AND tenant_id=$1' : ''} RETURNING id`,
+      tenantId ? [tenantId] : [],
+    );
     const deleted = result.length;
     if (deleted > 0) await this.auditInter('inter.payments_bulk_deleted', null, { userId, deleted });
     return { deleted };
@@ -364,10 +370,6 @@ export class InterService implements OnModuleInit {
   onModuleInit() {
     const enabled = process.env.INTER_AUTO_RECONCILE !== 'false';
     if (!enabled) return;
-    if (!process.env.INTER_CLIENT_ID || !process.env.INTER_CLIENT_SECRET) {
-      this.logger.warn('Conciliacao automatica Inter desativada: credenciais nao configuradas');
-      return;
-    }
 
     const configuredInterval = Number(process.env.INTER_RECONCILE_INTERVAL_MINUTES || 30);
     const intervalMinutes = Number.isFinite(configuredInterval) ? configuredInterval : 30;
@@ -390,9 +392,28 @@ export class InterService implements OnModuleInit {
     }
   }
 
+  // Conciliação automática roda fora de uma requisição, então não há tenant no contexto — em vez
+  // de reconciliar tudo de uma vez (o que misturaria pagamentos e credenciais de tenants
+  // diferentes), descobrimos primeiro quais tenants têm pagamentos pendentes e reconciliamos
+  // cada um isoladamente, com o tenantContext.run(...) garantindo que as credenciais e os
+  // filtros de SQL usados dentro de reconcilePendingPayments sejam sempre os daquele tenant.
   private async runScheduledReconciliation(source: string): Promise<void> {
     try {
-      await this.reconcilePendingPayments(source);
+      const tenants = await this.saleRepo.manager.query(
+        `SELECT DISTINCT tenant_id FROM payments WHERE type IN ('boleto','pix') AND status IN ('a_receber','vencido') AND COALESCE(codigo_solicitacao,'')<>''`,
+      );
+      if (!tenants.length) return;
+      for (const row of tenants) {
+        const tenantId = row.tenant_id;
+        await this.tenantContext.run(tenantId, async () => {
+          try {
+            await this.reconcilePendingPayments(source);
+          } catch (error: any) {
+            this.logger.error(`Erro na conciliacao automatica Inter (tenant ${tenantId}): ` + error.message);
+            await this.auditInter('inter.reconcile_error', null, { source, tenantId, error: error.message });
+          }
+        });
+      }
     } catch (error) {
       this.logger.error('Erro na conciliacao automatica Inter: ' + error.message);
       await this.auditInter('inter.reconcile_error', null, {
@@ -425,64 +446,34 @@ export class InterService implements OnModuleInit {
     solicitacaoPagador?: string;
     infoAdicionais?: Array<{ nome: string; valor: string }>;
   }) {
+    const tenantId = this.currentTenantId();
     // PIX precisa de token com escopo específico
-    let token: string;
+    let response: any;
     try {
-      const params = new URLSearchParams();
-      params.append('client_id', process.env.INTER_CLIENT_ID);
-      params.append('client_secret', process.env.INTER_CLIENT_SECRET);
-      params.append('scope', 'pix.write pix.read');
-      params.append('grant_type', 'client_credentials');
-      const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      });
-      token = tokenRes.access_token;
-    } catch (error) {
-      this.logger.error('PIX não habilitado para esta conta. Habilite o escopo PIX no painel do Banco Inter.');
-      throw new HttpException(
-        'PIX não habilitado. Habilite o escopo "pix.write" e "pix.read" no painel do Banco Inter na configuração da sua aplicação API.',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    this.logger.log(`Criando PIX imediato - valor: ${data.valor.original}`);
-
-    try {
-      const response = await this.httpRequest('POST', '/pix/v2/cob', data, {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      });
-
-      this.logger.log(`PIX criado com sucesso - txid: ${response.txid}`);
-      return response;
-    } catch (error) {
+      this.logger.log(`Criando PIX imediato - valor: ${data.valor.original}`);
+      response = await this.callInter(tenantId, 'pix.write pix.read', 'POST', '/pix/v2/cob', data, { 'Content-Type': 'application/json' });
+    } catch (error: any) {
       this.logger.error('Erro ao criar PIX: ' + JSON.stringify(error.data || error));
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
-        error.data?.message || 'Falha ao criar cobrança PIX',
+        error.data?.message || 'Falha ao criar cobrança PIX. Verifique se o escopo "pix.write" está habilitado no painel do Banco Inter.',
         error.status || HttpStatus.BAD_REQUEST,
       );
     }
+
+    this.logger.log(`PIX criado com sucesso - txid: ${response.txid}`);
+    return response;
   }
 
   /**
    * Consulta QR Code PIX via GET /pix/v2/cob/{txid}
    */
-  async getPixQrCode(txid: string) {
-    const params = new URLSearchParams();
-    params.append('client_id', process.env.INTER_CLIENT_ID);
-    params.append('client_secret', process.env.INTER_CLIENT_SECRET);
-    params.append('scope', 'pix.read');
-    params.append('grant_type', 'client_credentials');
-    const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), { 'Content-Type': 'application/x-www-form-urlencoded' });
-    const token = tokenRes.access_token;
-
+  async getPixQrCode(txid: string, tenantId?: string | null) {
+    const resolvedTenantId = tenantId !== undefined ? tenantId : this.currentTenantId();
     this.logger.log(`Consultando PIX QR Code: ${txid}`);
 
     try {
-      const response = await this.httpRequest('GET', `/pix/v2/cob/${txid}`, null, {
-        Authorization: `Bearer ${token}`,
-      });
-
+      const response = await this.callInter(resolvedTenantId, 'pix.read', 'GET', `/pix/v2/cob/${txid}`);
       return response;
     } catch (error) {
       this.logger.error('Erro ao consultar PIX: ' + (error.data?.message || error));
@@ -578,12 +569,16 @@ export class InterService implements OnModuleInit {
     return boleto;
   }
 
+  // Reconcilia os pagamentos pendentes do tenant do contexto atual. Quando chamada manualmente
+  // (botão na tela do tenant) o tenant já vem do JWT da requisição; quando chamada pelo cron
+  // (runScheduledReconciliation), o chamador já envolveu esta função em tenantContext.run(...).
   async reconcilePendingPayments(source = 'manual'): Promise<{ checked: number; updated: number; paid: number; repaired: number; failed: number; details: any[] }> {
     if (this.reconciliationRunning) {
       return { checked: 0, updated: 0, paid: 0, repaired: 0, failed: 0, details: [] };
     }
 
     this.reconciliationRunning = true;
+    const tenantId = this.currentTenantId();
     let checked = 0;
     let updated = 0;
     let paid = 0;
@@ -603,9 +598,10 @@ export class InterService implements OnModuleInit {
          WHERE type IN ('boleto','pix')
            AND status IN ('a_receber', 'vencido')
            AND COALESCE(codigo_solicitacao, '') <> ''
+           ${tenantId ? 'AND tenant_id = $2' : ''}
          ORDER BY updated_at ASC NULLS FIRST, created_at ASC
          LIMIT $1`,
-        [limit],
+        tenantId ? [limit, tenantId] : [limit],
       );
 
       await this.auditInter('inter.reconcile_started', null, {
@@ -660,6 +656,11 @@ export class InterService implements OnModuleInit {
   /**
    * Processa webhook de pagamento do Banco Inter.
    * Localiza a venda pelo seuNumero, atualiza status e registra no financeiro.
+   *
+   * O webhook do Inter não carrega nenhum identificador de tenant (é uma URL fixa por conta
+   * bancária) — por isso, para cada evento, primeiro descobrimos a que tenant o pagamento local
+   * pertence (pela própria linha de "payments") e só então processamos aquele evento dentro do
+   * contexto daquele tenant, para usar as credenciais corretas ao confirmar a cobrança na API.
    */
   async handleWebhook(payload: any, sourceIp?: string): Promise<{ success: boolean; message: string }> {
     const eventHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -692,9 +693,16 @@ export class InterService implements OnModuleInit {
           await this.auditInter('inter.webhook_ignored', null, { eventHash, reason: 'missing_verified_charge_identifier' });
           continue;
         }
-        const paymentType = await this.saleRepo.manager.query(`SELECT type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
-        const verifiedCharge = paymentType[0]?.type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
-        const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, verifiedCharge);
+        const paymentOwner = await this.saleRepo.manager.query(`SELECT type, tenant_id FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
+        if (!paymentOwner[0]) {
+          await this.auditInter('inter.webhook_ignored', null, { eventHash, codigoSolicitacao, reason: 'local_payment_not_found' });
+          continue;
+        }
+        const paymentTenantId = paymentOwner[0].tenant_id || null;
+        const statusUpdate = await this.tenantContext.run(paymentTenantId, async () => {
+          const verifiedCharge = paymentOwner[0].type === 'pix' ? await this.getPixQrCode(codigoSolicitacao, paymentTenantId) : await this.getBoleto(codigoSolicitacao, paymentTenantId);
+          return this.applyPaymentStatus(codigoSolicitacao, verifiedCharge);
+        });
         await this.auditInter('inter.webhook_processed', statusUpdate.saleId || null, { eventHash, codigoSolicitacao, statusUpdate });
         processed++;
       }
@@ -742,7 +750,7 @@ export class InterService implements OnModuleInit {
       };
       if (multa>0) data.multa={codigo:'PERCENTUAL',taxa:multa}; if (mora>0) data.mora={codigo:'TAXAMENSAL',taxa:mora};
       const result=await this.createBoleto(data); const codigo=result.codigoSolicitacao||'';
-      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key,installment_id) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key,installment.id]);
+      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key,installment_id,tenant_id) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key,installment.id,this.currentTenantId()]);
       await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`,[codigo]);
       try { attachments.push({filename:`boleto-parcela-${installment.number}-de-${sale.installments}.pdf`,content:await this.getBoletoPdf(codigo),contentType:'application/pdf'}); } catch(error:any) { this.logger.error(`Boleto ${installment.number} criado, mas PDF indisponível: ${error?.message||error}`); }
       results.push({...result,installmentId:installment.id,installmentNumber:installment.number,value:Number(installment.value),dueDate});
@@ -855,9 +863,9 @@ export class InterService implements OnModuleInit {
       );
       if (existingPayment.length === 0) {
         await this.saleRepo.manager.query(
-          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '', 'charge:' + sale.id + ':boleto']
+          `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, idempotency_key, tenant_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '', 'charge:' + sale.id + ':boleto', this.currentTenantId()]
         );
       }
 
@@ -869,7 +877,7 @@ export class InterService implements OnModuleInit {
         try {
           // Buscar PDF do boleto
           const pdfBuffer = await this.getBoletoPdf(result.codigoSolicitacao);
-          
+
           // Enviar email com PDF anexo
           const html = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -907,10 +915,12 @@ export class InterService implements OnModuleInit {
       return result;
     } else {
       // PIX imediato
+      const tenantId = this.currentTenantId();
+      const creds = await this.bankCredentials.getEffectiveCredentials(tenantId);
       const pixData = {
         calendario: { expiracao: 3600 }, // 1 hora
         valor: { original: Number(sale.totalAmount).toFixed(2) },
-        chave: process.env.INTER_ACCOUNT || '',
+        chave: creds.pixKey || '',
         solicitacaoPagador: `Venda #${sale.id.substring(0, 8)} - ${customer.name}`,
         infoAdicionais: [
           { nome: 'Venda', valor: sale.id.substring(0, 8) },
@@ -921,7 +931,7 @@ export class InterService implements OnModuleInit {
       const result = await this.createPixImmediate(pixData);
       const pixCode = result.txid || result.codigoSolicitacao || result.loc?.id;
       if (!pixCode) throw new HttpException('Banco Inter não retornou identificador do PIX', HttpStatus.BAD_GATEWAY);
-      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, pix_copia_e_cola, idempotency_key) VALUES ($1,$2,'pix',$3,'a_receber',$4,$5,$6,CURRENT_DATE,$7,$8)`, [sale.id, customer.id || null, pixCode, Number(sale.totalAmount), customer.name, document, result.pixCopiaECola || result.pixCopiaEColaBase64 || '', `charge:${sale.id}:pix`]);
+      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, pix_copia_e_cola, idempotency_key, tenant_id) VALUES ($1,$2,'pix',$3,'a_receber',$4,$5,$6,CURRENT_DATE,$7,$8,$9)`, [sale.id, customer.id || null, pixCode, Number(sale.totalAmount), customer.name, document, result.pixCopiaECola || result.pixCopiaEColaBase64 || '', `charge:${sale.id}:pix`, this.currentTenantId()]);
       await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`, [pixCode]);
       await this.saleRepo.manager.query(`UPDATE sales SET billing_status='emitido', updated_at=NOW() WHERE id=$1`, [sale.id]);
 
@@ -944,38 +954,16 @@ export class InterService implements OnModuleInit {
    * GET /banking/v2/extrato?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD
    */
   async getExtrato(dataInicio: string, dataFim: string): Promise<any> {
-    // Token com scope de extrato
-    let token: string;
-    try {
-      const params = new URLSearchParams();
-      params.append('client_id', process.env.INTER_CLIENT_ID);
-      params.append('client_secret', process.env.INTER_CLIENT_SECRET);
-      params.append('scope', 'extrato.read');
-      params.append('grant_type', 'client_credentials');
-      const tokenRes = await this.httpRequest('POST', '/oauth/v2/token', params.toString(), {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      });
-      token = tokenRes.access_token;
-    } catch (error) {
-      this.logger.error('Erro ao obter token para extrato: ' + JSON.stringify(error.data || error.message));
-      throw new HttpException(
-        'Falha ao autenticar para extrato. Verifique se o escopo "extrato.read" está habilitado na aplicação API do Inter.',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
+    const tenantId = this.currentTenantId();
     this.logger.log(`Buscando extrato Inter: ${dataInicio} a ${dataFim}`);
 
     try {
-      const response = await this.httpRequest('GET', `/banking/v2/extrato?dataInicio=${dataInicio}&dataFim=${dataFim}`, null, {
-        Authorization: `Bearer ${token}`,
-      });
-
+      const response = await this.callInter(tenantId, 'extrato.read', 'GET', `/banking/v2/extrato?dataInicio=${dataInicio}&dataFim=${dataFim}`);
       return response;
     } catch (error) {
       this.logger.error('Erro ao buscar extrato: ' + JSON.stringify(error.data || error));
       throw new HttpException(
-        error.data?.message || error.data?.title || 'Falha ao buscar extrato do Banco Inter',
+        error.data?.message || error.data?.title || 'Falha ao buscar extrato do Banco Inter. Verifique se o escopo "extrato.read" está habilitado na aplicação API do Inter.',
         error.status || HttpStatus.BAD_REQUEST,
       );
     }
@@ -1022,17 +1010,20 @@ export class InterService implements OnModuleInit {
   }
 
   private async _fetchBoletoPdf(codigoSolicitacao: string): Promise<Buffer> {
-    const token = await this.getAccessToken();
+    const tenantId = this.currentTenantId();
+    const { token, creds } = await this.requestToken(tenantId, 'boleto-cobranca.write boleto-cobranca.read');
+    const baseUrl = this.baseUrlFor(creds.environment);
+    const agent = this.getAgentFor(creds, tenantId || 'env');
 
     this.logger.log(`Obtendo PDF do boleto: ${codigoSolicitacao}`);
 
     return new Promise((resolve, reject) => {
-      const url = new URL(this.baseUrl + `/cobranca/v3/cobrancas/${codigoSolicitacao}/pdf`);
+      const url = new URL(baseUrl + `/cobranca/v3/cobrancas/${codigoSolicitacao}/pdf`);
       const options: https.RequestOptions = {
         hostname: url.hostname,
         path: url.pathname,
         method: 'GET',
-        agent: this.agent,
+        agent,
         headers: { Authorization: `Bearer ${token}` },
       };
 

@@ -8,16 +8,20 @@ import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
+import { TenantBankConfig } from './entities/tenant-bank-config.entity';
+import { BankCredentialsService } from './bank-credentials.service';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sale, AuditLog, InterWebhookEvent]),
+    TypeOrmModule.forFeature([Sale, AuditLog, InterWebhookEvent, TenantBankConfig]),
     FinancialModule,
     MailModule,
     AuditModule,
+    PlatformModule,
   ],
   controllers: [InterController],
-  providers: [InterService],
-  exports: [InterService],
+  providers: [InterService, BankCredentialsService],
+  exports: [InterService, BankCredentialsService],
 })
 export class InterModule {}

@@ -5,9 +5,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('reconciliation')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('conciliacao')
 @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
 export class ReconciliationController {
   constructor(private readonly service: ReconciliationService) {}

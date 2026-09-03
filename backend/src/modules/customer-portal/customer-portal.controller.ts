@@ -7,6 +7,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { PortalNotificationsService } from './portal-notifications.service';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('portal')
 export class CustomerPortalController {
@@ -53,12 +55,12 @@ export class CustomerPortalController {
   @Post('users') @UseGuards(PortalAuthGuard) createUser(@Request() req, @Body() body: any) { return this.service.createUser(body, req.portalUser.sub, req.portalUser); }
   @Patch('users/:id') @UseGuards(PortalAuthGuard) updateUser(@Request() req, @Param('id') id: string, @Body() body: any) { return this.service.updateUser(id, body, req.portalUser.sub, req.portalUser); }
 
-  @Get('admin/users') @UseGuards(JwtAuthGuard, RolesGuard) @Roles(UserRole.ADMIN)
+  @Get('admin/users') @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard) @Roles(UserRole.ADMIN) @RequireModule('customer_portal')
   adminUsers() { return this.service.listUsers(); }
-  @Post('admin/users') @UseGuards(JwtAuthGuard, RolesGuard) @Roles(UserRole.ADMIN)
+  @Post('admin/users') @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard) @Roles(UserRole.ADMIN) @RequireModule('customer_portal')
   adminCreate(@Request() req, @Body() body: any) { return this.service.createUser(body, req.user.id); }
-  @Patch('admin/users/:id') @UseGuards(JwtAuthGuard, RolesGuard) @Roles(UserRole.ADMIN)
+  @Patch('admin/users/:id') @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard) @Roles(UserRole.ADMIN) @RequireModule('customer_portal')
   adminUpdate(@Request() req, @Param('id') id: string, @Body() body: any) { return this.service.updateUser(id, body, req.user.id); }
-  @Post('admin/forms') @UseGuards(JwtAuthGuard, RolesGuard) @Roles(UserRole.ADMIN)
+  @Post('admin/forms') @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard) @Roles(UserRole.ADMIN) @RequireModule('customer_portal')
   saveForm(@Body() body: any) { return this.service.saveForm(body); }
 }

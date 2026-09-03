@@ -11,12 +11,14 @@ import { Product } from '../products/entities/product.entity';
 import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { FinancialModule } from '../financial/financial.module';
 import { AuditModule } from '../audit/audit.module';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Purchase, FinancialMovement, PurchaseItem, PurchaseQuote, PurchaseAttachment, Product, StockMovement]),
     FinancialModule,
     AuditModule,
+    PlatformModule,
   ],
   controllers: [PurchasesController],
   providers: [PurchasesService],

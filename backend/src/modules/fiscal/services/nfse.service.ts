@@ -10,6 +10,7 @@ import { Invoice } from '../entities/invoice.entity';
 import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { CertificateService } from './certificate.service';
 import { AuditService } from '../../audit/audit.service';
+import { MunicipalitiesService } from '../../platform/municipalities.service';
 
 @Injectable()
 export class NfseService {
@@ -22,6 +23,7 @@ export class NfseService {
     private configRepository: Repository<FiscalConfig>,
     private certificateService: CertificateService,
     private auditService: AuditService,
+    private municipalitiesService: MunicipalitiesService,
   ) {}
 
   private async reserveNfseNumber(configId: string): Promise<number> {
@@ -45,7 +47,7 @@ export class NfseService {
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
 
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
     if (!baseUrl) throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Acesse Modulo Fiscal > Configuracao e preencha o campo "URL API NFS-e${config.environment !== 1 ? ' Teste' : ''}".`);
 
     const agent = await this.certificateService.getHttpsAgent(certId);
@@ -128,14 +130,14 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async consultProtocol(protocolo: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarProtocolo/' + encodeURIComponent(protocolo), 'GET', null, agent);
   }
 
   async consult(chave: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
   }
 
@@ -154,7 +156,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async downloadPdf(chave: string, certId: string): Promise<Buffer> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.pdfGZipB64) {
       const officialPdf = zlib.gunzipSync(Buffer.from(response.pdfGZipB64, 'base64'));
@@ -187,7 +189,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async downloadXmlFromApi(chave: string, certId: string): Promise<string> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.notas?.length > 0 && response.notas[0].xmlGZipB64) {
       const xmlBuf = zlib.gunzipSync(Buffer.from(response.notas[0].xmlGZipB64, 'base64'));
@@ -203,7 +205,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = this.getBaseUrl(config);
+    const baseUrl = await this.getBaseUrl(config);
 
     try {
       // Montar XML de evento de cancelamento
@@ -490,13 +492,23 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     });
   }
 
-  private getBaseUrl(config: FiscalConfig): string {
+  private async getBaseUrl(config: FiscalConfig): Promise<string> {
     if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada');
-    const configuredUrl = config.environment === 1
+    let configuredUrl = config.environment === 1
       ? (config.nfseApiUrl || process.env.CIDADE360_API_URL)
       : (config.nfseTestUrl || process.env.CIDADE360_TEST_API_URL);
+
+    // Se o tenant não preencheu a URL manualmente, cai para o catálogo de municípios da
+    // plataforma (cadastrado pelo super admin) usando o código IBGE já configurado.
+    if (!configuredUrl && config.cityCode) {
+      const municipality = await this.municipalitiesService.findByIbgeCode(config.cityCode);
+      if (municipality && municipality.status !== 'nao_suportado') {
+        configuredUrl = config.environment === 1 ? municipality.nfseApiUrl : (municipality.nfseTestUrl || municipality.nfseApiUrl);
+      }
+    }
+
     if (!configuredUrl) {
-      throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada`);
+      throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Preencha manualmente ou peça ao suporte para cadastrar o município no catálogo.`);
     }
 
     // A API do Cidade360 (inclusive a instancia de Contagem) so expoe rotas sob /NotaNacional/*

@@ -25,8 +25,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sale } from '../sales/entities/sale.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
+import { BankCredentialsService } from './bank-credentials.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
+// @RequireModule funciona no nível da classe mesmo com os guards declarados por método (a
+// leitura do metadado independe de onde o PlanGuard está listado) — só o guard em si precisa
+// estar na MESMA lista que o JwtAuthGuard de cada rota, para rodar depois dele e já ter
+// req.user.tenantId disponível.
 @Controller('inter')
+@RequireModule('pagamentos')
 export class InterController {
   private readonly logger = new Logger(InterController.name);
   private readonly webhookSecret = process.env.INTER_WEBHOOK_SECRET || '';
@@ -38,7 +47,28 @@ export class InterController {
     private readonly saleRepo: Repository<Sale>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
+    private readonly bankCredentials: BankCredentialsService,
+    private readonly tenantContext: TenantContextService,
   ) {}
+
+  /**
+   * GET/PATCH /api/inter/bank-config
+   * Credenciais do Banco Inter deste tenant. Sem linha cadastrada, o sistema usa as variáveis
+   * de ambiente globais (comportamento legado) — ver bank-credentials.service.ts.
+   */
+  @Get('bank-config')
+  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async getBankConfig() {
+    return this.bankCredentials.getPublicConfig(this.tenantContext.requireTenantId());
+  }
+
+  @Post('bank-config')
+  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async updateBankConfig(@Body() body: any) {
+    return this.bankCredentials.updateConfig(this.tenantContext.requireTenantId(), body);
+  }
 
   /**
    * GET /api/inter/payments
@@ -46,7 +76,7 @@ export class InterController {
    */
   @Get('payments')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async listPayments(@Query('page') page = '1', @Query('limit') limit = '50', @Query('month') month?: string) {
     const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
     const monthFilter = month && /^\d{4}-\d{2}$/.test(month) ? month : null;
@@ -73,7 +103,7 @@ export class InterController {
    */
   @Delete('payments/cancelled')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async deleteAllCancelledPayments(@Req() req: Request) {
     return this.interService.deleteAllCancelledPayments((req as any).user?.id);
   }
@@ -84,7 +114,7 @@ export class InterController {
    */
   @Delete('payments/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async deletePayment(@Param('id') id: string, @Req() req: Request) {
     await this.interService.deletePayment(id, (req as any).user?.id);
     return { success: true };
@@ -96,7 +126,7 @@ export class InterController {
    */
   @Post('generate/:saleId')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async generate(
     @Param('saleId') saleId: string,
     @Query('type') type: 'boleto' | 'pix' = 'boleto',
@@ -135,7 +165,7 @@ export class InterController {
    */
   @Get('status/:codigoSolicitacao')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async getStatus(@Param('codigoSolicitacao') codigoSolicitacao: string) {
     this.logger.log(`Consultando status: ${codigoSolicitacao}`);
 
@@ -153,7 +183,7 @@ export class InterController {
    */
   @Post('reconcile')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async reconcile() {
     const result = await this.interService.reconcilePendingPayments('manual');
     return {
@@ -164,7 +194,7 @@ export class InterController {
 
   @Get('webhook-logs')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async webhookLogs() {
     return this.auditRepo.find({
       where: [
@@ -179,7 +209,7 @@ export class InterController {
   }
 
   @Post('webhook/reprocess/:auditId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.reprocess_webhook')
   async reprocessWebhook(@Param('auditId') auditId: string) {
@@ -191,7 +221,7 @@ export class InterController {
 
   @Get('compare/:codigoSolicitacao')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async compareLocalInter(@Param('codigoSolicitacao') codigoSolicitacao: string) {
     const local = await this.saleRepo.manager.query(
       `SELECT * FROM payments WHERE codigo_solicitacao = $1 LIMIT 1`,
@@ -202,7 +232,7 @@ export class InterController {
   }
 
   @Post('cancel-batch')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.cancel_batch')
   async cancelBatch(@Body() body: any) {
@@ -219,7 +249,7 @@ export class InterController {
   }
 
   @Post('expired/:codigoSolicitacao')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.handle_expired')
   async handleExpired(@Param('codigoSolicitacao') codigoSolicitacao: string, @Body() body: any) {
@@ -276,7 +306,7 @@ export class InterController {
    */
   @Get('pdf/:codigoSolicitacao')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async getPdf(
     @Param('codigoSolicitacao') codigoSolicitacao: string,
     @Res() res: Response,

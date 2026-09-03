@@ -1129,8 +1129,24 @@ function FiscalConfigForm() {
   const [cfg, setCfg] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [municipality, setMunicipality] = useState<{ found?: boolean; name?: string; uf?: string; status?: string; nfseApiUrl?: string | null; nfseTestUrl?: string | null } | null>(null)
 
   useEffect(() => { api.get('/fiscal/config').then(r => setCfg(r.data)).catch(() => setCfg({})) }, [])
+
+  // Consulta o catálogo de municípios (mantido pelo super admin) sempre que o código IBGE muda,
+  // para avisar se aquela prefeitura já tem provedor de NFS-e homologado.
+  useEffect(() => {
+    const cityCode = cfg?.cityCode
+    if (!cityCode || cityCode.length !== 7) { setMunicipality(null); return }
+    let cancelled = false
+    api.get(`/catalogs/municipalities/${cityCode}`).then(r => { if (!cancelled) setMunicipality(r.data?.found === false ? null : r.data) }).catch(() => { if (!cancelled) setMunicipality(null) })
+    return () => { cancelled = true }
+  }, [cfg?.cityCode])
+
+  function useMunicipalityUrls() {
+    if (!municipality) return
+    setCfg((current: any) => ({ ...current, nfseApiUrl: municipality.nfseApiUrl || current.nfseApiUrl, nfseTestUrl: municipality.nfseTestUrl || current.nfseTestUrl }))
+  }
 
   async function save() {
     setSaving(true); setMsg('')
@@ -1185,6 +1201,19 @@ function FiscalConfigForm() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Municipio (codigo IBGE 7 dig)</label>
           <input className="input" value={cfg.cityCode || '3118601'} onChange={e => setCfg({...cfg, cityCode: e.target.value})} placeholder="3118601 = Contagem" />
+          {municipality && (
+            <p className="text-xs mt-1 flex items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 font-medium ${municipality.status === 'suportado' ? 'bg-green-100 text-green-700' : municipality.status === 'em_teste' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                {municipality.name}/{municipality.uf} — {municipality.status === 'suportado' ? 'integração disponível' : municipality.status === 'em_teste' ? 'em teste' : 'sem integração'}
+              </span>
+              {(municipality.nfseApiUrl || municipality.nfseTestUrl) && (
+                <button type="button" onClick={useMunicipalityUrls} className="text-blue-600 underline">usar URLs do catálogo</button>
+              )}
+            </p>
+          )}
+          {!municipality && cfg.cityCode?.length === 7 && (
+            <p className="text-xs text-gray-400 mt-1">Município não cadastrado no catálogo — preencha as URLs manualmente ou peça ao suporte para cadastrá-lo.</p>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">NF-e Serie</label>

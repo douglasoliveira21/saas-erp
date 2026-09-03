@@ -14,6 +14,7 @@ import { FinancialModule } from '../financial/financial.module';
 import { InterModule } from '../inter/inter.module';
 import { FiscalModule } from '../fiscal/fiscal.module';
 import { AuditModule } from '../audit/audit.module';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AuditModule } from '../audit/audit.module';
     InterModule,
     FiscalModule,
     AuditModule,
+    PlatformModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

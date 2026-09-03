@@ -29,17 +29,22 @@ import { CrmModule } from './modules/crm/crm.module';
 import { CustomerPortalModule } from './modules/customer-portal/customer-portal.module';
 import { ServiceOrdersModule } from './modules/service-orders/service-orders.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
+import { PlatformModule } from './modules/platform/platform.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { OperationTrackingInterceptor } from './modules/operations/operation-tracking.interceptor';
+import { TenantContextModule } from './common/tenant/tenant-context.module';
+import { TenantContextInterceptor } from './common/tenant/tenant-context.interceptor';
 
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
       useClass: DatabaseConfig,
     }),
+    TenantContextModule,
+    PlatformModule,
     AuthModule,
     UsersModule,
     CustomersModule,
@@ -72,6 +77,7 @@ import { OperationTrackingInterceptor } from './modules/operations/operation-tra
   ],
   controllers: [HealthController],
   providers: [
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_INTERCEPTOR, useClass: OperationTrackingInterceptor },
   ],

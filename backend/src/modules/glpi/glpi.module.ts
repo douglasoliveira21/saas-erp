@@ -7,9 +7,10 @@ import { GlpiConfig } from './entities/glpi-config.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Contract } from '../contracts/entities/contract.entity';
 import { SlaMonthlySnapshot } from './entities/sla-monthly-snapshot.entity';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([GlpiTicket, GlpiConfig, Customer, Contract, SlaMonthlySnapshot])],
+  imports: [TypeOrmModule.forFeature([GlpiTicket, GlpiConfig, Customer, Contract, SlaMonthlySnapshot]), PlatformModule],
   controllers: [GlpiController],
   providers: [GlpiService],
   exports: [GlpiService],

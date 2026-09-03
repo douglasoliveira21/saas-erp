@@ -14,6 +14,7 @@ import { BankAccount } from './entities/bank-account.entity';
 import { MonthlyClosing } from './entities/monthly-closing.entity';
 import { InstallmentPayment } from './entities/installment-payment.entity';
 import { AccountPayable } from './entities/account-payable.entity';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AccountPayable } from './entities/account-payable.entity';
       AccountPayable,
     ]),
     AuditModule,
+    PlatformModule,
   ],
   controllers: [FinancialController],
   providers: [FinancialService],

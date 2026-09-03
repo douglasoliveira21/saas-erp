@@ -1,7 +1,89 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useFeedback } from '../components/ui'
-import { FileSearch, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
+import { FileSearch, KeyRound, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
+
+const emptyBankForm = { environment: 'sandbox', clientId: '', clientSecret: '', certificate: '', privateKey: '', pixKey: '', account: '', active: true }
+
+function BankConfigForm() {
+  const [config, setConfig] = useState<any>(null)
+  const [form, setForm] = useState(emptyBankForm)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function load() {
+    const { data } = await api.get('/inter/bank-config')
+    setConfig(data)
+    setForm({
+      environment: data.environment || 'sandbox', clientId: data.clientId || '', clientSecret: '',
+      certificate: '', privateKey: '', pixKey: data.pixKey || '', account: data.account || '', active: data.active ?? true,
+    })
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function save() {
+    setSaving(true); setMsg('')
+    try {
+      await api.post('/inter/bank-config', form)
+      setMsg('Credenciais salvas!')
+      await load()
+    } catch (e: any) {
+      setMsg(e.response?.data?.message || 'Erro ao salvar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!config) return null
+
+  return (
+    <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900"><KeyRound className="h-4 w-4" /> Credenciais do Banco Inter (por cliente)</div>
+      <p className="text-xs text-gray-500">
+        {config.configured
+          ? 'Este cliente tem credenciais próprias cadastradas.'
+          : config.hasEnvDefaults
+            ? 'Nenhuma credencial própria cadastrada — usando a configuração padrão do sistema.'
+            : 'Nenhuma credencial configurada. Cadastre abaixo para emitir boletos/PIX via Banco Inter.'}
+      </p>
+      {msg && <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-700">{msg}</div>}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">Ambiente</label>
+          <select className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })}>
+            <option value="sandbox">Sandbox (testes)</option>
+            <option value="production">Produção</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">Conta / Chave PIX</label>
+          <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={form.pixKey} onChange={e => setForm({ ...form, pixKey: e.target.value })} placeholder="chave PIX da conta" />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">Client ID</label>
+          <input className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })} placeholder={config.clientId || 'Client ID da aplicação API'} />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">Client Secret</label>
+          <input type="password" className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" value={form.clientSecret} onChange={e => setForm({ ...form, clientSecret: e.target.value })} placeholder={config.configured ? '••••••••' : 'Client Secret'} />
+        </div>
+        <div className="col-span-2">
+          <label className="mb-1 block text-xs text-gray-500">Certificado (.crt/.pem)</label>
+          <textarea className="min-h-20 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs" value={form.certificate} onChange={e => setForm({ ...form, certificate: e.target.value })} placeholder={config.hasCertificate ? 'Certificado já cadastrado — cole um novo para substituir' : '-----BEGIN CERTIFICATE-----'} />
+        </div>
+        <div className="col-span-2">
+          <label className="mb-1 block text-xs text-gray-500">Chave privada (.key/.pem)</label>
+          <textarea className="min-h-20 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs" value={form.privateKey} onChange={e => setForm({ ...form, privateKey: e.target.value })} placeholder={config.hasCertificate ? 'Chave já cadastrada — cole uma nova para substituir' : '-----BEGIN PRIVATE KEY-----'} />
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-gray-700">
+        <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Integração ativa
+      </label>
+      <button onClick={save} disabled={saving} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? 'Salvando...' : 'Salvar credenciais'}</button>
+    </div>
+  )
+}
 
 export function InterAdvanced() {
   const { runOperation, confirm: confirmAction } = useFeedback()
@@ -80,6 +162,8 @@ export function InterAdvanced() {
 
       {error && <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {success && <div className="rounded-md bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
+
+      <BankConfigForm />
 
       <section className="grid gap-6 xl:grid-cols-[1fr_420px]">
         <div className="rounded-lg border border-gray-200 bg-white">

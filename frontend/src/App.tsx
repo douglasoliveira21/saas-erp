@@ -52,6 +52,12 @@ const ServiceOrderDetail = lazy(() => import('./pages/ServiceOrderDetail').then(
 const WhatsappSettings = lazy(() => import('./pages/WhatsappSettings').then(module => ({ default: module.WhatsappSettings })))
 const Tutorial = lazy(() => import('./pages/Tutorial').then(module => ({ default: module.Tutorial })))
 const CustomerPortalAdmin = lazy(() => import('./pages/CustomerPortalAdmin').then(module => ({ default: module.CustomerPortalAdmin })))
+const SuperAdminLogin = lazy(() => import('./pages/super-admin/SuperAdminLogin').then(module => ({ default: module.SuperAdminLogin })))
+const SuperAdminLayout = lazy(() => import('./pages/super-admin/SuperAdminLayout').then(module => ({ default: module.SuperAdminLayout })))
+const SuperAdminTenants = lazy(() => import('./pages/super-admin/SuperAdminTenants').then(module => ({ default: module.SuperAdminTenants })))
+const SuperAdminPlans = lazy(() => import('./pages/super-admin/SuperAdminPlans').then(module => ({ default: module.SuperAdminPlans })))
+const SuperAdminMunicipalities = lazy(() => import('./pages/super-admin/SuperAdminMunicipalities').then(module => ({ default: module.SuperAdminMunicipalities })))
+const SuperAdminBanks = lazy(() => import('./pages/super-admin/SuperAdminBanks').then(module => ({ default: module.SuperAdminBanks })))
 
 function PageLoader() {
   const [delayed, setDelayed] = useState(false)
@@ -78,6 +84,16 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            {/* Painel do super admin: autenticação e client HTTP totalmente separados do app do
+                tenant (services/superAdminApi.ts) — fora da árvore do PrivateRoute/AuthProvider. */}
+            <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+            <Route path="/super-admin" element={<SuperAdminLayout />}>
+              <Route index element={<Navigate to="/super-admin/tenants" replace />} />
+              <Route path="tenants" element={<SuperAdminTenants />} />
+              <Route path="plans" element={<SuperAdminPlans />} />
+              <Route path="municipalities" element={<SuperAdminMunicipalities />} />
+              <Route path="banks" element={<SuperAdminBanks />} />
+            </Route>
             <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />

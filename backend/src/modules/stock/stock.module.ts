@@ -7,9 +7,10 @@ import { Product } from '../products/entities/product.entity';
 import { FinancialModule } from '../financial/financial.module';
 import { AuditModule } from '../audit/audit.module';
 import { StockInventory } from './entities/stock-inventory.entity';
+import { PlatformModule } from '../platform/platform.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([StockMovement, Product, StockInventory]), FinancialModule, AuditModule],
+  imports: [TypeOrmModule.forFeature([StockMovement, Product, StockInventory]), FinancialModule, AuditModule, PlatformModule],
   controllers: [StockController],
   providers: [StockService],
   exports: [StockService, TypeOrmModule],

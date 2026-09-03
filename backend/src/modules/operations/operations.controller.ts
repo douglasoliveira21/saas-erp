@@ -5,10 +5,13 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { OperationsService } from './operations.service';
 import { OperationTrackingService } from './operation-tracking.service';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('operations')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
 @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+@RequireModule('controles_erp')
 export class OperationsController {
   constructor(private service: OperationsService, private tracking: OperationTrackingService) {}
   @Get('executions') executions(@Query() query:any) { return this.tracking.list(query); }

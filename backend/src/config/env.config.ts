@@ -33,6 +33,12 @@ export const env = {
     apiUrl: process.env.EVOLUTION_API_URL || '',
     apiKey: process.env.EVOLUTION_API_KEY || '',
   },
+  platform: {
+    // Segredo próprio (nunca o mesmo do JWT de tenant): um token de super admin nunca pode ser
+    // aceito por engano pelo guard de um tenant, nem o contrário, mesmo que algum dia um dos dois
+    // strategies tenha um bug de validação do payload.
+    superAdminJwtSecret: process.env.SUPER_ADMIN_JWT_SECRET || `${process.env.JWT_SECRET || 'dev'}-super-admin-dev-only`,
+  },
 };
 
 const unsafeSecrets = new Set([
@@ -49,7 +55,7 @@ export function validateProductionSecrets(): void {
   const rawNodeEnv = (process.env.NODE_ENV || '').trim().toLowerCase();
   const isExplicitlyDev = rawNodeEnv === 'development' || rawNodeEnv === 'test';
   if (isExplicitlyDev) return;
-  const required = ['JWT_SECRET', 'CERT_ENCRYPTION_KEY', 'CREDENTIAL_ENCRYPTION_KEY', 'INTER_WEBHOOK_SECRET'];
+  const required = ['JWT_SECRET', 'CERT_ENCRYPTION_KEY', 'CREDENTIAL_ENCRYPTION_KEY', 'INTER_WEBHOOK_SECRET', 'SUPER_ADMIN_JWT_SECRET'];
   const invalid = required.filter((name) => {
     const value = (process.env[name] || '').trim();
     return value.length < 32 || unsafeSecrets.has(value.toLowerCase());

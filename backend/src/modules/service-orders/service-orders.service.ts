@@ -8,6 +8,8 @@ import { ServiceOrderAttachment } from './entities/service-order-attachment.enti
 import { ServiceOrderEvent } from './entities/service-order-event.entity';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ServiceOrderPdfService } from './service-order-pdf.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { TenantsService } from '../platform/tenants.service';
 
 const ATTACHMENT_TYPES = ['foto_antes', 'foto_depois', 'documento', 'geral'];
 
@@ -20,6 +22,8 @@ export class ServiceOrdersService {
     @InjectRepository(ServiceOrderEvent) private eventsRepository: Repository<ServiceOrderEvent>,
     private whatsappService: WhatsappService,
     private pdfService: ServiceOrderPdfService,
+    private tenantContext: TenantContextService,
+    private tenantsService: TenantsService,
   ) {}
 
   // Notificação por WhatsApp nunca pode travar a operação principal da OS — se a instância
@@ -153,7 +157,19 @@ export class ServiceOrdersService {
     const defaultStatus = statuses.find((s) => s.key === 'iniciando') || statuses[0];
     const statusKey = dto.statusKey && statuses.some((s) => s.key === dto.statusKey) ? dto.statusKey : defaultStatus?.key || 'iniciando';
 
+    const tenantId = this.tenantContext.getTenantId();
+    if (tenantId) {
+      const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0);
+      const monthCount = await this.ordersRepository
+        .createQueryBuilder('o')
+        .where('o.tenantId = :tenantId', { tenantId })
+        .andWhere('o.createdAt >= :startOfMonth', { startOfMonth })
+        .getCount();
+      await this.tenantsService.assertWithinLimit(tenantId, 'maxServiceOrdersPerMonth', monthCount, 'Limite de ordens de serviço deste mês atingido no plano contratado.');
+    }
+
     const order = this.ordersRepository.create({
+      tenantId: tenantId || undefined,
       customerId: dto.customerId,
       technicianId: dto.technicianId || null,
       serviceType: String(dto.serviceType).trim(),

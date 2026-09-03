@@ -22,9 +22,12 @@ import { FiscalIntegrationService } from './services/fiscal-integration.service'
 import { FiscalJobsService } from './services/fiscal-jobs.service';
 import { Sale } from '../sales/entities/sale.entity';
 import { getCustomerEmailRecipients, getCustomerEmails } from '../../common/customer-emails';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('fiscal')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('fiscal')
 export class FiscalController {
   private readonly logger = new Logger(FiscalController.name);
 

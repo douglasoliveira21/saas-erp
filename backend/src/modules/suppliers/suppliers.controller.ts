@@ -4,9 +4,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 @Controller('suppliers')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('contas_pagar')
 export class SuppliersController {
   constructor(private readonly service: SuppliersService) {}
 
@@ -31,7 +34,8 @@ export class SuppliersController {
 }
 
 @Controller('bills')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('contas_pagar')
 export class BillsController {
   constructor(private readonly service: SuppliersService) {}
 

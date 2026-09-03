@@ -25,13 +25,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { PlanGuard } from '../platform/guards/plan.guard';
+import { RequireModule } from '../platform/decorators/require-module.decorator';
 
 const internalRoles = [UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO];
 const uploadDir = join(process.cwd(), 'uploads', 'service-orders');
 if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true });
 
 @Controller('service-orders')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+@RequireModule('service_orders')
 export class ServiceOrdersController {
   constructor(
     private readonly service: ServiceOrdersService,
