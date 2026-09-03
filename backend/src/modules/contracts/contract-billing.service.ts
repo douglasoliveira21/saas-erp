@@ -500,19 +500,24 @@ export class ContractBillingService implements OnModuleInit {
     if (!contract || !contract.customer) return { hasNf: false, hasBoleto: false, invoiceId: null, boletoCode: null, period };
 
     const customerDoc = (contract.customer.cpfCnpj || '').replace(/\D/g, '');
+    const monthlyValue = Number(contract.monthlyValue || contract.totalValue);
 
-    // Check if there's an authorized NFS-e for this customer in this month
+    // Check if there's an authorized NFS-e for this customer in this month, com o mesmo valor do
+    // contrato. Um cliente com mais de um contrato ativo (comum: 2 contratos separados com
+    // emissoes separadas) tem varias notas autorizadas no mesmo mes para CNPJs iguais — sem
+    // filtrar por valor, o fallback via CNPJ+mes confundia a nota de um contrato com a de outro
+    // (ex.: contrato A de R$1408 fazia o contrato B de R$389 aparecer como "ja emitido").
     const invoices = await this.dataSource.query(
       `SELECT id FROM invoices WHERE recipient_cnpj = $1 AND type = 'nfse' AND status = 'autorizada'
-       AND created_at >= $2 AND created_at < $3 LIMIT 1`,
-      [customerDoc || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00']
+       AND created_at >= $2 AND created_at < $3 AND ABS(total_value - $4) < 0.01 LIMIT 1`,
+      [customerDoc || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00', monthlyValue]
     ).catch(() => []);
 
-    // Check if there's a boleto payment for this customer in this month
+    // Mesmo raciocinio para o boleto: filtra pelo valor do contrato, nao so cliente+mes.
     const payments = await this.dataSource.query(
       `SELECT id, codigo_solicitacao FROM payments WHERE customer_id = $1 AND type = 'boleto' AND status != 'cancelado'
-       AND created_at >= $2 AND created_at < $3 LIMIT 1`,
-      [contract.customerId || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00']
+       AND created_at >= $2 AND created_at < $3 AND ABS(value - $4) < 0.01 LIMIT 1`,
+      [contract.customerId || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00', monthlyValue]
     ).catch(() => []);
 
     return {
