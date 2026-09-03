@@ -29,6 +29,10 @@ export const env = {
     environment: process.env.INTER_ENVIRONMENT || 'sandbox',
     account: process.env.INTER_ACCOUNT || '',
   },
+  evolution: {
+    apiUrl: process.env.EVOLUTION_API_URL || '',
+    apiKey: process.env.EVOLUTION_API_KEY || '',
+  },
 };
 
 const unsafeSecrets = new Set([

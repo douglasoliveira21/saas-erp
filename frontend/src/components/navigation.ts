@@ -2,7 +2,7 @@ import {
   LucideIcon, LayoutDashboard, Package, Wrench, Users, ShoppingCart, DollarSign,
   UserCog, FileText, Navigation, ScrollText, Clock, Car, CreditCard, PiggyBank,
   ShoppingBag, Receipt, Star, Repeat, ClipboardList, Mail, ArrowDownUp, BarChart3,
-  Landmark, Archive, Building2, ShieldCheck, Boxes, Settings, BookOpen,
+  Landmark, Archive, Building2, ShieldCheck, Boxes, Settings, BookOpen, ClipboardCheck, MessageCircle,
 } from 'lucide-react'
 
 export interface NavItem { name: string; href: string; icon: LucideIcon; roles: string[] }
@@ -56,6 +56,7 @@ export const navigationSections: NavSection[] = [
     { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: office },
   ]},
   { id: 'operacoes', title: 'Operações', icon: Navigation, expandable: true, items: [
+    { name: 'Ordens de serviço', href: '/service-orders', icon: ClipboardCheck, roles: all },
     { name: 'Rotas externas', href: '/routes', icon: Navigation, roles: all },
     { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'] },
     { name: 'Controle de SLA', href: '/sla', icon: Clock, roles: office },
@@ -65,6 +66,7 @@ export const navigationSections: NavSection[] = [
     { name: 'Usuários e acessos', href: '/users', icon: UserCog, roles: ['admin'] },
     { name: 'Portal do cliente', href: '/customer-portal', icon: ShieldCheck, roles: ['admin'] },
     { name: 'Configuração de e-mail', href: '/email-settings', icon: Mail, roles: ['admin'] },
+    { name: 'WhatsApp', href: '/whatsapp-settings', icon: MessageCircle, roles: ['admin'] },
     { name: 'Tutorial e guias', href: '/tutorial', icon: BookOpen, roles: all },
   ]},
 ]

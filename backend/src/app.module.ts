@@ -27,6 +27,8 @@ import { QuotesModule } from './modules/quotes/quotes.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { CustomerPortalModule } from './modules/customer-portal/customer-portal.module';
+import { ServiceOrdersModule } from './modules/service-orders/service-orders.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 import { APP_INTERCEPTOR } from '@nestjs/core';
@@ -65,6 +67,8 @@ import { OperationTrackingInterceptor } from './modules/operations/operation-tra
     OperationsModule,
     CrmModule,
     CustomerPortalModule,
+    ServiceOrdersModule,
+    WhatsappModule,
   ],
   controllers: [HealthController],
   providers: [

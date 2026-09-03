@@ -31,6 +31,8 @@ interface Contract {
   issueDay: number
   issRetido: boolean
   issAliquota: number
+  notifyViaWhatsapp?: boolean
+  whatsappNumber?: string
   equipments: string
   renewalHistory: string
   lastRenewalDate: string
@@ -52,7 +54,7 @@ export function Contracts() {
   const [editing, setEditing] = useState<Contract | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '' })
+  const [form, setForm] = useState({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: '', endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '', notifyViaWhatsapp: false, whatsappNumber: '' })
   const [file, setFile] = useState<File | null>(null)
   const [showRenewModal, setShowRenewModal] = useState(false)
   const [renewingContract, setRenewingContract] = useState<Contract | null>(null)
@@ -95,18 +97,19 @@ export function Contracts() {
 
   function openNew() {
     setEditing(null); setFile(null)
-    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '' })
+    setForm({ customerId: '', title: '', description: '', totalValue: '', monthlyValue: '', startDate: new Date().toISOString().split('T')[0], endDate: '', slaInternal: '4', slaExternal: '24', slaTotalHours: '0', slaOverageRate: '80', slaCalculationMode: 'glpi_actiontime', observations: '', adjustmentIndex: 'IGPM', adjustmentPercentage: '', autoCharge: false, chargeDay: '10', issueDay: '3', chargeDateFull: '', issueDateFull: '', issRetido: false, issAliquota: '5', equipments: '', notifyViaWhatsapp: false, whatsappNumber: '' })
     setError(''); setShowModal(true)
   }
 
   function openEdit(c: Contract) {
     setEditing(c); setFile(null)
-    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', issueDay: c.issueDay ? String(c.issueDay) : '3', chargeDateFull: '', issueDateFull: '', issRetido: c.issRetido || false, issAliquota: c.issAliquota ? String(c.issAliquota) : '5', equipments: c.equipments || '' })
+    setForm({ customerId: c.customer?.id || '', title: c.title, description: c.description || '', totalValue: String(c.totalValue), monthlyValue: c.monthlyValue ? String(c.monthlyValue) : '', startDate: c.startDate, endDate: c.endDate || '', slaInternal: String(c.slaInternal), slaExternal: String(c.slaExternal), slaTotalHours: String(c.slaTotalHours || 0), slaOverageRate: String(c.slaOverageRate || 80), slaCalculationMode: c.slaCalculationMode || 'glpi_actiontime', observations: c.observations || '', adjustmentIndex: c.adjustmentIndex || 'IGPM', adjustmentPercentage: c.adjustmentPercentage ? String(c.adjustmentPercentage) : '', autoCharge: c.autoCharge || false, chargeDay: c.chargeDay ? String(c.chargeDay) : '10', issueDay: c.issueDay ? String(c.issueDay) : '3', chargeDateFull: '', issueDateFull: '', issRetido: c.issRetido || false, issAliquota: c.issAliquota ? String(c.issAliquota) : '5', equipments: c.equipments || '', notifyViaWhatsapp: c.notifyViaWhatsapp || false, whatsappNumber: c.whatsappNumber || '' })
     setError(''); setShowModal(true)
   }
 
   async function save() {
     if (!form.customerId || !form.title || !form.totalValue || !form.startDate) { setError('Preencha cliente, titulo, valor e data de inicio'); return }
+    if (form.notifyViaWhatsapp && !form.whatsappNumber?.trim()) { setError('Informe o número de WhatsApp para receber nota e boleto'); return }
     setSaving(true)
     try {
       const fd = new FormData()
@@ -131,6 +134,8 @@ export function Contracts() {
       fd.append('issRetido', String(form.issRetido || false))
       fd.append('issAliquota', form.issAliquota || '5')
       if (form.equipments) fd.append('equipments', form.equipments)
+      fd.append('notifyViaWhatsapp', String(form.notifyViaWhatsapp || false))
+      if (form.whatsappNumber) fd.append('whatsappNumber', form.whatsappNumber)
       if (file) fd.append('file', file)
 
       const action = editing ? 'Salvando contrato...' : 'Criando contrato...'
@@ -585,6 +590,21 @@ export function Contracts() {
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* WhatsApp */}
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" id="notifyViaWhatsapp" checked={form.notifyViaWhatsapp} onChange={e => setForm({ ...form, notifyViaWhatsapp: e.target.checked })} className="w-4 h-4 text-primary-600 rounded" />
+                  <label htmlFor="notifyViaWhatsapp" className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Enviar nota e boleto via WhatsApp</label>
+                </div>
+                {form.notifyViaWhatsapp && (
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Número do WhatsApp *</label>
+                    <input className="input" placeholder="(31) 99999-9999" value={form.whatsappNumber} onChange={e => setForm({ ...form, whatsappNumber: e.target.value })} />
+                    <p className="text-xs text-gray-400 mt-1">Fica salvo neste contrato: todo mês, NF + boleto + XML serão enviados automaticamente para este número.</p>
+                  </div>
+                )}
               </div>
 
               {/* Upload */}

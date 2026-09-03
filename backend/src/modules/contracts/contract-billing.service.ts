@@ -5,6 +5,7 @@ import { Contract } from './entities/contract.entity';
 import { InterService } from '../inter/inter.service';
 import { NfseService } from '../fiscal/services/nfse.service';
 import { MailService } from '../mail/mail.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class ContractBillingService implements OnModuleInit {
@@ -37,7 +38,34 @@ export class ContractBillingService implements OnModuleInit {
     private interService: InterService,
     private nfseService: NfseService,
     private mailService: MailService,
+    private whatsappService: WhatsappService,
   ) {}
+
+  // Envia os documentos de cobrança (NF + boleto) por WhatsApp quando o contrato tem essa opção
+  // habilitada. Nunca lança erro para o chamador: uma falha aqui não pode travar a emissão fiscal
+  // nem o envio por email, que já aconteceram antes desta chamada.
+  private async notifyBillingWhatsapp(contract: Contract, billingPeriod: string, attachments: { filename: string; content: Buffer; contentType: string }[]): Promise<void> {
+    if (!contract.notifyViaWhatsapp || !contract.whatsappNumber || attachments.length === 0) return;
+    try {
+      await this.whatsappService.sendText(
+        contract.whatsappNumber,
+        `Olá! Segue a Nota Fiscal e o Boleto referentes ao contrato *${contract.title}* (${billingPeriod}).`,
+        { relatedEntity: 'contract', relatedId: contract.id },
+      );
+      for (const attachment of attachments) {
+        await this.whatsappService.sendMedia(
+          contract.whatsappNumber,
+          attachment.content,
+          attachment.contentType,
+          attachment.filename,
+          '',
+          { relatedEntity: 'contract', relatedId: contract.id },
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(`Erro ao enviar cobrança por WhatsApp (contrato ${contract.title}): ${error.message}`);
+    }
+  }
 
   onModuleInit() {
     // Run billing check daily
@@ -366,6 +394,30 @@ export class ContractBillingService implements OnModuleInit {
       } catch (error) {
         this.logger.error(`Erro ao enviar email: ${error.message}`);
       }
+    }
+
+    // 5. Send NF (XML + PDF) and Boleto (PDF) via WhatsApp, if enabled for this contract
+    if (contract.notifyViaWhatsapp && contract.whatsappNumber) {
+      const whatsappAttachments: { filename: string; content: Buffer; contentType: string }[] = [];
+      if (boletoPdf) whatsappAttachments.push({ filename: `boleto-${billingPeriod}.pdf`, content: boletoPdf, contentType: 'application/pdf' });
+      if (invoiceId) {
+        try {
+          const invoice = await this.dataSource.query(`SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [invoiceId]);
+          if (invoice[0]) {
+            const xml = invoice[0].xml_authorized || invoice[0].xml_sent;
+            if (xml) whatsappAttachments.push({ filename: `NFSe_${invoice[0].number || 'nota'}_serie${invoice[0].series || 1}.xml`, content: Buffer.from(xml, 'utf-8'), contentType: 'application/xml' });
+            if (invoice[0].access_key && invoice[0].certificate_id) {
+              try {
+                const pdf = await this.nfseService.downloadPdf(invoice[0].access_key, invoice[0].certificate_id);
+                whatsappAttachments.push({ filename: `NFSe_${invoice[0].number || 'nota'}.pdf`, content: pdf, contentType: 'application/pdf' });
+              } catch { /* PDF ainda não disponível */ }
+            }
+          }
+        } catch (error: any) {
+          this.logger.error(`Erro ao buscar NF para envio por WhatsApp (contrato ${contract.title}): ${error.message}`);
+        }
+      }
+      await this.notifyBillingWhatsapp(contract, billingPeriod, whatsappAttachments);
     }
 
     return { invoiceId, boletoCode, billingPeriod, value: monthlyValue };
@@ -697,7 +749,8 @@ export class ContractBillingService implements OnModuleInit {
   async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
     const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
     if (!contract) throw new Error('Contrato não encontrado');
-    if (!contract.customer?.email) throw new Error('Cliente sem email cadastrado');
+    const canWhatsapp = contract.notifyViaWhatsapp && contract.whatsappNumber;
+    if (!contract.customer?.email && !canWhatsapp) throw new Error('Cliente sem email cadastrado e sem WhatsApp habilitado para este contrato');
 
     // First try to get billing status (which handles both contract_billings and fallback)
     const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
@@ -821,12 +874,16 @@ export class ContractBillingService implements OnModuleInit {
       </div>
     `;
 
-    await this.mailService.sendMailWithAttachment(
-      contract.customer.email,
-      `NF + Boleto - ${contract.title} (${billingPeriod})`,
-      html,
-      attachments,
-    );
+    if (contract.customer?.email) {
+      await this.mailService.sendMailWithAttachment(
+        contract.customer.email,
+        `NF + Boleto - ${contract.title} (${billingPeriod})`,
+        html,
+        attachments,
+      );
+    }
+
+    await this.notifyBillingWhatsapp(contract, billingPeriod, attachments);
 
     return { sent: true };
   }

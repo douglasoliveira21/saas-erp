@@ -46,6 +46,10 @@ const InterAdvanced = lazy(() => import('./pages/InterAdvanced').then(module => 
 const PurchasesAdvanced = lazy(() => import('./pages/PurchasesAdvanced').then(module => ({ default: module.PurchasesAdvanced })))
 const Operations = lazy(() => import('./pages/Operations').then(module => ({ default: module.Operations })))
 const Crm = lazy(() => import('./pages/Crm').then(module => ({ default: module.Crm })))
+const ServiceOrders = lazy(() => import('./pages/ServiceOrders').then(module => ({ default: module.ServiceOrders })))
+const ServiceOrderForm = lazy(() => import('./pages/ServiceOrderForm').then(module => ({ default: module.ServiceOrderForm })))
+const ServiceOrderDetail = lazy(() => import('./pages/ServiceOrderDetail').then(module => ({ default: module.ServiceOrderDetail })))
+const WhatsappSettings = lazy(() => import('./pages/WhatsappSettings').then(module => ({ default: module.WhatsappSettings })))
 const Tutorial = lazy(() => import('./pages/Tutorial').then(module => ({ default: module.Tutorial })))
 const CustomerPortalAdmin = lazy(() => import('./pages/CustomerPortalAdmin').then(module => ({ default: module.CustomerPortalAdmin })))
 
@@ -86,6 +90,9 @@ function App() {
               <Route path="/commissions" element={<Commissions />} />
               <Route path="/stock" element={<Stock />} />
               <Route path="/routes" element={<RoutesPage />} />
+              <Route path="/service-orders" element={<ServiceOrders />} />
+              <Route path="/service-orders/new" element={<ServiceOrderForm />} />
+              <Route path="/service-orders/:id" element={<ServiceOrderDetail />} />
               <Route path="/vehicles" element={<Vehicles />} />
               <Route path="/contracts" element={<Contracts />} />
               <Route path="/sla" element={<Sla />} />
@@ -105,6 +112,7 @@ function App() {
               <Route path="/fidelidade" element={<Fidelidade />} />
               <Route path="/assinaturas" element={<Assinaturas />} />
               <Route path="/email-settings" element={<EmailSettings />} />
+              <Route path="/whatsapp-settings" element={<WhatsappSettings />} />
               <Route path="/contas-pagar" element={<Bills />} />
               <Route path="/dre" element={<Dre />} />
               <Route path="/financeiro-avancado" element={<FinancialAdvanced />} />

@@ -83,6 +83,12 @@ export class Contract {
   @Column({ type: 'text', nullable: true })
   equipments: string;
 
+  @Column({ name: 'notify_via_whatsapp', type: 'boolean', default: false })
+  notifyViaWhatsapp: boolean;
+
+  @Column({ name: 'whatsapp_number', length: 30, nullable: true })
+  whatsappNumber: string;
+
   @Column({ name: 'renewal_history', type: 'text', nullable: true })
   renewalHistory: string;
 

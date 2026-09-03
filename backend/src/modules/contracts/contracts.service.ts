@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Contract } from './entities/contract.entity';
@@ -10,7 +10,14 @@ export class ContractsService {
     private contractsRepository: Repository<Contract>,
   ) {}
 
+  private validateWhatsapp(dto: any, existing?: Contract) {
+    const enabled = dto.notifyViaWhatsapp ?? existing?.notifyViaWhatsapp;
+    const number = dto.whatsappNumber !== undefined ? dto.whatsappNumber : existing?.whatsappNumber;
+    if (enabled && !number) throw new BadRequestException('Informe o número de WhatsApp para receber nota e boleto');
+  }
+
   async create(dto: any): Promise<Contract> {
+    this.validateWhatsapp(dto);
     const contract = this.contractsRepository.create(dto);
     const saved = await this.contractsRepository.save(contract);
     return this.findOne((Array.isArray(saved) ? saved[0] : saved).id);
@@ -34,6 +41,7 @@ export class ContractsService {
 
   async update(id: string, dto: any): Promise<Contract> {
     const contract = await this.findOne(id);
+    this.validateWhatsapp(dto, contract);
     Object.assign(contract, dto);
     return this.contractsRepository.save(contract);
   }

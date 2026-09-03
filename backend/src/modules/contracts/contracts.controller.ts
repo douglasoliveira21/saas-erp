@@ -56,6 +56,8 @@ export class ContractsController {
       issRetido: body.issRetido === 'true' || body.issRetido === true,
       issAliquota: body.issAliquota ? parseFloat(body.issAliquota) : 5,
       equipments: body.equipments || null,
+      notifyViaWhatsapp: body.notifyViaWhatsapp === 'true' || body.notifyViaWhatsapp === true,
+      whatsappNumber: body.whatsappNumber || null,
       createdBy: req.user.id,
     };
 
@@ -120,6 +122,7 @@ export class ContractsController {
     if (dto.issRetido !== undefined) dto.issRetido = dto.issRetido === 'true' || dto.issRetido === true;
     if (dto.issAliquota !== undefined) dto.issAliquota = parseFloat(dto.issAliquota) || 5;
     if (dto.autoCharge !== undefined) dto.autoCharge = dto.autoCharge === 'true' || dto.autoCharge === true;
+    if (dto.notifyViaWhatsapp !== undefined) dto.notifyViaWhatsapp = dto.notifyViaWhatsapp === 'true' || dto.notifyViaWhatsapp === true;
     if (file) {
       dto.fileName = file.originalname;
       dto.filePath = file.path;

@@ -8,6 +8,7 @@ import { Contract } from './entities/contract.entity';
 import { InterModule } from '../inter/inter.module';
 import { FiscalModule } from '../fiscal/fiscal.module';
 import { MailModule } from '../mail/mail.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { MailModule } from '../mail/mail.module';
     InterModule,
     FiscalModule,
     MailModule,
+    WhatsappModule,
   ],
   controllers: [ContractsController],
   providers: [ContractsService, ContractBillingService],
