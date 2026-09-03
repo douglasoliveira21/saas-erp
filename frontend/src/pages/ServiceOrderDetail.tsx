@@ -79,6 +79,7 @@ export function ServiceOrderDetail() {
   const [conclusionDescription, setConclusionDescription] = useState('')
   const [partsCost, setPartsCost] = useState('0')
   const [laborCost, setLaborCost] = useState('0')
+  const [afterPhotos, setAfterPhotos] = useState<FileList | null>(null)
   const [concluding, setConcluding] = useState(false)
 
   async function load() {
@@ -179,8 +180,19 @@ export function ServiceOrderDetail() {
   async function submitConclusion() {
     if (!order) return
     if (!conclusionDescription.trim()) { notify('Descreva o que foi feito', 'error'); return }
+    const hasExistingAfterPhoto = order.attachments.some(a => a.type === 'foto_depois')
+    if (!hasExistingAfterPhoto && !afterPhotos?.length) {
+      notify('Anexe ao menos uma foto do serviço concluído (depois) para concluir a OS', 'error')
+      return
+    }
     setConcluding(true)
     try {
+      if (afterPhotos?.length) {
+        const formData = new FormData()
+        Array.from(afterPhotos).forEach(file => formData.append('files', file))
+        formData.append('type', 'foto_depois')
+        await api.post(`/service-orders/${order.id}/attachments`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      }
       await api.patch(`/service-orders/${order.id}/conclude`, {
         conclusionDescription: conclusionDescription.trim(),
         partsCost: Number(partsCost || 0),
@@ -188,6 +200,7 @@ export function ServiceOrderDetail() {
       })
       notify('Ordem de serviço concluída', 'success')
       setConcludeOpen(false)
+      setAfterPhotos(null)
       load()
     } catch (e: any) {
       notify(getErrorMessage(e, 'Erro ao concluir ordem de serviço'), 'error')
@@ -383,9 +396,7 @@ export function ServiceOrderDetail() {
       {/* Anexos */}
       {attachmentGroups.map(([type, title, hint]) => {
         const items = order.attachments.filter(a => a.type === type)
-        // Fotos de "Depois" só liberam depois que a OS é concluída — evita registrar o "depois"
-        // no meio do serviço, antes de realmente terminar.
-        const locked = type === 'foto_depois' && !isClosed
+        const locked = false
         return (
           <div key={type} className="card space-y-3 p-4">
             <div className="flex items-center justify-between">
@@ -486,7 +497,16 @@ export function ServiceOrderDetail() {
               </div>
             </div>
             <p className="text-sm text-gray-500">Total: <strong className="text-gray-900 dark:text-white">{money(Number(partsCost || 0) + Number(laborCost || 0))}</strong></p>
-            <p className="text-xs text-gray-400">Após confirmar, a seção "Fotos - Depois" será liberada para você registrar o resultado final.</p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Foto do serviço concluído (depois) *</label>
+              {order.attachments.some(a => a.type === 'foto_depois') ? (
+                <p className="text-xs text-gray-500">Já existe ao menos uma foto "Depois" anexada nesta OS. Pode anexar mais aqui, se quiser.</p>
+              ) : (
+                <p className="text-xs text-gray-500">Obrigatório: registre o resultado final antes de confirmar a conclusão.</p>
+              )}
+              <input type="file" multiple accept="image/*" className="input mt-1" onChange={e => setAfterPhotos(e.target.files)} />
+              {afterPhotos && afterPhotos.length > 0 && <p className="mt-1 text-xs text-gray-500">{afterPhotos.length} arquivo(s) selecionado(s)</p>}
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setConcludeOpen(false)}>Cancelar</Button>
               <Button onClick={submitConclusion} loading={concluding}><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Confirmar conclusão</Button>

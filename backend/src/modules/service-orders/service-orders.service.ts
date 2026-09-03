@@ -242,6 +242,11 @@ export class ServiceOrdersService {
   async conclude(id: string, dto: any, userId?: string): Promise<ServiceOrder> {
     const order = await this.findOne(id);
     if (!dto.conclusionDescription) throw new BadRequestException('Descreva o que foi feito na conclusão');
+    // Rede de seguranca do lado do servidor (o front ja exige isso antes de habilitar o botao):
+    // sem a foto do depois, o comparativo "antes x depois" do PDF enviado ao cliente na conclusao
+    // fica incompleto.
+    const hasAfterPhoto = (order.attachments || []).some((a) => a.type === 'foto_depois');
+    if (!hasAfterPhoto) throw new BadRequestException('Anexe ao menos uma foto do serviço concluído (depois) antes de concluir a OS');
 
     const statuses = await this.findAllStatuses(true);
     const finalStatus = statuses.find((s) => s.key === 'concluida' && s.isFinal) || statuses.find((s) => s.isFinal);

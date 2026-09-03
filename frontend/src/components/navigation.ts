@@ -59,8 +59,10 @@ export const navigationSections: NavSection[] = [
     { name: 'Fidelidade', href: '/fidelidade', icon: Star, roles: office, module: 'relacionamento' },
     { name: 'Assinaturas', href: '/assinaturas', icon: CreditCard, roles: office, module: 'relacionamento' },
   ]},
-  { id: 'operacoes', title: 'Operações', icon: Navigation, expandable: true, items: [
+  { id: 'manutencao', title: 'Manutenção', icon: Wrench, expandable: true, items: [
     { name: 'Ordens de serviço', href: '/service-orders', icon: ClipboardCheck, roles: all, module: 'service_orders' },
+  ]},
+  { id: 'operacoes', title: 'Operações', icon: Navigation, expandable: true, items: [
     { name: 'Rotas externas', href: '/routes', icon: Navigation, roles: all, module: 'routes' },
     { name: 'Veículos', href: '/vehicles', icon: Car, roles: ['admin'], module: 'vehicles' },
     { name: 'Controle de SLA', href: '/sla', icon: Clock, roles: office, module: 'sla' },

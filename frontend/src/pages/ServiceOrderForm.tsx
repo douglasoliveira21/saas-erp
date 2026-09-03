@@ -24,6 +24,7 @@ export function ServiceOrderForm() {
   const [customerReport, setCustomerReport] = useState('')
   const [diagnosis, setDiagnosis] = useState('')
   const [observations, setObservations] = useState('')
+  const [beforePhotos, setBeforePhotos] = useState<FileList | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -40,6 +41,7 @@ export function ServiceOrderForm() {
     if (!customerId) { setError('Selecione o cliente'); return }
     if (!serviceType.trim()) { setError('Informe o tipo de serviço'); return }
     if (!customerReport.trim()) { setError('Registre o relato do cliente'); return }
+    if (!beforePhotos?.length) { setError('Anexe ao menos uma foto do estado inicial (antes) do equipamento/local'); return }
     setError('')
     setSaving(true)
     try {
@@ -48,6 +50,17 @@ export function ServiceOrderForm() {
         equipment, brand, model, serialNumber, accessories,
         customerReport, diagnosis, observations,
       })
+      try {
+        const formData = new FormData()
+        Array.from(beforePhotos).forEach(file => formData.append('files', file))
+        formData.append('type', 'foto_antes')
+        await api.post(`/service-orders/${res.data.id}/attachments`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      } catch (uploadError: unknown) {
+        // A OS já foi criada — não desfazemos, só avisamos pra anexar a foto manualmente na tela da OS.
+        notify(getErrorMessage(uploadError, 'OS criada, mas houve erro ao enviar a foto do antes. Anexe na tela da OS.'), 'error')
+        navigate(`/service-orders/${res.data.id}`)
+        return
+      }
       notify('Ordem de serviço criada', 'success')
       navigate(`/service-orders/${res.data.id}`)
     } catch (e: unknown) {
@@ -147,6 +160,15 @@ export function ServiceOrderForm() {
           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Observações</label>
           <textarea className="input" rows={2} value={observations} onChange={e => setObservations(e.target.value)} />
         </div>
+      </div>
+
+      <div className="card space-y-3">
+        <h2 className="font-semibold text-gray-900 dark:text-white">Foto do antes *</h2>
+        <p className="text-xs text-gray-500">Obrigatório: registre o estado inicial do equipamento/local antes de iniciar o serviço.</p>
+        <input type="file" multiple accept="image/*" className="input" onChange={e => setBeforePhotos(e.target.files)} />
+        {beforePhotos && beforePhotos.length > 0 && (
+          <p className="text-xs text-gray-500">{beforePhotos.length} arquivo(s) selecionado(s)</p>
+        )}
       </div>
 
       <div className="flex justify-end gap-3">
