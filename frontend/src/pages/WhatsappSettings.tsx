@@ -28,6 +28,8 @@ export function WhatsappSettings() {
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [loadingQr, setLoadingQr] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [qrCountdown, setQrCountdown] = useState<number | null>(null)
+  const QR_TTL_SECONDS = 28
 
   async function load() {
     setLoading(true)
@@ -70,19 +72,50 @@ export function WhatsappSettings() {
     }
   }
 
-  async function generateQrCode() {
+  // `auto=true` quando chamado pelo contador (QR expirado sozinho) — nesse caso nao mostra
+  // toast de erro/info repetido a cada 28s, so tenta de novo silenciosamente.
+  async function generateQrCode(auto = false) {
     setLoadingQr(true)
-    setQrCode(null)
+    if (!auto) setQrCode(null)
     try {
       const res = await api.get('/whatsapp/qrcode')
-      if (!res.data.base64) { notify('A instância já pode estar conectada, ou a API não retornou um QR Code.', 'info'); return }
+      if (!res.data.base64) {
+        if (!auto) notify('A instância já pode estar conectada, ou a API não retornou um QR Code.', 'info')
+        setQrCode(null)
+        setQrCountdown(null)
+        return
+      }
       setQrCode(res.data.base64)
+      setQrCountdown(QR_TTL_SECONDS)
     } catch (e: any) {
-      notify(getErrorMessage(e, 'Erro ao gerar QR Code'), 'error')
+      if (!auto) notify(getErrorMessage(e, 'Erro ao gerar QR Code'), 'error')
+      setQrCountdown(null)
     } finally {
       setLoadingQr(false)
     }
   }
+
+  // Conta regressiva até o QR expirar e gera um novo automaticamente — o QR code do WhatsApp
+  // (Baileys/Evolution API) expira em segundos, e sem isso o usuário via um código que já não
+  // funcionava mais sem perceber.
+  useEffect(() => {
+    if (qrCountdown === null) return
+    if (qrCountdown <= 0) {
+      if (config?.connectionStatus !== 'conectado') void generateQrCode(true)
+      return
+    }
+    const timer = window.setTimeout(() => setQrCountdown(c => (c === null ? null : c - 1)), 1000)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrCountdown, config?.connectionStatus])
+
+  // Assim que conectar, o QR exibido perde sentido — para o contador e limpa a imagem.
+  useEffect(() => {
+    if (config?.connectionStatus === 'conectado') {
+      setQrCode(null)
+      setQrCountdown(null)
+    }
+  }, [config?.connectionStatus])
 
   async function testConnection() {
     setTesting(true)
@@ -177,7 +210,10 @@ export function WhatsappSettings() {
               Clique em "Gerar QR Code" para conectar
             </div>
           )}
-          <Button variant="secondary" onClick={generateQrCode} loading={loadingQr}><QrCode className="h-4 w-4" aria-hidden="true" />Gerar QR Code</Button>
+          <Button variant="secondary" onClick={() => generateQrCode()} loading={loadingQr}><QrCode className="h-4 w-4" aria-hidden="true" />Gerar QR Code</Button>
+          {qrCode && qrCountdown !== null && (
+            <p className="text-xs text-gray-400">Atualiza automaticamente em {qrCountdown}s</p>
+          )}
         </div>
       </div>
     </div>
