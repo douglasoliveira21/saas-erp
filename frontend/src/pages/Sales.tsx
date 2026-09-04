@@ -23,6 +23,7 @@ interface Sale {
   installments: number
   createdAt: string
   items: any[]
+  observations?: string
 }
 
 const statusLabels: Record<string, string> = {
@@ -115,7 +116,8 @@ export function Sales() {
   function openEmailModal(id: string) {
     const sale = sales.find(s => s.id === id)
     setEmailSaleId(id)
-    setEmailBody(`Olá ${sale?.customer?.name || ''},\n\nSeguem em anexo a nota fiscal e o boleto referentes ao atendimento realizado.\n\nQualquer dúvida estamos à disposição.\n\nAtenciosamente,\nEquipe VGON`)
+    const description = sale?.observations?.trim()
+    setEmailBody(`Olá ${sale?.customer?.name || ''},\n\nSeguem em anexo a nota fiscal e o boleto referentes ao atendimento realizado.${description ? `\n\n${description}` : ''}\n\nQualquer dúvida estamos à disposição.\n\nAtenciosamente,\nEquipe VGON`)
     setShowEmailModal(true)
   }
 
