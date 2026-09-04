@@ -780,18 +780,11 @@ export class ContractBillingService implements OnModuleInit {
    * Send billing email with NF XML + Boleto PDF for a specific period.
    * Works both with contract_billings records AND directly from invoices/payments.
    */
-  async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
-    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
-    if (!contract) throw new Error('Contrato não encontrado');
-    const canWhatsapp = contract.notifyViaWhatsapp && contract.whatsappNumber;
-    if (!contract.customer?.email && !canWhatsapp) throw new Error('Cliente sem email cadastrado e sem WhatsApp habilitado para este contrato');
-
-    // First try to get billing status (which handles both contract_billings and fallback)
-    const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
-    if (!status.hasNf && !status.hasBoleto) {
-      throw new Error(`Nenhuma NF ou Boleto encontrado para o período ${billingPeriod}. Gere a NF e o Boleto antes de enviar.`);
-    }
-
+  /**
+   * Busca o XML/PDF da NF-e/NFS-e e o PDF do boleto de um período de faturamento - reaproveitado
+   * pelo envio manual por email e pelo envio manual por WhatsApp.
+   */
+  private async gatherBillingAttachments(contract: Contract, billingPeriod: string, status: { invoiceId?: string; hasNf: boolean; boletoCode?: string; hasBoleto: boolean }): Promise<{ filename: string; content: Buffer; contentType: string }[]> {
     const attachments: any[] = [];
 
     // Get NFS-e XML/PDF from invoiceId (either from contract_billings or direct lookup)
@@ -888,6 +881,23 @@ export class ContractBillingService implements OnModuleInit {
 
     if (attachments.length === 0) throw new Error('Nenhum documento disponível para envio (NF ou Boleto não encontrados)');
 
+    return attachments;
+  }
+
+  async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
+    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
+    if (!contract) throw new Error('Contrato não encontrado');
+    const canWhatsapp = contract.notifyViaWhatsapp && contract.whatsappNumber;
+    if (!contract.customer?.email && !canWhatsapp) throw new Error('Cliente sem email cadastrado e sem WhatsApp habilitado para este contrato');
+
+    // First try to get billing status (which handles both contract_billings and fallback)
+    const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    if (!status.hasNf && !status.hasBoleto) {
+      throw new Error(`Nenhuma NF ou Boleto encontrado para o período ${billingPeriod}. Gere a NF e o Boleto antes de enviar.`);
+    }
+
+    const attachments = await this.gatherBillingAttachments(contract, billingPeriod, status);
+
     const html = `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
         <div style="background:linear-gradient(90deg,#7c3aed,#5b21b6);padding:20px;border-radius:8px 8px 0 0;text-align:center">
@@ -918,6 +928,48 @@ export class ContractBillingService implements OnModuleInit {
     }
 
     await this.notifyBillingWhatsapp(contract, billingPeriod, attachments);
+
+    return { sent: true };
+  }
+
+  /**
+   * Envio manual, sob demanda, do boleto + XML + nota fiscal de um período por WhatsApp -
+   * diferente de notifyBillingWhatsapp (que só dispara automaticamente se o contrato tiver
+   * "Enviar nota e boleto via WhatsApp" habilitado). Aqui o envio é forçado pelo usuário,
+   * então usa o número informado ou o cadastrado no contrato/cliente, independente do toggle.
+   */
+  async sendBillingWhatsapp(contractId: string, billingPeriod: string, phone?: string): Promise<{ sent: boolean }> {
+    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
+    if (!contract) throw new Error('Contrato não encontrado');
+
+    const targetPhone = (phone || contract.whatsappNumber || (contract.customer as any)?.phone || '').trim();
+    if (!targetPhone) throw new Error('Informe um número de WhatsApp (contrato e cliente sem telefone cadastrado)');
+
+    const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    if (!status.hasNf && !status.hasBoleto) {
+      throw new Error(`Nenhuma NF ou Boleto encontrado para o período ${billingPeriod}. Gere a NF e o Boleto antes de enviar.`);
+    }
+
+    const attachments = await this.gatherBillingAttachments(contract, billingPeriod, status);
+
+    let sent = await this.whatsappService.sendText(
+      targetPhone,
+      `Olá! Segue a Nota Fiscal e o Boleto referentes ao contrato *${contract.title}* (${billingPeriod}).`,
+      { relatedEntity: 'contract', relatedId: contract.id },
+    );
+    for (const attachment of attachments) {
+      const ok = await this.whatsappService.sendMedia(
+        targetPhone,
+        attachment.content,
+        attachment.contentType,
+        attachment.filename,
+        '',
+        { relatedEntity: 'contract', relatedId: contract.id },
+      );
+      sent = sent && ok;
+    }
+
+    if (!sent) throw new Error('Falha ao enviar pelo WhatsApp - verifique a conexão em Configurações > WhatsApp');
 
     return { sent: true };
   }

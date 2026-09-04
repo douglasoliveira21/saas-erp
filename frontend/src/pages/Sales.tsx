@@ -5,11 +5,12 @@ import { useAuth } from '../contexts/AuthContext'
 import { useFeedback } from '../components/ui'
 import { getErrorMessage } from '../services/errors'
 import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit, Send } from 'lucide-react'
+import { WhatsAppIcon } from '../components/icons/WhatsAppIcon'
 
 interface Sale {
   id: string
   technician: { id: string; name: string; email?: string }
-  customer: { id: string; name: string; email?: string }
+  customer: { id: string; name: string; email?: string; phone?: string }
   status: string
   operationalStatus?: string
   fiscalStatus?: string
@@ -56,6 +57,10 @@ export function Sales() {
   const [emailSaleId, setEmailSaleId] = useState('')
   const [emailBody, setEmailBody] = useState('')
   const [emailSending, setEmailSending] = useState(false)
+  const [showWhatsappModal, setShowWhatsappModal] = useState(false)
+  const [whatsappSaleId, setWhatsappSaleId] = useState('')
+  const [whatsappPhone, setWhatsappPhone] = useState('')
+  const [whatsappSending, setWhatsappSending] = useState(false)
 
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [])
 
@@ -136,6 +141,31 @@ export function Sales() {
       notify(message, 'error')
     } finally {
       setEmailSending(false)
+    }
+  }
+
+  function openWhatsappModal(id: string) {
+    const sale = sales.find(s => s.id === id)
+    setWhatsappSaleId(id)
+    setWhatsappPhone(sale?.customer?.phone || '')
+    setShowWhatsappModal(true)
+  }
+
+  async function sendWhatsappDocuments() {
+    setWhatsappSending(true)
+    setError('')
+    try {
+      const res = await api.post(`/sales/${whatsappSaleId}/send-whatsapp`, { phone: whatsappPhone })
+      const count = res.data?.attachments?.length || 0
+      const warning = res.data?.warning
+      notify(`Documentos enviados por WhatsApp com ${count} anexo(s).${warning ? ' Atenção: ' + warning : ''}`, warning ? 'info' : 'success')
+      setShowWhatsappModal(false)
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Erro ao enviar documentos por WhatsApp')
+      setError(message)
+      notify(message, 'error')
+    } finally {
+      setWhatsappSending(false)
     }
   }
 
@@ -286,8 +316,13 @@ export function Sales() {
                         <button onClick={() => generatePayment(s.id, 'pix')} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Gerar PIX"><DollarSign className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
-                        <button onClick={() => openEmailModal(s.id)} disabled={emailSending && emailSaleId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos para cliente">
+                        <button onClick={() => openEmailModal(s.id)} disabled={emailSending && emailSaleId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos por email">
                           <Send className={'w-4 h-4 ' + (emailSending && emailSaleId === s.id ? 'animate-pulse' : '')} />
+                        </button>
+                      )}
+                      {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
+                        <button onClick={() => openWhatsappModal(s.id)} disabled={whatsappSending && whatsappSaleId === s.id} className="p-1 text-green-600 hover:bg-green-50 rounded disabled:opacity-50" title="Enviar documentos por WhatsApp">
+                          <WhatsAppIcon className={'w-4 h-4 ' + (whatsappSending && whatsappSaleId === s.id ? 'animate-pulse' : '')} />
                         </button>
                       )}
 
@@ -352,6 +387,47 @@ export function Sales() {
               <button onClick={sendDocuments} disabled={emailSending} className="btn btn-primary flex items-center gap-2">
                 {emailSending ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Send className="w-4 h-4" />}
                 {emailSending ? 'Enviando...' : 'Enviar Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWhatsappModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Enviar Documentos por WhatsApp</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Boleto, XML e nota fiscal serão enviados como anexos pelo WhatsApp</p>
+              </div>
+              <button onClick={() => setShowWhatsappModal(false)} className="text-gray-400 hover:text-gray-600">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Número do WhatsApp</label>
+                <input
+                  className="input"
+                  value={whatsappPhone}
+                  onChange={e => setWhatsappPhone(e.target.value)}
+                  placeholder="(31) 99999-9999"
+                />
+              </div>
+              <div className="p-3 bg-green-50 rounded-xl text-sm text-green-700">
+                <p className="font-medium mb-1">📎 Anexos automáticos:</p>
+                <ul className="list-disc list-inside text-xs space-y-0.5 text-green-600">
+                  <li>Nota Fiscal (PDF/XML) — se emitida</li>
+                  <li>Boleto (PDF) — se gerado</li>
+                </ul>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+              <button onClick={() => setShowWhatsappModal(false)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={sendWhatsappDocuments} disabled={whatsappSending || !whatsappPhone.trim()} className="btn btn-primary flex items-center gap-2 !bg-green-600 hover:!bg-green-700">
+                {whatsappSending ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <WhatsAppIcon className="w-4 h-4" />}
+                {whatsappSending ? 'Enviando...' : 'Enviar WhatsApp'}
               </button>
             </div>
           </div>

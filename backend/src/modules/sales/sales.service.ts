@@ -21,6 +21,7 @@ import { SaleEvent } from './entities/sale-event.entity';
 import { SaleAttachment } from './entities/sale-attachment.entity';
 import { money, moneySum, moneyMultiply } from '../../common/money';
 import { getCustomerEmailRecipients } from '../../common/customer-emails';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -51,6 +52,7 @@ export class SalesService {
     private nfseService: NfseService,
     private danfePdfService: DanfePdfService,
     private auditService: AuditService,
+    private whatsappService: WhatsappService,
   ) {}
 
   async create(createSaleDto: any, userId?: string): Promise<Sale> {
@@ -541,14 +543,13 @@ export class SalesService {
       }
     }
   }
-  async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[]; warning?: string }> {
+  /**
+   * Busca as notas fiscais autorizadas e os boletos em aberto de uma venda, prontos
+   * para anexar - reaproveitado pelo envio por email e pelo envio por WhatsApp.
+   */
+  private async gatherSaleDocuments(id: string): Promise<{ sale: any; customer: any; attachments: MailAttachment[]; attachmentNames: string[]; pendingInvoiceWarning?: string }> {
     const sale = await this.findOne(id);
     const customer = sale.customer as any;
-
-    const customerEmails = getCustomerEmailRecipients(customer);
-    if (!customerEmails) {
-      throw new BadRequestException('Cliente sem email cadastrado');
-    }
 
     const attachments: MailAttachment[] = [];
     const attachmentNames: string[] = [];
@@ -629,6 +630,17 @@ export class SalesService {
         throw new BadRequestException(`Não foi possível obter o PDF do boleto ${index + 1}/${payments.length}: ` + (error?.message || 'erro desconhecido'));
       }
     }
+
+    return { sale, customer, attachments, attachmentNames, pendingInvoiceWarning };
+  }
+
+  async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[]; warning?: string }> {
+    const { sale, customer, attachments, attachmentNames, pendingInvoiceWarning } = await this.gatherSaleDocuments(id);
+
+    const customerEmails = getCustomerEmailRecipients(customer);
+    if (!customerEmails) {
+      throw new BadRequestException('Cliente sem email cadastrado');
+    }
     if (attachments.length === 0) {
       throw new BadRequestException('Nenhum boleto ou nota fiscal autorizada encontrada para envio');
     }
@@ -671,6 +683,41 @@ export class SalesService {
 
     if (!sent) {
       throw new BadRequestException('Falha ao enviar email para o cliente');
+    }
+
+    return { success: true, sent, attachments: attachmentNames, warning: pendingInvoiceWarning };
+  }
+
+  async sendCustomerDocumentsWhatsapp(id: string, phone?: string): Promise<{ success: boolean; sent: boolean; attachments: string[]; warning?: string }> {
+    const { sale, customer, attachments, attachmentNames, pendingInvoiceWarning } = await this.gatherSaleDocuments(id);
+
+    const targetPhone = (phone || customer?.phone || '').trim();
+    if (!targetPhone) {
+      throw new BadRequestException('Informe um número de WhatsApp (o cliente não tem telefone cadastrado)');
+    }
+    if (attachments.length === 0) {
+      throw new BadRequestException('Nenhum boleto ou nota fiscal autorizada encontrada para envio');
+    }
+
+    let sent = await this.whatsappService.sendText(
+      targetPhone,
+      `Olá! Segue a nota fiscal e o boleto referentes à venda #${sale.id.substring(0, 8)}.`,
+      { relatedEntity: 'sale', relatedId: sale.id },
+    );
+    for (const attachment of attachments) {
+      const ok = await this.whatsappService.sendMedia(
+        targetPhone,
+        attachment.content,
+        attachment.contentType,
+        attachment.filename,
+        '',
+        { relatedEntity: 'sale', relatedId: sale.id },
+      );
+      sent = sent && ok;
+    }
+
+    if (!sent) {
+      throw new BadRequestException('Falha ao enviar pelo WhatsApp - verifique a conexão em Configurações > WhatsApp');
     }
 
     return { success: true, sent, attachments: attachmentNames, warning: pendingInvoiceWarning };
@@ -896,6 +943,12 @@ export class SalesService {
   async resendDocuments(id: string, body: string | undefined, userId: string) {
     const result = await this.sendCustomerDocuments(id, body);
     await this.addEvent(id, 'sale.documents_resent', null, 'Documentos reenviados ao cliente', userId, result);
+    return result;
+  }
+
+  async resendDocumentsWhatsapp(id: string, phone: string | undefined, userId: string) {
+    const result = await this.sendCustomerDocumentsWhatsapp(id, phone);
+    await this.addEvent(id, 'sale.documents_sent_whatsapp', null, 'Documentos enviados ao cliente por WhatsApp', userId, result);
     return result;
   }
 

@@ -3,10 +3,11 @@ import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, Edit, Trash2, X, Check, FileText, Download, Clock, AlertTriangle, RefreshCw, Bell, Monitor, DollarSign, Send } from 'lucide-react'
+import { WhatsAppIcon } from '../components/icons/WhatsAppIcon'
 
 interface Contract {
   id: string
-  customer: { id: string; name: string }
+  customer: { id: string; name: string; phone?: string }
   title: string
   description: string
   totalValue: number
@@ -259,6 +260,25 @@ export function Contracts() {
     }
   }
 
+  async function sendBillingWhatsapp(id: string) {
+    const contract = contracts.find(c => c.id === id)
+    const period = getCurrentPeriod()
+    const defaultPhone = contract?.whatsappNumber || contract?.customer?.phone || ''
+    const phone = window.prompt(`Enviar NF + Boleto por WhatsApp para ${contract?.customer?.name}. Número:`, defaultPhone)
+    if (phone === null) return
+    if (!phone.trim()) { setError('Informe um número de WhatsApp'); return }
+    setError('')
+    try {
+      await trackAction(
+        'Enviando documentos por WhatsApp...',
+        api.post(`/contracts/${id}/billing/send-whatsapp`, { billingPeriod: period, phone: phone.trim() }),
+        'Documentos enviados por WhatsApp com sucesso!'
+      )
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao enviar por WhatsApp')
+    }
+  }
+
   function downloadFile(id: string) {
     window.open('/api/contracts/' + id + '/download', '_blank')
   }
@@ -393,6 +413,16 @@ export function Contracts() {
                       title={hasBillingReady(c.id) ? 'Enviar NF + Boleto por email' : 'Gere NF e Boleto primeiro para habilitar envio'}
                     >
                       <Send className="w-4 h-4" />
+                    </button>
+                  )}
+                  {c.status === 'ativo' && (
+                    <button
+                      onClick={() => sendBillingWhatsapp(c.id)}
+                      disabled={!hasBillingReady(c.id)}
+                      className={`p-1.5 rounded ${hasBillingReady(c.id) ? 'text-green-600 hover:bg-green-50' : 'text-gray-300 cursor-not-allowed'}`}
+                      title={hasBillingReady(c.id) ? 'Enviar NF + Boleto por WhatsApp' : 'Gere NF e Boleto primeiro para habilitar envio'}
+                    >
+                      <WhatsAppIcon className="w-4 h-4" />
                     </button>
                   )}
                   {c.status === 'ativo' && <button onClick={() => openRenew(c)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Renovar"><RefreshCw className="w-4 h-4" /></button>}

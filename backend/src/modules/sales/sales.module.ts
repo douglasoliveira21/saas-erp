@@ -15,6 +15,7 @@ import { InterModule } from '../inter/inter.module';
 import { FiscalModule } from '../fiscal/fiscal.module';
 import { AuditModule } from '../audit/audit.module';
 import { PlatformModule } from '../platform/platform.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PlatformModule } from '../platform/platform.module';
     FiscalModule,
     AuditModule,
     PlatformModule,
+    WhatsappModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

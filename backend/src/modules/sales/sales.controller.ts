@@ -81,6 +81,12 @@ export class SalesController {
     return this.salesService.resendDocuments(id, body?.body, req.user.id);
   }
 
+  @Post(':id/send-whatsapp')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendDocumentsWhatsapp(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.salesService.resendDocumentsWhatsapp(id, body?.phone, req.user.id);
+  }
+
   @Patch(':id/approve-commercial')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   approveCommercial(@Param('id') id: string, @Request() req: any) {

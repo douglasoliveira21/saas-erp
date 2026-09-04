@@ -170,6 +170,12 @@ export class ContractsController {
     return this.billingService.sendBillingEmail(id, body.billingPeriod);
   }
 
+  @Post(':id/billing/send-whatsapp')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendBillingWhatsapp(@Param('id') id: string, @Body() body: any) {
+    return this.billingService.sendBillingWhatsapp(id, body.billingPeriod, body.phone);
+  }
+
   @Post('billing/check')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   runBillingCheck() {
