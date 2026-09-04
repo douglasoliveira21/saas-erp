@@ -122,7 +122,31 @@ export class WhatsappService {
     // instancia inteira (perdendo o historico dela). O erro do logout e ignorado de proposito:
     // numa instancia que nunca conectou (primeiro QR) ele so retorna "nao conectado" ou similar.
     await this.request('DELETE', `/instance/logout/${instanceName}`, apiUrl, apiKey).catch(() => {});
-    const response = await this.request('GET', `/instance/connect/${instanceName}`, apiUrl, apiKey);
+
+    // O QR nem sempre vem pronto na primeira resposta - o Baileys gera ele de forma
+    // assíncrona por trás do /instance/connect, então tenta algumas vezes com espera entre
+    // elas antes de considerar que realmente não veio nada.
+    const tryConnect = async (): Promise<any> => {
+      let response: any = null;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        response = await this.request('GET', `/instance/connect/${instanceName}`, apiUrl, apiKey);
+        if (response?.base64 || response?.qrcode?.base64) return response;
+        if (attempt < 4) await new Promise(r => setTimeout(r, 1500));
+      }
+      return response;
+    };
+
+    let response = await tryConnect();
+    if (!response?.base64 && !response?.qrcode?.base64) {
+      // Logout sozinho não foi suficiente pra soltar a sessão presa - apaga e recria a
+      // instância do zero (perde o histórico dela na Evolution, mas é o único jeito de sair
+      // de um socket Baileys realmente travado) e tenta gerar o QR mais uma vez.
+      this.logger.warn(`QR Code não veio após logout+connect - recriando a instância "${instanceName}" do zero`);
+      await this.request('DELETE', `/instance/delete/${instanceName}`, apiUrl, apiKey).catch(() => {});
+      await this.request('POST', '/instance/create', apiUrl, apiKey, { instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {});
+      response = await tryConnect();
+    }
+
     let base64 = response?.base64 || response?.qrcode?.base64 || null;
     if (base64 && !base64.startsWith('data:image')) base64 = `data:image/png;base64,${base64}`;
     return { base64, pairingCode: response?.pairingCode || response?.code };
