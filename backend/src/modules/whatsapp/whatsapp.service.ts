@@ -76,7 +76,10 @@ export class WhatsappService {
     try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
     if (!res.ok) {
       const message = json?.message || json?.error || text || `HTTP ${res.status}`;
-      throw new Error(Array.isArray(message) ? message.join('; ') : String(message));
+      // Precisa ser uma HttpException do Nest, não um Error puro - um Error puro não é
+      // reconhecido pelo filtro de exceções e vira "Internal Server Error" genérico pro
+      // cliente, escondendo o motivo real (número inválido, instância desconectada, etc).
+      throw new BadRequestException('WhatsApp: ' + (Array.isArray(message) ? message.join('; ') : String(message)));
     }
     return json;
   }
