@@ -41,9 +41,10 @@ interface Order {
   attachments: Attachment[]
 }
 
+// "foto_depois" não entra aqui de propósito - ela só deve aparecer no card de Conclusão
+// (ver renderAttachmentGrid mais abaixo), não na seção genérica de Anexos junto com o resto.
 const attachmentGroups: [string, string, string][] = [
   ['foto_antes', 'Fotos - Antes', 'Registre o estado inicial do equipamento/local.'],
-  ['foto_depois', 'Fotos - Depois', 'Registre o resultado final do serviço.'],
   ['documento', 'Documentos', 'Notas, laudos, comprovantes ou outros arquivos.'],
 ]
 
@@ -73,7 +74,7 @@ export function ServiceOrderDetail() {
   const [changingStatus, setChangingStatus] = useState(false)
 
   const [uploadingType, setUploadingType] = useState<string | null>(null)
-  const fileInputs = { foto_antes: useRef<HTMLInputElement>(null), foto_depois: useRef<HTMLInputElement>(null), documento: useRef<HTMLInputElement>(null) }
+  const fileInputs = { foto_antes: useRef<HTMLInputElement>(null), documento: useRef<HTMLInputElement>(null) }
 
   const [concludeOpen, setConcludeOpen] = useState(false)
   const [conclusionDescription, setConclusionDescription] = useState('')
@@ -396,47 +397,22 @@ export function ServiceOrderDetail() {
       {/* Anexos */}
       {attachmentGroups.map(([type, title, hint]) => {
         const items = order.attachments.filter(a => a.type === type)
-        const locked = false
         return (
           <div key={type} className="card space-y-3 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-semibold text-gray-900 dark:text-white">{title}</h2>
-                <p className="text-xs text-gray-500">{locked ? 'Disponível após concluir a OS (clique em "Concluir OS" acima).' : hint}</p>
+                <p className="text-xs text-gray-500">{hint}</p>
               </div>
-              <Button variant="secondary" size="sm" disabled={locked} loading={uploadingType === type} onClick={() => fileInputs[type as keyof typeof fileInputs].current?.click()}>
+              <Button variant="secondary" size="sm" loading={uploadingType === type} onClick={() => fileInputs[type as keyof typeof fileInputs].current?.click()}>
                 <Upload className="h-4 w-4" aria-hidden="true" />Enviar
               </Button>
-              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden disabled={locked} accept={type === 'documento' ? undefined : 'image/*'} capture={type === 'documento' ? undefined : 'environment'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
+              <input ref={fileInputs[type as keyof typeof fileInputs]} type="file" multiple hidden accept={type === 'documento' ? undefined : 'image/*'} capture={type === 'documento' ? undefined : 'environment'} onChange={e => { uploadFiles(type, e.target.files); e.target.value = '' }} />
             </div>
-            {locked ? (
-              <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Envie as fotos de "Depois" depois de concluir a ordem de serviço.</p>
-            ) : items.length === 0 ? (
+            {items.length === 0 ? (
               <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Nenhum arquivo enviado</p>
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                {items.map(att => (
-                  <div key={att.id} className="group relative overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-                    {att.mimeType?.startsWith('image/') ? (
-                      <a href={`/api/service-orders/${order.id}/attachments/${att.id}/inline`} target="_blank" rel="noreferrer">
-                        <img src={`/api/service-orders/${order.id}/attachments/${att.id}/inline`} alt={att.filename} className="h-28 w-full object-cover" />
-                      </a>
-                    ) : (
-                      <a href={`/api/service-orders/${order.id}/attachments/${att.id}/inline`} target="_blank" rel="noreferrer" className="flex h-28 flex-col items-center justify-center gap-1 bg-gray-50 p-2 text-center text-xs text-gray-500 dark:bg-gray-900">
-                        <span className="line-clamp-2">{att.filename}</span>
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => deleteAttachment(att.id)}
-                      className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
-                      aria-label="Remover anexo"
-                    >
-                      <X className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <AttachmentGrid orderId={order.id} items={items} onDelete={deleteAttachment} />
             )}
           </div>
         )
@@ -454,6 +430,21 @@ export function ServiceOrderDetail() {
                 <div><span className="text-xs text-gray-500">Mão de obra</span><p className="font-medium text-gray-900 dark:text-white">{money(order.laborCost)}</p></div>
                 <div><span className="text-xs text-gray-500">Total</span><p className="font-semibold text-primary-600">{money(order.totalCost)}</p></div>
               </div>
+              {(() => {
+                const afterItems = order.attachments.filter(a => a.type === 'foto_depois')
+                return (
+                  <div className="border-t border-gray-100 pt-3 dark:border-gray-700">
+                    <span className="text-xs text-gray-500">Fotos - Depois</span>
+                    <div className="mt-2">
+                      {afterItems.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-xs text-gray-400 dark:border-gray-700">Nenhuma foto enviada</p>
+                      ) : (
+                        <AttachmentGrid orderId={order.id} items={afterItems} onDelete={deleteAttachment} />
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
             </>
           ) : (
             <p className="text-sm text-gray-500">Ordem cancelada sem registro de conclusão.</p>
@@ -514,6 +505,34 @@ export function ServiceOrderDetail() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AttachmentGrid({ orderId, items, onDelete }: { orderId: string; items: Attachment[]; onDelete: (attachmentId: string) => void }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+      {items.map(att => (
+        <div key={att.id} className="group relative overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          {att.mimeType?.startsWith('image/') ? (
+            <a href={`/api/service-orders/${orderId}/attachments/${att.id}/inline`} target="_blank" rel="noreferrer">
+              <img src={`/api/service-orders/${orderId}/attachments/${att.id}/inline`} alt={att.filename} className="h-28 w-full object-cover" />
+            </a>
+          ) : (
+            <a href={`/api/service-orders/${orderId}/attachments/${att.id}/inline`} target="_blank" rel="noreferrer" className="flex h-28 flex-col items-center justify-center gap-1 bg-gray-50 p-2 text-center text-xs text-gray-500 dark:bg-gray-900">
+              <span className="line-clamp-2">{att.filename}</span>
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => onDelete(att.id)}
+            className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition group-hover:opacity-100"
+            aria-label="Remover anexo"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
     </div>
   )
 }

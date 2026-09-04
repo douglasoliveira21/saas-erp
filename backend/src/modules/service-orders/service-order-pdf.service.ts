@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { existsSync, readFileSync } from 'fs';
@@ -14,6 +14,8 @@ const PAGE_BOTTOM = 780;
 
 @Injectable()
 export class ServiceOrderPdfService {
+  private readonly logger = new Logger(ServiceOrderPdfService.name);
+
   constructor(
     @InjectRepository(ServiceOrder) private ordersRepository: Repository<ServiceOrder>,
     @InjectRepository(ServiceOrderStatus) private statusesRepository: Repository<ServiceOrderStatus>,
@@ -157,11 +159,19 @@ export class ServiceOrderPdfService {
         const rowY = doc.y;
         const leftPhoto = before[i];
         const rightPhoto = after[i];
-        if (leftPhoto && existsSync(leftPhoto.storagePath)) {
-          try { doc.image(leftPhoto.storagePath, MARGIN, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch { /* arquivo corrompido/ilegível, ignora */ }
+        if (leftPhoto) {
+          if (existsSync(leftPhoto.storagePath)) {
+            try { doc.image(leftPhoto.storagePath, MARGIN, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch (error: any) { this.logger.warn(`Foto "antes" ${leftPhoto.id} (OS ${order.id}) ilegível pelo PDFKit: ${error.message}`); }
+          } else {
+            this.logger.warn(`Foto "antes" ${leftPhoto.id} (OS ${order.id}) referenciada no banco, mas o arquivo não existe em disco: ${leftPhoto.storagePath}`);
+          }
         }
-        if (rightPhoto && existsSync(rightPhoto.storagePath)) {
-          try { doc.image(rightPhoto.storagePath, MARGIN + colWidth + 16, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch { /* arquivo corrompido/ilegível, ignora */ }
+        if (rightPhoto) {
+          if (existsSync(rightPhoto.storagePath)) {
+            try { doc.image(rightPhoto.storagePath, MARGIN + colWidth + 16, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch (error: any) { this.logger.warn(`Foto "depois" ${rightPhoto.id} (OS ${order.id}) ilegível pelo PDFKit: ${error.message}`); }
+          } else {
+            this.logger.warn(`Foto "depois" ${rightPhoto.id} (OS ${order.id}) referenciada no banco, mas o arquivo não existe em disco: ${rightPhoto.storagePath}`);
+          }
         }
         doc.y = rowY + thumbHeight + 8;
       }
