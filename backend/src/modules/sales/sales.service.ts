@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Sale } from './entities/sale.entity';
@@ -26,6 +26,8 @@ type MailAttachment = { filename: string; content: Buffer; contentType: string }
 
 @Injectable()
 export class SalesService {
+  private readonly logger = new Logger(SalesService.name);
+
   constructor(
     @InjectRepository(Sale)
     private salesRepository: Repository<Sale>,
@@ -539,7 +541,7 @@ export class SalesService {
       }
     }
   }
-  async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[] }> {
+  async sendCustomerDocuments(id: string, customBody?: string): Promise<{ success: boolean; sent: boolean; attachments: string[]; warning?: string }> {
     const sale = await this.findOne(id);
     const customer = sale.customer as any;
 
@@ -558,6 +560,20 @@ export class SalesService {
        ORDER BY issued_at DESC NULLS LAST, created_at DESC`,
       [id],
     );
+
+    // Se existe nota fiscal para a venda mas nenhuma está autorizada ainda (ainda processando/rejeitada),
+    // o loop abaixo não anexa nada e isso passava batido - o email saía só com o boleto, sem log nenhum.
+    let pendingInvoiceWarning: string | undefined;
+    if (invoices.length === 0) {
+      const pending = await this.dataSource.query(
+        `SELECT type, number, status FROM invoices WHERE sale_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [id],
+      );
+      if (pending[0]) {
+        pendingInvoiceWarning = `Nota fiscal (${pending[0].type}) ainda não autorizada (status: ${pending[0].status}) - email seguirá sem XML/PDF da nota`;
+        this.logger.warn(`Venda ${id}: ${pendingInvoiceWarning}`);
+      }
+    }
 
     for (const invoice of invoices) {
       const label = invoice.type === 'nfse' ? 'NFSe' : 'NFe';
@@ -639,6 +655,7 @@ export class SalesService {
           ` : ''}
           <p style="color: #4b5563;">Arquivos enviados:</p>
           <ul style="color: #4b5563;">${attachmentNames.map(name => `<li>${name}</li>`).join('')}</ul>
+          ${pendingInvoiceWarning ? '<p style="color:#b45309;font-size:13px;">A nota fiscal ainda está em processamento e será enviada assim que autorizada.</p>' : ''}
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
           <p style="color: #9ca3af; font-size: 12px; text-align: center;">VGON Solucoes em Informatica</p>
         </div>
@@ -656,7 +673,7 @@ export class SalesService {
       throw new BadRequestException('Falha ao enviar email para o cliente');
     }
 
-    return { success: true, sent, attachments: attachmentNames };
+    return { success: true, sent, attachments: attachmentNames, warning: pendingInvoiceWarning };
   }
 
   private async cancelExternalDocuments(saleId: string, userId?: string): Promise<void> {

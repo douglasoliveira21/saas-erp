@@ -125,7 +125,8 @@ export function Sales() {
     try {
       const res = await api.post(`/sales/${emailSaleId}/send-documents`, { body: emailBody })
       const count = res.data?.attachments?.length || 0
-      notify(`Email enviado para o cliente com ${count} anexo(s).`, 'success')
+      const warning = res.data?.warning
+      notify(`Email enviado para o cliente com ${count} anexo(s).${warning ? ' Atenção: ' + warning : ''}`, warning ? 'info' : 'success')
       setShowEmailModal(false)
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Erro ao enviar email para o cliente')

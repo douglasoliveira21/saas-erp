@@ -282,11 +282,16 @@ export class ContractBillingService implements OnModuleInit {
           [customer.id, boletoCode, boletoValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
         );
 
-        // Try to get PDF
-        try {
-          await new Promise(r => setTimeout(r, 3000)); // Wait 3s for Inter to process
-          boletoPdf = await this.interService.getBoletoPdf(boletoCode);
-        } catch { this.logger.warn('PDF do boleto ainda não disponível'); }
+        // Try to get PDF - Inter processa o boleto de forma assíncrona, então tenta
+        // algumas vezes com espera entre cada uma antes de desistir.
+        for (let attempt = 1; attempt <= 3 && !boletoPdf; attempt++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            boletoPdf = await this.interService.getBoletoPdf(boletoCode);
+          } catch {
+            if (attempt === 3) this.logger.warn('PDF do boleto ainda não disponível após 3 tentativas');
+          }
+        }
       }
     } catch (error) {
       this.logger.error(`Erro ao gerar boleto para contrato ${contract.title}: ${error.message}`);
@@ -337,7 +342,31 @@ export class ContractBillingService implements OnModuleInit {
       );
     });
 
-    // 4. Send email to customer
+    // 4. Fetch the NF XML/PDF once (used by both the customer email and the WhatsApp send below)
+    let nfXml: Buffer | null = null;
+    let nfPdf: Buffer | null = null;
+    let nfNumber = '';
+    if (invoiceId) {
+      try {
+        const invoice = await this.dataSource.query(`SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [invoiceId]);
+        if (invoice[0]) {
+          nfNumber = invoice[0].number || 'nota';
+          const xml = invoice[0].xml_authorized || invoice[0].xml_sent;
+          if (xml) nfXml = Buffer.from(xml, 'utf-8');
+          if (invoice[0].access_key && invoice[0].certificate_id) {
+            try {
+              nfPdf = await this.nfseService.downloadPdf(invoice[0].access_key, invoice[0].certificate_id);
+            } catch { this.logger.warn(`PDF da NFS-e ainda não disponível (contrato ${contract.title})`); }
+          }
+        } else {
+          this.logger.warn(`NFS-e do contrato ${contract.title} ainda não autorizada no momento do envio - email/WhatsApp seguirão sem XML/PDF da nota`);
+        }
+      } catch (error: any) {
+        this.logger.error(`Erro ao buscar NF para anexar ao envio (contrato ${contract.title}): ${error.message}`);
+      }
+    }
+
+    // 5. Send email to customer
     if (customer.email) {
       try {
         const attachments: any[] = [];
@@ -346,6 +375,20 @@ export class ContractBillingService implements OnModuleInit {
           attachments.push({
             filename: `boleto-${billingPeriod}.pdf`,
             content: boletoPdf,
+            contentType: 'application/pdf',
+          });
+        }
+        if (nfXml) {
+          attachments.push({
+            filename: `NFSe_${nfNumber}_serie1.xml`,
+            content: nfXml,
+            contentType: 'application/xml',
+          });
+        }
+        if (nfPdf) {
+          attachments.push({
+            filename: `NFSe_${nfNumber}.pdf`,
+            content: nfPdf,
             contentType: 'application/pdf',
           });
         }
@@ -368,6 +411,7 @@ export class ContractBillingService implements OnModuleInit {
                 <tr><td style="padding:8px;color:#6b7280">Descrição:</td><td style="padding:8px">${description}</td></tr>
               </table>
               ${boletoPdf ? '<p>O boleto segue em anexo.</p>' : '<p>O boleto será disponibilizado em breve.</p>'}
+              ${nfXml || nfPdf ? '<p>A nota fiscal (XML/PDF) segue em anexo.</p>' : '<p>A nota fiscal será enviada assim que for autorizada.</p>'}
               <p style="color:#6b7280;font-size:14px">Efetue o pagamento até a data de vencimento para evitar juros e multa.</p>
               <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
               <p style="color:#9ca3af;font-size:12px;text-align:center">VGON Soluções em Informática</p>
@@ -396,27 +440,12 @@ export class ContractBillingService implements OnModuleInit {
       }
     }
 
-    // 5. Send NF (XML + PDF) and Boleto (PDF) via WhatsApp, if enabled for this contract
+    // 6. Send NF (XML + PDF) and Boleto (PDF) via WhatsApp, if enabled for this contract
     if (contract.notifyViaWhatsapp && contract.whatsappNumber) {
       const whatsappAttachments: { filename: string; content: Buffer; contentType: string }[] = [];
       if (boletoPdf) whatsappAttachments.push({ filename: `boleto-${billingPeriod}.pdf`, content: boletoPdf, contentType: 'application/pdf' });
-      if (invoiceId) {
-        try {
-          const invoice = await this.dataSource.query(`SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [invoiceId]);
-          if (invoice[0]) {
-            const xml = invoice[0].xml_authorized || invoice[0].xml_sent;
-            if (xml) whatsappAttachments.push({ filename: `NFSe_${invoice[0].number || 'nota'}_serie${invoice[0].series || 1}.xml`, content: Buffer.from(xml, 'utf-8'), contentType: 'application/xml' });
-            if (invoice[0].access_key && invoice[0].certificate_id) {
-              try {
-                const pdf = await this.nfseService.downloadPdf(invoice[0].access_key, invoice[0].certificate_id);
-                whatsappAttachments.push({ filename: `NFSe_${invoice[0].number || 'nota'}.pdf`, content: pdf, contentType: 'application/pdf' });
-              } catch { /* PDF ainda não disponível */ }
-            }
-          }
-        } catch (error: any) {
-          this.logger.error(`Erro ao buscar NF para envio por WhatsApp (contrato ${contract.title}): ${error.message}`);
-        }
-      }
+      if (nfXml) whatsappAttachments.push({ filename: `NFSe_${nfNumber}_serie1.xml`, content: nfXml, contentType: 'application/xml' });
+      if (nfPdf) whatsappAttachments.push({ filename: `NFSe_${nfNumber}.pdf`, content: nfPdf, contentType: 'application/pdf' });
       await this.notifyBillingWhatsapp(contract, billingPeriod, whatsappAttachments);
     }
 
