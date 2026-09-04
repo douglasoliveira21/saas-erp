@@ -23,13 +23,13 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   create(@Body() createProductDto: any) {
     return this.productsService.create(createProductDto);
   }
 
   @Post('import')
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   importProducts(@Body() body: { products: any[] }) {
     return this.productsService.importFromXml(body.products);
   }

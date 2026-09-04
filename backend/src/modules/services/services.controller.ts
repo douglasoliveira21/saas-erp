@@ -23,7 +23,7 @@ export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   create(@Body() createServiceDto: any) {
     return this.servicesService.create(createServiceDto);
   }
