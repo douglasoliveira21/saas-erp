@@ -2,8 +2,10 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { existsSync, readFileSync } from 'fs';
+import sharp from 'sharp';
 import PDFDocument = require('pdfkit');
 import { ServiceOrder } from './entities/service-order.entity';
+import { ServiceOrderAttachment } from './entities/service-order-attachment.entity';
 import { ServiceOrderStatus } from './entities/service-order-status.entity';
 import { FiscalConfig } from '../fiscal/entities/fiscal-config.entity';
 
@@ -159,20 +161,8 @@ export class ServiceOrderPdfService {
         const rowY = doc.y;
         const leftPhoto = before[i];
         const rightPhoto = after[i];
-        if (leftPhoto) {
-          if (existsSync(leftPhoto.storagePath)) {
-            try { doc.image(leftPhoto.storagePath, MARGIN, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch (error: any) { this.logger.warn(`Foto "antes" ${leftPhoto.id} (OS ${order.id}) ilegível pelo PDFKit: ${error.message}`); }
-          } else {
-            this.logger.warn(`Foto "antes" ${leftPhoto.id} (OS ${order.id}) referenciada no banco, mas o arquivo não existe em disco: ${leftPhoto.storagePath}`);
-          }
-        }
-        if (rightPhoto) {
-          if (existsSync(rightPhoto.storagePath)) {
-            try { doc.image(rightPhoto.storagePath, MARGIN + colWidth + 16, rowY, { fit: [colWidth, thumbHeight], align: 'center' }); } catch (error: any) { this.logger.warn(`Foto "depois" ${rightPhoto.id} (OS ${order.id}) ilegível pelo PDFKit: ${error.message}`); }
-          } else {
-            this.logger.warn(`Foto "depois" ${rightPhoto.id} (OS ${order.id}) referenciada no banco, mas o arquivo não existe em disco: ${rightPhoto.storagePath}`);
-          }
-        }
+        if (leftPhoto) await this.drawPhoto(doc, leftPhoto, 'antes', order.id, MARGIN, rowY, colWidth, thumbHeight);
+        if (rightPhoto) await this.drawPhoto(doc, rightPhoto, 'depois', order.id, MARGIN + colWidth + 16, rowY, colWidth, thumbHeight);
         doc.y = rowY + thumbHeight + 8;
       }
     }
@@ -198,5 +188,28 @@ export class ServiceOrderPdfService {
 
     doc.end();
     return done;
+  }
+
+  /**
+   * Desenha uma foto de "antes/depois" no PDF. Se o PDFKit não conseguir ler o arquivo direto
+   * (formato não suportado, tipicamente HEIC de fotos tiradas direto da câmera do iPhone antes
+   * da normalização feita no upload - ver service-orders.service.ts addAttachments), tenta
+   * converter para JPEG em memória via sharp como último recurso antes de desistir da foto.
+   */
+  private async drawPhoto(doc: PDFKit.PDFDocument, photo: ServiceOrderAttachment, label: 'antes' | 'depois', orderId: string, x: number, y: number, width: number, height: number): Promise<void> {
+    if (!existsSync(photo.storagePath)) {
+      this.logger.warn(`Foto "${label}" ${photo.id} (OS ${orderId}) referenciada no banco, mas o arquivo não existe em disco: ${photo.storagePath}`);
+      return;
+    }
+    try {
+      doc.image(photo.storagePath, x, y, { fit: [width, height], align: 'center' });
+      return;
+    } catch { /* tenta converter abaixo antes de desistir */ }
+    try {
+      const jpegBuffer = await sharp(photo.storagePath).jpeg().toBuffer();
+      doc.image(jpegBuffer, x, y, { fit: [width, height], align: 'center' });
+    } catch (error: any) {
+      this.logger.warn(`Foto "${label}" ${photo.id} (OS ${orderId}) ilegível mesmo após conversão para JPEG: ${error.message}`);
+    }
   }
 }

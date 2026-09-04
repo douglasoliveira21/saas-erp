@@ -1,7 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { unlink } from 'fs/promises';
+import { extname } from 'path';
+import sharp from 'sharp';
 import { ServiceOrder } from './entities/service-order.entity';
 import { ServiceOrderStatus } from './entities/service-order-status.entity';
 import { ServiceOrderAttachment } from './entities/service-order-attachment.entity';
@@ -15,6 +17,8 @@ const ATTACHMENT_TYPES = ['foto_antes', 'foto_depois', 'documento', 'geral'];
 
 @Injectable()
 export class ServiceOrdersService {
+  private readonly logger = new Logger(ServiceOrdersService.name);
+
   constructor(
     @InjectRepository(ServiceOrder) private ordersRepository: Repository<ServiceOrder>,
     @InjectRepository(ServiceOrderStatus) private statusesRepository: Repository<ServiceOrderStatus>,
@@ -297,6 +301,27 @@ export class ServiceOrdersService {
   async addAttachments(id: string, files: any[], type: string, userId?: string) {
     await this.findOne(id);
     if (!ATTACHMENT_TYPES.includes(type)) throw new BadRequestException('Tipo de anexo inválido');
+
+    // Fotos tiradas direto da câmera do celular (o input usa capture="environment") costumam
+    // vir em HEIC/HEIF no iPhone, ou outros formatos que o PDFKit não sabe decodificar
+    // ("Unknown image format") - o arquivo salvava normalmente e abria certinho no navegador,
+    // mas sumia sem erro nenhum do PDF gerado. Normaliza toda imagem pra JPEG no upload, então
+    // tanto o PDF quanto qualquer visualização ficam num formato universalmente suportado.
+    const stripExt = (name: string) => { const ext = extname(name); return ext ? name.slice(0, -ext.length) : name; };
+    for (const file of files) {
+      if (!(file.mimetype || '').startsWith('image/') || file.mimetype === 'image/jpeg') continue;
+      const jpegPath = stripExt(file.path) + '.jpg';
+      try {
+        await sharp(file.path).rotate().jpeg({ quality: 85 }).toFile(jpegPath);
+        await unlink(file.path).catch(() => {});
+        file.path = jpegPath;
+        file.mimetype = 'image/jpeg';
+        file.originalname = stripExt(file.originalname) + '.jpg';
+      } catch (error: any) {
+        this.logger.warn(`Não foi possível converter "${file.originalname}" para JPEG, mantendo o formato original: ${error.message}`);
+      }
+    }
+
     const attachments = await Promise.all(
       files.map((file) =>
         this.attachmentsRepository.save(

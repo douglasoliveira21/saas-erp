@@ -35,6 +35,7 @@
     "pg": "^8.11.3",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
+    "sharp": "^0.33.5",
     "typeorm": "^0.3.19",
     "web-push": "^3.6.7",
     "xml-crypto": "^6.1.2"
