@@ -23,6 +23,11 @@ async function bootstrap() {
     await ds.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS mora_percentage DECIMAL(5,2) DEFAULT 0.03`).catch(() => {});
     await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS purchase_id UUID`).catch(() => {});
     await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS bill_group_id VARCHAR(100)`).catch(() => {});
+    // recurring_group_id já era usado pelo parcelamento de contas (createBill), mas nunca tinha
+    // sido de fato criado no banco fora do "synchronize" do TypeORM em dev - em produção
+    // (synchronize desligado) toda conta parcelada em mais de 1x quebrava silenciosamente.
+    await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS recurring_group_id VARCHAR(100)`).catch(() => {});
+    await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS is_fixed_cost BOOLEAN DEFAULT FALSE`).catch(() => {});
     await ds.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS origin VARCHAR(20) DEFAULT 'manual'`).catch(() => {});
     await ds.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS registration_status VARCHAR(20) DEFAULT 'completo'`).catch(() => {});
     await ds.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS financial_status VARCHAR(20)`).catch(() => {});

@@ -22,6 +22,7 @@ interface Bill {
   category: string; paymentMethod: string; installments: number;
   installmentNumber: number; recurringGroupId: string; documentNumber: string;
   barcode: string; observations: string; createdAt: string;
+  isFixedCost?: boolean;
   supplier: Supplier | null;
 }
 
@@ -87,7 +88,7 @@ export function Bills() {
   const [billForm, setBillForm] = useState({
     supplierId: '', description: '', value: '', dueDate: '',
     category: '', installments: '1', barcode: '', documentNumber: '',
-    paymentMethod: '', observations: ''
+    paymentMethod: '', observations: '', isFixedCost: false, recurringMonths: '12'
   })
 
   // Pay Modal
@@ -143,7 +144,7 @@ export function Bills() {
   // ==================== BILL CRUD ====================
   function openNewBill() {
     setEditingBill(null)
-    setBillForm({ supplierId: '', description: '', value: '', dueDate: '', category: '', installments: '1', barcode: '', documentNumber: '', paymentMethod: '', observations: '' })
+    setBillForm({ supplierId: '', description: '', value: '', dueDate: '', category: '', installments: '1', barcode: '', documentNumber: '', paymentMethod: '', observations: '', isFixedCost: false, recurringMonths: '12' })
     setError(''); setShowBillModal(true)
   }
 
@@ -154,7 +155,8 @@ export function Bills() {
       value: String(b.value), dueDate: b.dueDate,
       category: b.category || '', installments: String(b.installments),
       barcode: b.barcode || '', documentNumber: b.documentNumber || '',
-      paymentMethod: b.paymentMethod || '', observations: b.observations || ''
+      paymentMethod: b.paymentMethod || '', observations: b.observations || '',
+      isFixedCost: b.isFixedCost || false, recurringMonths: '12'
     })
     setError(''); setShowBillModal(true)
   }
@@ -165,7 +167,7 @@ export function Bills() {
     }
     setSaving(true)
     try {
-      const payload = {
+      const payload: any = {
         supplierId: billForm.supplierId,
         description: billForm.description.trim(),
         value: parseFloat(billForm.value),
@@ -176,6 +178,10 @@ export function Bills() {
         documentNumber: billForm.documentNumber || null,
         paymentMethod: billForm.paymentMethod || null,
         observations: billForm.observations || null,
+      }
+      if (!editingBill && billForm.isFixedCost) {
+        payload.isFixedCost = true
+        payload.recurringMonths = parseInt(billForm.recurringMonths) || 12
       }
       if (editingBill) {
         await api.patch('/bills/' + editingBill.id, payload)
@@ -434,7 +440,10 @@ export function Bills() {
                     <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="table-cell text-sm text-gray-600 dark:text-gray-400">{formatDate(b.dueDate)}</td>
                       <td className="table-cell text-gray-700 dark:text-gray-300">{b.supplier?.name || '-'}</td>
-                      <td className="table-cell font-medium text-gray-900 dark:text-white">{b.description}</td>
+                      <td className="table-cell font-medium text-gray-900 dark:text-white">
+                        {b.description}
+                        {b.isFixedCost && <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 align-middle">FIXO</span>}
+                      </td>
                       <td className="table-cell text-sm text-gray-600 dark:text-gray-400">{b.category || '-'}</td>
                       <td className="table-cell font-semibold text-gray-900 dark:text-white">{formatCurrency(Number(b.value))}</td>
                       <td className="table-cell text-sm text-gray-600">{b.installments > 1 ? `${b.installmentNumber}/${b.installments}` : '-'}</td>
@@ -618,12 +627,28 @@ export function Bills() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parcelas</label>
-                  <input className="input" type="number" min="1" max="48" value={billForm.installments} onChange={e => setBillForm({ ...billForm, installments: e.target.value })} disabled={!!editingBill} />
-                  {!editingBill && parseInt(billForm.installments) > 1 && (
+                  <input className="input" type="number" min="1" max="48" value={billForm.installments} onChange={e => setBillForm({ ...billForm, installments: e.target.value })} disabled={!!editingBill || billForm.isFixedCost} />
+                  {!editingBill && !billForm.isFixedCost && parseInt(billForm.installments) > 1 && (
                     <p className="text-xs text-gray-500 mt-1">Valor por parcela: {formatCurrency(parseFloat(billForm.value || '0') / parseInt(billForm.installments || '1'))}</p>
                   )}
                 </div>
               </div>
+
+              {!editingBill && (
+                <div className="p-3 bg-gray-50 dark:bg-gray-700/40 rounded-lg space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" checked={billForm.isFixedCost} onChange={e => setBillForm({ ...billForm, isFixedCost: e.target.checked, installments: '1' })} />
+                    Custo fixo (repete todo mês, ex: aluguel, internet)
+                  </label>
+                  {billForm.isFixedCost && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Gerar por quantos meses</label>
+                      <input className="input w-32" type="number" min="1" max="60" value={billForm.recurringMonths} onChange={e => setBillForm({ ...billForm, recurringMonths: e.target.value })} />
+                      <p className="text-xs text-gray-500 mt-1">Cria {billForm.recurringMonths || 12} contas de {formatCurrency(parseFloat(billForm.value || '0'))} cada, uma por mês a partir do vencimento informado.</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

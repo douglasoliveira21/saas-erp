@@ -42,6 +42,9 @@ export class Bill {
   @Column({ name: 'recurring_group_id', length: 100, nullable: true })
   recurringGroupId: string;
 
+  @Column({ name: 'is_fixed_cost', type: 'boolean', default: false })
+  isFixedCost: boolean;
+
   @Column({ name: 'purchase_id', type: 'uuid', nullable: true })
   purchaseId: string;
 

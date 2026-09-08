@@ -43,6 +43,32 @@ export class SuppliersService {
   async createBill(dto: any, userId: string): Promise<Bill | Bill[]> {
     const installments = dto.installments || 1;
 
+    if (dto.isFixedCost) {
+      // Custo fixo mensal: diferente de parcelamento (que divide um valor total em N partes),
+      // aqui cada mês gera uma conta INDEPENDENTE com o valor cheio (ex: aluguel, internet) -
+      // reaproveita o mesmo recurringGroupId só para agrupar visualmente as ocorrências.
+      const months = Math.max(1, Math.min(Number(dto.recurringMonths) || 12, 60));
+      const groupId = 'FIXED-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+      const bills: Bill[] = [];
+      for (let i = 0; i < months; i++) {
+        const dueDate = new Date(dto.dueDate + 'T12:00:00');
+        dueDate.setMonth(dueDate.getMonth() + i);
+        const bill = this.billRepo.create({
+          ...dto,
+          value: Number(dto.value),
+          dueDate: dueDate.toISOString().split('T')[0],
+          installments: 1,
+          installmentNumber: 1,
+          recurringGroupId: groupId,
+          isFixedCost: true,
+          createdBy: userId,
+        });
+        const saved = await this.billRepo.save(bill as any) as unknown as Bill;
+        bills.push(saved);
+      }
+      return bills;
+    }
+
     if (installments > 1) {
       // Parcelamento
       const groupId = 'BILL-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
