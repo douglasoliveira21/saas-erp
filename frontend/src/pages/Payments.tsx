@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2 } from 'lucide-react'
+import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle } from 'lucide-react'
 import { useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 
@@ -20,6 +20,9 @@ interface Payment {
   pixCopiaECola?: string
   origem?: string
   contractTitle?: string
+  invoiceNumber?: string
+  settledManually?: boolean
+  paymentNote?: string
 }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', vencido: 'Vencido', cancelado: 'Cancelado', a_receber: 'A Receber' }
@@ -32,6 +35,7 @@ export function Payments() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [monthFilter, setMonthFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [error, setError] = useState('')
   const [reconciling, setReconciling] = useState(false)
 
@@ -107,6 +111,21 @@ export function Payments() {
       setError(error.response?.data?.message || 'Erro ao excluir')
     }
   }
+  async function markAsReceived(payment: Payment) {
+    const note = window.prompt('Como foi recebido esse pagamento? (ex: dinheiro, transferência, outro banco) - opcional')
+    if (note === null) return
+    if (!await confirmAction({ title: 'Marcar como recebido', message: `Confirma que o pagamento de ${payment.customerName} (R$ ${Number(payment.value).toFixed(2)}) foi recebido por fora do Inter?`, confirmLabel: 'Marcar como recebido' })) return
+    try {
+      await runOperation(
+        () => api.post(`/inter/payments/${payment.id}/mark-received`, { note: note.trim() || undefined }),
+        { title: 'Marcando como recebido', processingMessage: 'Atualizando venda/parcela e financeiro.', successMessage: 'Pagamento marcado como recebido.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao marcar como recebido' },
+      )
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao marcar como recebido')
+    }
+  }
+
   async function reconcileInter() {
     setReconciling(true)
     setError('')
@@ -136,6 +155,7 @@ export function Payments() {
   }
 
   const filtered = payments.filter(p => {
+    if (statusFilter && p.status !== statusFilter) return false
     if (!search) return true
     const s = search.toLowerCase()
     return (p.customerName || '').toLowerCase().includes(s) ||
@@ -173,6 +193,13 @@ export function Payments() {
             <label className="block text-xs font-medium text-gray-500 mb-1">Mês (vencimento)</label>
             <input type="month" className="input w-40" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+            <select className="input w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="">Todos</option>
+              {Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -191,13 +218,14 @@ export function Payments() {
                 <th className="table-cell font-semibold text-gray-700">Valor</th>
                 <th className="table-cell font-semibold text-gray-700">Vencimento</th>
                 <th className="table-cell font-semibold text-gray-700">Status</th>
+                <th className="table-cell font-semibold text-gray-700">Nota Fiscal</th>
                 <th className="table-cell font-semibold text-gray-700">Código</th>
                 <th className="table-cell font-semibold text-gray-700">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
+                <tr><td colSpan={9} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50">
                   <td className="table-cell"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + (p.type === 'pix' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700')}>{p.type === 'pix' ? 'PIX' : 'Boleto'}</span></td>
@@ -214,10 +242,17 @@ export function Payments() {
                   <td className="table-cell text-sm font-medium">{p.customerName}</td>
                   <td className="table-cell font-semibold">R$ {Number(p.value).toFixed(2)}</td>
                   <td className="table-cell text-sm">{p.dueDate ? new Date(p.dueDate).toLocaleDateString('pt-BR') : '-'}</td>
-                  <td className="table-cell"><span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (statusColors[p.status] || 'bg-blue-100 text-blue-700')}>{statusLabels[p.status] || p.status}</span></td>
+                  <td className="table-cell">
+                    <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (statusColors[p.status] || 'bg-blue-100 text-blue-700')}>{statusLabels[p.status] || p.status}</span>
+                    {p.settledManually && <p className="text-xs text-gray-500 mt-0.5" title={p.paymentNote || ''}>Recebido manualmente{p.paymentNote ? ` (${p.paymentNote})` : ''}</p>}
+                  </td>
+                  <td className="table-cell text-sm">{p.invoiceNumber || '-'}</td>
                   <td className="table-cell font-mono text-xs text-gray-500">{(p.codigoSolicitacao || '').substring(0, 8)}...</td>
                   <td className="table-cell">
                     <div className="flex gap-1">
+                      {!['pago', 'cancelado'].includes(p.status) && (
+                        <button onClick={() => markAsReceived(p)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Marcar como recebido (pago por outra forma)"><CheckCircle className="w-4 h-4" /></button>
+                      )}
                       {p.type === 'boleto' && (
                         <>
                           <button onClick={() => viewPdf(p.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>

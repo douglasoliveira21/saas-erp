@@ -84,9 +84,13 @@ export class InterController {
     const whereClause = monthFilter ? `WHERE to_char(p.due_date, 'YYYY-MM') = $3` : '';
     const params = monthFilter ? [safeLimit, (safePage - 1) * safeLimit, monthFilter] : [safeLimit, (safePage - 1) * safeLimit];
     const payments = await this.saleRepo.manager.query(
-      `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt",
+      `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt", p.settled_manually as "settledManually", p.payment_note as "paymentNote",
        CASE WHEN p.sale_id IS NOT NULL THEN 'venda' ELSE COALESCE((SELECT 'contrato' FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1), 'outro') END as "origem",
-       CASE WHEN p.sale_id IS NOT NULL THEN NULL ELSE (SELECT c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1) END as "contractTitle"
+       CASE WHEN p.sale_id IS NOT NULL THEN NULL ELSE (SELECT c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1) END as "contractTitle",
+       COALESCE(
+         (SELECT i.number FROM invoices i WHERE i.sale_id = p.sale_id AND i.status = 'autorizada' ORDER BY i.issued_at DESC NULLS LAST, i.created_at DESC LIMIT 1),
+         (SELECT i.number FROM contract_billings cb JOIN invoices i ON i.id = cb.invoice_id WHERE cb.boleto_code = p.codigo_solicitacao AND i.status = 'autorizada' ORDER BY i.issued_at DESC NULLS LAST, i.created_at DESC LIMIT 1)
+       ) as "invoiceNumber"
        FROM payments p ${whereClause} ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
       params,
     );
@@ -118,6 +122,17 @@ export class InterController {
   async deletePayment(@Param('id') id: string, @Req() req: Request) {
     await this.interService.deletePayment(id, (req as any).user?.id);
     return { success: true };
+  }
+
+  /**
+   * POST /api/inter/payments/:id/mark-received
+   * Marca manualmente um boleto/PIX como recebido, quando o cliente pagou por fora do Inter.
+   */
+  @Post('payments/:id/mark-received')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async markPaymentAsReceived(@Param('id') id: string, @Body('note') note: string, @Req() req: Request) {
+    return this.interService.markAsReceivedManually(id, (req as any).user?.id, note);
   }
 
   /**

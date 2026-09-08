@@ -356,6 +356,50 @@ export class InterService implements OnModuleInit {
     });
   }
 
+  /**
+   * Marca manualmente um pagamento (boleto/PIX) como recebido, para quando o cliente pagou por
+   * fora do Inter (dinheiro, transferência direta, outro banco, etc.) e por isso o webhook/
+   * conciliação automática nunca vai confirmar. Reaplica os mesmos efeitos que applyPaymentStatus
+   * já faz quando o Inter confirma um pagamento "pago" (venda, parcela, financeiro), só que sem
+   * depender de dados vindos da API do Inter.
+   */
+  async markAsReceivedManually(id: string, userId?: string, note?: string): Promise<{ saleId?: string }> {
+    const tenantId = this.currentTenantId();
+    return this.saleRepo.manager.transaction(async (manager) => {
+      const rows = await manager.query(
+        `SELECT id, sale_id, type, status, installment_id, value, codigo_solicitacao FROM payments WHERE id=$1${tenantId ? ' AND tenant_id=$2' : ''} FOR UPDATE`,
+        tenantId ? [id, tenantId] : [id],
+      );
+      const payment = rows[0];
+      if (!payment) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
+      if (payment.status === 'pago') throw new HttpException('Este pagamento já está marcado como pago', HttpStatus.BAD_REQUEST);
+      if (payment.status === 'cancelado') throw new HttpException('Não é possível marcar um pagamento cancelado como recebido', HttpStatus.BAD_REQUEST);
+
+      const paidAt = new Date();
+      await manager.query(
+        `UPDATE payments SET status='pago', paid_at=COALESCE(paid_at, $2), settled_manually=true, settled_by=$3, payment_note=$4, updated_at=NOW() WHERE id=$1`,
+        [id, paidAt, userId || null, note || null],
+      );
+
+      const saleId = payment.sale_id; const installmentId = payment.installment_id; const paymentValue = payment.value;
+      const isSplitInstallment = !!installmentId;
+      if (saleId && !isSplitInstallment) {
+        await manager.query(`UPDATE sales SET billing_status='pago', updated_at=NOW() WHERE id=$1::uuid`, [saleId]);
+      }
+      if (saleId) {
+        const idempotencyKey = `manual:${id}`;
+        if (isSplitInstallment) {
+          await this.financialService.payInstallment(installmentId, Number(paymentValue), 'outro', null as any, { paidAt: paidAt.toISOString(), idempotencyKey, observations: note || 'Recebido manualmente (pago por outro meio)' }, manager);
+        } else {
+          await this.financialService.settleSale(saleId, 'outro', null as any, idempotencyKey, paidAt, undefined, manager);
+        }
+      }
+
+      await this.auditInter('inter.payment_marked_received_manually', id, { userId, note, codigoSolicitacao: payment.codigo_solicitacao, saleId });
+      return { saleId };
+    });
+  }
+
   // Remove de uma vez todos os pagamentos ja cancelados, para o caso de ja haver varios acumulados.
   async deleteAllCancelledPayments(userId?: string): Promise<{ deleted: number }> {
     const tenantId = this.currentTenantId();
