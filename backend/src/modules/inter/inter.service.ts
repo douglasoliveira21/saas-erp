@@ -421,21 +421,31 @@ export class InterService implements OnModuleInit {
     let installmentId = payment.installment_id;
     if (!installmentId) {
       if (!payment.sale_id) throw new HttpException('Este pagamento não está vinculado a uma venda/parcela - reverta pelo Financeiro diretamente', HttpStatus.BAD_REQUEST);
-      const candidates = await this.saleRepo.manager.query(
-        `SELECT id FROM installments WHERE sale_id=$1 AND due_date=$2 AND status='pago'`,
-        [payment.sale_id, payment.due_date],
+      // Importante: preenche o vínculo de TODOS os boletos "irmãos" dessa venda que ainda estão
+      // sem installment_id, não só o que está sendo revertido agora. Se deixasse os outros sem
+      // vínculo, o passo final de reverseMovement (que limpa pagamentos "orfãos" de uma venda de
+      // boleto único, sem parcela alguma) também pegaria os irmãos ainda não vinculados e
+      // revertia todos juntos por engano - reverter 1 de 3 acabava desfazendo os 3.
+      const siblings = await this.saleRepo.manager.query(
+        `SELECT id, due_date FROM payments WHERE sale_id=$1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
+        [payment.sale_id],
       );
-      if (candidates.length !== 1) {
+      for (const sibling of siblings) {
+        const candidates = await this.saleRepo.manager.query(
+          `SELECT id FROM installments WHERE sale_id=$1 AND due_date=$2`,
+          [payment.sale_id, sibling.due_date],
+        );
+        if (candidates.length === 1) {
+          await this.saleRepo.manager.query(`UPDATE payments SET installment_id=$1 WHERE id=$2`, [candidates[0].id, sibling.id]);
+          if (sibling.id === paymentId) installmentId = candidates[0].id;
+        }
+      }
+      if (!installmentId) {
         throw new HttpException(
-          candidates.length === 0
-            ? 'Não foi possível identificar a parcela deste boleto automaticamente (venda antiga sem vínculo). Reverta pela tela Financeiro > parcela correspondente.'
-            : 'Mais de uma parcela paga com o mesmo vencimento - não é possível identificar automaticamente qual reverter. Use a tela Financeiro.',
+          'Não foi possível identificar a parcela deste boleto automaticamente (venda antiga sem vínculo, ou mais de uma parcela com o mesmo vencimento). Reverta pela tela Financeiro > parcela correspondente.',
           HttpStatus.CONFLICT,
         );
       }
-      installmentId = candidates[0].id;
-      // Aproveita pra corrigir o vínculo que faltava, assim da próxima vez o botão já funciona direto.
-      await this.saleRepo.manager.query(`UPDATE payments SET installment_id=$1 WHERE id=$2`, [installmentId, paymentId]);
     }
 
     await this.financialService.revertInstallmentToReceivable(installmentId, reason, userId as any);
