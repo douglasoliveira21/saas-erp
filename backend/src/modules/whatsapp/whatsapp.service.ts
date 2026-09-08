@@ -84,6 +84,15 @@ export class WhatsappService {
     return json;
   }
 
+  // Consulta e normaliza o estado de conexão da instância - centralizado aqui porque tanto
+  // getQrCode() (pra decidir se pode pular o logout) quanto checkConnectionStatus() (pra exibir
+  // o status na tela) precisam do mesmo mapeamento, e divergiam antes.
+  private async fetchConnectionState(apiUrl: string, apiKey: string, instanceName: string): Promise<{ state: string; raw: string; response: any }> {
+    const response = await this.request('GET', `/instance/connectionState/${instanceName}`, apiUrl, apiKey);
+    const raw = response?.instance?.state ?? response?.instance?.connectionStatus ?? response?.state ?? response?.connectionStatus ?? '';
+    return { state: String(raw || '').toLowerCase(), raw: String(raw || ''), response };
+  }
+
   // Cria a instância na Evolution API caso ainda não exista.
   private async ensureInstance(): Promise<void> {
     const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
@@ -112,9 +121,21 @@ export class WhatsappService {
     }
   }
 
-  async getQrCode(): Promise<{ base64: string | null; pairingCode?: string }> {
+  async getQrCode(): Promise<{ base64: string | null; pairingCode?: string; alreadyConnected?: boolean }> {
     await this.ensureInstance();
     const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
+
+    // Nunca desloga a instância sem antes confirmar que ela genuinamente não está conectada.
+    // Antes esta função sempre chamava /instance/logout incondicionalmente - bastava a tela de
+    // WhatsApp achar (mesmo por engano, ex: um erro de leitura do status) que estava
+    // desconectada e tentar gerar um QR automaticamente (ela refaz isso a cada ~28s enquanto
+    // não vê "conectado") para essa chamada derrubar uma sessão que na verdade estava
+    // funcionando normalmente no celular/Evolution - exatamente o "fica desconectando sozinho".
+    const currentStateValue = await this.fetchConnectionState(apiUrl, apiKey, instanceName).then(r => r.state).catch(() => '');
+    if (currentStateValue === 'open' || currentStateValue === 'connected') {
+      return { base64: null, alreadyConnected: true };
+    }
+
     // Quando o WhatsApp cai (desconecta do celular), o socket Baileys da instancia fica preso
     // num estado "fechado" que faz /instance/connect sozinho nao gerar um QR valido pra
     // reconectar a MESMA instancia — a Evolution API precisa de um logout explicito antes pra
@@ -156,11 +177,15 @@ export class WhatsappService {
     const row = await this.getOrCreateRow();
     try {
       const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
-      const response = await this.request('GET', `/instance/connectionState/${instanceName}`, apiUrl, apiKey);
-      const state = response?.instance?.state || response?.state;
-      row.connectionStatus = state === 'open' ? 'conectado' : state === 'connecting' ? 'conectando' : 'desconectado';
+      const { state, raw, response } = await this.fetchConnectionState(apiUrl, apiKey, instanceName);
+      row.connectionStatus = state === 'open' || state === 'connected' ? 'conectado' : state === 'connecting' ? 'conectando' : 'desconectado';
       row.phoneNumber = response?.instance?.owner ? String(response.instance.owner).split('@')[0] : row.phoneNumber;
       row.lastError = null;
+      if (row.connectionStatus === 'desconectado' && raw !== 'close' && raw !== 'closed') {
+        // O manager da Evolution costuma mostrar "conectado" com um estado que a gente ainda não
+        // mapeia aqui - loga a resposta crua pra dar pra ajustar sem precisar adivinhar.
+        this.logger.warn(`Estado de conexão não reconhecido, marcando como desconectado por segurança: ${JSON.stringify(response)}`);
+      }
     } catch (error: any) {
       row.connectionStatus = 'erro';
       row.lastError = error.message;

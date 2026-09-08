@@ -80,7 +80,12 @@ export function WhatsappSettings() {
     try {
       const res = await api.get('/whatsapp/qrcode')
       if (!res.data.base64) {
-        if (!auto) notify('A instância já pode estar conectada, ou a API não retornou um QR Code.', 'info')
+        if (res.data.alreadyConnected) {
+          if (!auto) notify('A instância já está conectada - nada a fazer.', 'success')
+          load()
+        } else if (!auto) {
+          notify('A API não retornou um QR Code. Tente novamente em alguns segundos.', 'info')
+        }
         setQrCode(null)
         setQrCountdown(null)
         return
