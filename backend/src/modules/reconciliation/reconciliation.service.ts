@@ -142,7 +142,15 @@ export class ReconciliationService {
         }
       }
 
-      if (bestScore >= minScore && bestMatch) {        if (stmt.type === 'credito' && bestMatch.sale_id && bestMatch.is_forecast) {
+      if (bestScore >= minScore && bestMatch) {
+        // settleSale quita a venda INTEIRA (todos os boletos/parcelas de uma vez). O score
+        // combina vários critérios (data, descrição, referência) e pode passar de minScore
+        // mesmo com o valor bem diferente do previsto - o que já aconteceu: o depósito de
+        // 1 de 3 boletos parcelados batia o suficiente em data/descrição pra "casar" com a
+        // previsão do valor TOTAL da venda, e a venda inteira era quitada por engano. Só
+        // quita a venda se o valor do extrato realmente bater com o valor previsto.
+        const amountMatches = bestMatch.sale_id && Math.abs(Number(stmt.amount) - Number(bestMatch.value)) < 0.01;
+        if (stmt.type === 'credito' && bestMatch.sale_id && bestMatch.is_forecast && amountMatches) {
           await this.financialService.settleSale(bestMatch.sale_id, stmt.category === 'pix' ? 'pix' : 'transferencia', null as any, `bank:${stmt.bankAccount || 'unknown'}:${stmt.transactionId || stmt.id}`, new Date(stmt.date + 'T12:00:00'));
           bestMatch.is_forecast = false;
         }

@@ -203,6 +203,13 @@ export class FinancialController {
     return this.financialService.reverseMovement(id, body.reason || 'Estorno manual', req.user.id);
   }
 
+  @Post('installments/:id/revert-to-receivable')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Permissions('financial.reverse')
+  revertInstallmentToReceivable(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.financialService.revertInstallmentToReceivable(id, body.reason || 'Marcado como pago incorretamente', req.user.id);
+  }
+
   @Patch('movements/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   updateMovement(@Param('id') id: string, @Body() body: any, @Request() req: any) {

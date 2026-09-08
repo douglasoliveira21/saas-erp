@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle } from 'lucide-react'
+import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle, Undo2 } from 'lucide-react'
 import { useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 
@@ -23,6 +23,7 @@ interface Payment {
   invoiceNumber?: string
   settledManually?: boolean
   paymentNote?: string
+  installmentId?: string
 }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', vencido: 'Vencido', cancelado: 'Cancelado', a_receber: 'A Receber' }
@@ -123,6 +124,26 @@ export function Payments() {
       await load()
     } catch (error: any) {
       setError(error.response?.data?.message || 'Erro ao marcar como recebido')
+    }
+  }
+
+  async function revertToReceivable(payment: Payment) {
+    if (!payment.installmentId) {
+      setError('Este pagamento não está vinculado a uma parcela - use o estorno na tela Financeiro para reverter a venda inteira.')
+      return
+    }
+    const reason = window.prompt('Motivo da reversão (obrigatório) - ex: pago apenas o boleto 1 de 3, os outros ainda não foram pagos')
+    if (reason === null) return
+    if (!reason.trim()) { setError('Informe o motivo da reversão'); return }
+    if (!await confirmAction({ title: 'Reverter para A Receber', message: `Isso desfaz o pagamento de ${payment.customerName} (R$ ${Number(payment.value).toFixed(2)}) e volta a parcela para "a receber". Use apenas quando o pagamento foi marcado errado.`, confirmLabel: 'Reverter', danger: true })) return
+    try {
+      await runOperation(
+        () => api.post(`/financial/installments/${payment.installmentId}/revert-to-receivable`, { reason: reason.trim() }),
+        { title: 'Revertendo pagamento', processingMessage: 'Corrigindo parcela, venda e boleto.', successMessage: 'Pagamento revertido para A Receber.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao reverter pagamento' },
+      )
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao reverter pagamento')
     }
   }
 
@@ -252,6 +273,9 @@ export function Payments() {
                     <div className="flex gap-1">
                       {!['pago', 'cancelado'].includes(p.status) && (
                         <button onClick={() => markAsReceived(p)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Marcar como recebido (pago por outra forma)"><CheckCircle className="w-4 h-4" /></button>
+                      )}
+                      {p.status === 'pago' && p.installmentId && (
+                        <button onClick={() => revertToReceivable(p)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter para A Receber (marcado como pago por engano)"><Undo2 className="w-4 h-4" /></button>
                       )}
                       {p.type === 'boleto' && (
                         <>

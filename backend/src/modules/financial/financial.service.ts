@@ -847,18 +847,52 @@ export class FinancialService implements OnModuleInit {
           installment.status = installment.paidValue <= 0 ? 'pendente' : installment.paidValue + 0.001 >= Number(installment.value) ? 'pago' : 'parcial';
           installment.paidAt = installment.status === 'pago' ? installment.paidAt : null;
           await installmentRepo.save(installment);
+          // O estorno da parcela por si só não desfazia o boleto correspondente na tela de
+          // Pagamentos, que continuava marcado "pago" mesmo depois da parcela voltar a
+          // pendente/parcial - volta o boleto ligado a essa parcela pra "a_receber"/"vencido".
+          if (installment.status !== 'pago') {
+            await manager.query(
+              `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
+                 paid_at = NULL, settled_manually = false, payment_note = NULL, updated_at = NOW()
+               WHERE installment_id = $1 AND status NOT IN ('cancelado')`,
+              [installment.id],
+            );
+          }
         }
         const totals = await installmentRepo.createQueryBuilder('i').select('COALESCE(SUM(i.paidValue),0)','paid').addSelect('COALESCE(SUM(i.value),0)','total').where('i.accountId=:accountId',{accountId:movement.accountId}).getRawOne();
         const paid=Number(totals.paid), total=Number(totals.total), fullyPaid=paid+0.001>=total;
         await manager.getRepository(AccountReceivable).update(movement.accountId,{paidValue:paid,pendingValue:Math.max(0,total-paid),status:fullyPaid?'pago':paid>0?'parcial':'pendente',paidAt:fullyPaid?movement.paidAt:null});
         const sale = await manager.getRepository(Sale).findOne({where:{id:movement.saleId},lock:{mode:'pessimistic_write'}});
         if (sale) { sale.paymentStatus=fullyPaid?'pago':paid>0?'parcial':'pendente'; if (!fullyPaid && sale.status === 'pago' as any) sale.status=(sale.billingStatus==='emitido'||sale.billingStatus==='pago'?'boleto_emitido':'pendente') as any; if (!fullyPaid && sale.billingStatus==='pago') sale.billingStatus='emitido'; await manager.getRepository(Sale).save(sale); }
+        // Venda sem parcela isolada (boleto único, não parcelado): o pagamento fica em
+        // payments.installment_id IS NULL, então o loop acima não cobre esse caso.
+        if (!fullyPaid) {
+          await manager.query(
+            `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
+               paid_at = NULL, settled_manually = false, payment_note = NULL, updated_at = NOW()
+             WHERE sale_id = $1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
+            [movement.saleId],
+          );
+        }
       }
       return { reversal, duplicate: false };
     });
     if (!result.duplicate) await this.auditService.safeCreate({ userId, action: 'financial.movement_reversed', entity: 'financial_movement', entityId: id, newData: { reversalId: result.reversal.id, reason } });
     return result.reversal;
   }
+  /**
+   * Conveniência para "devolver pra a receber" uma parcela marcada como paga por engano
+   * (ex: reconciliação bancária/Inter quitou a venda inteira quando só uma parcela foi paga
+   * de fato) - acha o lançamento de recebimento da parcela e reaproveita o mesmo estorno que
+   * já é usado no financeiro, que corrige parcela, conta, venda e (desde a extensão acima)
+   * o boleto correspondente na tela de Pagamentos.
+   */
+  async revertInstallmentToReceivable(installmentId: string, reason: string, userId: string) {
+    const movement = await this.movementRepo.findOne({ where: { installmentId, isForecast: false, type: 'receita' }, order: { createdAt: 'DESC' } });
+    if (!movement) throw new NotFoundException('Nenhum lançamento de recebimento encontrado para esta parcela');
+    return this.reverseMovement(movement.id, reason, userId);
+  }
+
   async closeMonth(period: string, userId: string, notes?: string) {
     if (!/^\\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new BadRequestException('Período inválido; use AAAA-MM');
     const existing = await this.monthlyClosingRepo.findOne({ where: { period } });
