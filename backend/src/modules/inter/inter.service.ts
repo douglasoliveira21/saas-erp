@@ -400,6 +400,49 @@ export class InterService implements OnModuleInit {
     });
   }
 
+  /**
+   * Reverte um boleto/PIX marcado "pago" por engano de volta pra "a receber", pelo id do
+   * PAGAMENTO (não da parcela) - usado pela tela de Pagamentos, onde nem todo boleto antigo tem
+   * installment_id preenchido (esse vínculo só passou a ser gravado depois; boletos de vendas
+   * parceladas criadas antes disso não têm essa coluna populada). Quando falta o vínculo, tenta
+   * achar a parcela certa pela data de vencimento (que sempre bateu com o boleto correspondente)
+   * e, se achar exatamente uma, aproveita e já preenche installment_id pra próxima vez.
+   */
+  async revertPaymentToReceivable(paymentId: string, reason: string, userId?: string): Promise<{ saleId?: string }> {
+    const tenantId = this.currentTenantId();
+    const rows = await this.saleRepo.manager.query(
+      `SELECT id, sale_id, status, installment_id, due_date FROM payments WHERE id=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
+      tenantId ? [paymentId, tenantId] : [paymentId],
+    );
+    const payment = rows[0];
+    if (!payment) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
+    if (payment.status !== 'pago') throw new HttpException('Este pagamento não está marcado como pago', HttpStatus.BAD_REQUEST);
+
+    let installmentId = payment.installment_id;
+    if (!installmentId) {
+      if (!payment.sale_id) throw new HttpException('Este pagamento não está vinculado a uma venda/parcela - reverta pelo Financeiro diretamente', HttpStatus.BAD_REQUEST);
+      const candidates = await this.saleRepo.manager.query(
+        `SELECT id FROM installments WHERE sale_id=$1 AND due_date=$2 AND status='pago'`,
+        [payment.sale_id, payment.due_date],
+      );
+      if (candidates.length !== 1) {
+        throw new HttpException(
+          candidates.length === 0
+            ? 'Não foi possível identificar a parcela deste boleto automaticamente (venda antiga sem vínculo). Reverta pela tela Financeiro > parcela correspondente.'
+            : 'Mais de uma parcela paga com o mesmo vencimento - não é possível identificar automaticamente qual reverter. Use a tela Financeiro.',
+          HttpStatus.CONFLICT,
+        );
+      }
+      installmentId = candidates[0].id;
+      // Aproveita pra corrigir o vínculo que faltava, assim da próxima vez o botão já funciona direto.
+      await this.saleRepo.manager.query(`UPDATE payments SET installment_id=$1 WHERE id=$2`, [installmentId, paymentId]);
+    }
+
+    await this.financialService.revertInstallmentToReceivable(installmentId, reason, userId as any);
+    await this.auditInter('inter.payment_reverted_to_receivable', paymentId, { userId, reason, installmentId, saleId: payment.sale_id });
+    return { saleId: payment.sale_id };
+  }
+
   // Remove de uma vez todos os pagamentos ja cancelados, para o caso de ja haver varios acumulados.
   async deleteAllCancelledPayments(userId?: string): Promise<{ deleted: number }> {
     const tenantId = this.currentTenantId();

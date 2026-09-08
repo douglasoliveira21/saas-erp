@@ -136,6 +136,18 @@ export class InterController {
   }
 
   /**
+   * POST /api/inter/payments/:id/revert-to-receivable
+   * Reverte um boleto/PIX marcado "pago" por engano (ex: bug de reconciliação que quitou a
+   * venda inteira quando só uma parcela foi paga de fato) de volta pra "a receber".
+   */
+  @Post('payments/:id/revert-to-receivable')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async revertPaymentToReceivable(@Param('id') id: string, @Body('reason') reason: string, @Req() req: Request) {
+    return this.interService.revertPaymentToReceivable(id, reason || 'Marcado como pago incorretamente', (req as any).user?.id);
+  }
+
+  /**
    * POST /api/inter/generate/:saleId
    * Gera boleto ou PIX para uma venda.
    */
