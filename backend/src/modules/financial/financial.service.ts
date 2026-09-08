@@ -853,7 +853,7 @@ export class FinancialService implements OnModuleInit {
           if (installment.status !== 'pago') {
             await manager.query(
               `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
-                 paid_at = NULL, settled_manually = false, payment_note = NULL, updated_at = NOW()
+                 paid_at = NULL, settled_manually = false, payment_note = NULL, reverted_at = NOW(), updated_at = NOW()
                WHERE installment_id = $1 AND status NOT IN ('cancelado')`,
               [installment.id],
             );
@@ -869,7 +869,7 @@ export class FinancialService implements OnModuleInit {
         if (!fullyPaid) {
           await manager.query(
             `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
-               paid_at = NULL, settled_manually = false, payment_note = NULL, updated_at = NOW()
+               paid_at = NULL, settled_manually = false, payment_note = NULL, reverted_at = NOW(), updated_at = NOW()
              WHERE sale_id = $1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
             [movement.saleId],
           );

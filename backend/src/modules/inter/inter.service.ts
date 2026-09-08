@@ -656,6 +656,10 @@ export class InterService implements OnModuleInit {
   async syncBoletoStatus(codigoSolicitacao: string): Promise<any> {
     const local = await this.saleRepo.manager.query(`SELECT type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
     if (!local[0]) throw new HttpException('Cobrança não encontrada', HttpStatus.NOT_FOUND);
+    // Pedido explícito do usuário ("Consultar status") vale mais que uma proteção contra
+    // reconciliação automática deixada por uma reversão manual anterior - limpa antes de checar,
+    // assim o resultado desse clique manual passa a valer pra reconciliação automática de novo.
+    await this.saleRepo.manager.query(`UPDATE payments SET reverted_at = NULL WHERE codigo_solicitacao = $1`, [codigoSolicitacao]);
     const boleto = local[0].type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
     const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
     await this.auditInter('inter.status_sync', statusUpdate.saleId || null, {
@@ -695,6 +699,7 @@ export class InterService implements OnModuleInit {
          WHERE type IN ('boleto','pix')
            AND status IN ('a_receber', 'vencido')
            AND COALESCE(codigo_solicitacao, '') <> ''
+           AND reverted_at IS NULL
            ${tenantId ? 'AND tenant_id = $2' : ''}
          ORDER BY updated_at ASC NULLS FIRST, created_at ASC
          LIMIT $1`,
