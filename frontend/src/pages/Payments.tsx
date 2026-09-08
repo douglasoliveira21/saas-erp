@@ -177,7 +177,8 @@ export function Payments() {
     const s = search.toLowerCase()
     return (p.customerName || '').toLowerCase().includes(s) ||
       (p.codigoSolicitacao || '').includes(s) ||
-      (p.customerDoc || '').includes(s)
+      (p.customerDoc || '').includes(s) ||
+      (p.invoiceNumber || '').toLowerCase().includes(s)
   })
 
   return (
@@ -204,7 +205,7 @@ export function Payments() {
         <div className="flex gap-4 flex-wrap items-end">
           <div className="relative flex-1 min-w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input className="input pl-10" placeholder="Buscar por cliente, código..." value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="input pl-10" placeholder="Buscar por cliente, código, nota fiscal..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Mês (vencimento)</label>
