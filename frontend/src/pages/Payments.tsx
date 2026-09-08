@@ -237,13 +237,12 @@ export function Payments() {
                 <th className="table-cell font-semibold text-gray-700">Vencimento</th>
                 <th className="table-cell font-semibold text-gray-700">Status</th>
                 <th className="table-cell font-semibold text-gray-700">Nota Fiscal</th>
-                <th className="table-cell font-semibold text-gray-700">Código</th>
                 <th className="table-cell font-semibold text-gray-700">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filtered.length === 0 ? (
-                <tr><td colSpan={9} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
+                <tr><td colSpan={8} className="table-cell text-center text-gray-500 py-8">Nenhum pagamento emitido</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50">
                   <td className="table-cell"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + (p.type === 'pix' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700')}>{p.type === 'pix' ? 'PIX' : 'Boleto'}</span></td>
@@ -265,7 +264,6 @@ export function Payments() {
                     {p.settledManually && <p className="text-xs text-gray-500 mt-0.5" title={p.paymentNote || ''}>Recebido manualmente{p.paymentNote ? ` (${p.paymentNote})` : ''}</p>}
                   </td>
                   <td className="table-cell text-sm">{p.invoiceNumber || '-'}</td>
-                  <td className="table-cell font-mono text-xs text-gray-500">{(p.codigoSolicitacao || '').substring(0, 8)}...</td>
                   <td className="table-cell">
                     <div className="flex gap-1">
                       {!['pago', 'cancelado'].includes(p.status) && (
