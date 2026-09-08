@@ -20,7 +20,7 @@ interface Payment {
   pixCopiaECola?: string
   origem?: string
   contractTitle?: string
-  invoiceNumber?: string
+  invoiceNumber?: string | number
   settledManually?: boolean
   paymentNote?: string
   installmentId?: string
@@ -178,7 +178,7 @@ export function Payments() {
     return (p.customerName || '').toLowerCase().includes(s) ||
       (p.codigoSolicitacao || '').includes(s) ||
       (p.customerDoc || '').includes(s) ||
-      (p.invoiceNumber || '').toLowerCase().includes(s)
+      String(p.invoiceNumber || '').toLowerCase().includes(s)
   })
 
   return (
