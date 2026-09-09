@@ -148,6 +148,17 @@ export class InterController {
   }
 
   /**
+   * POST /api/inter/payments/:id/reissue
+   * Cancela o boleto atual e gera um novo com data de vencimento (e valor, opcionalmente) novos.
+   */
+  @Post('payments/:id/reissue')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async reissuePayment(@Param('id') id: string, @Body() body: { dueDate: string; value?: number }, @Req() req: Request) {
+    return this.interService.reissuePayment(id, body.dueDate, body.value, (req as any).user?.id);
+  }
+
+  /**
    * POST /api/inter/generate/:saleId
    * Gera boleto ou PIX para uma venda.
    */

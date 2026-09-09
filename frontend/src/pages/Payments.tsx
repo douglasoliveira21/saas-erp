@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle, Undo2 } from 'lucide-react'
+import { Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle, Undo2, CalendarClock } from 'lucide-react'
 import { useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 
@@ -30,7 +30,7 @@ const statusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', pago: 'bg-green-100 text-green-700', vencido: 'bg-red-100 text-red-700', cancelado: 'bg-gray-100 text-gray-700', a_receber: 'bg-blue-100 text-blue-700' }
 
 export function Payments() {
-  const { confirm: confirmAction, runOperation } = useFeedback()
+  const { confirm: confirmAction, runOperation, notify } = useFeedback()
   const { trackAction } = useActionToast()
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,6 +39,11 @@ export function Payments() {
   const [statusFilter, setStatusFilter] = useState('')
   const [error, setError] = useState('')
   const [reconciling, setReconciling] = useState(false)
+  const [reissuingPayment, setReissuingPayment] = useState<Payment | null>(null)
+  const [reissueDueDate, setReissueDueDate] = useState('')
+  const [reissueValue, setReissueValue] = useState('')
+  const [reissuing, setReissuing] = useState(false)
+  const [reviewSaleId, setReviewSaleId] = useState<string | null>(null)
 
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [monthFilter])
 
@@ -140,6 +145,35 @@ export function Payments() {
       await load()
     } catch (error: any) {
       setError(error.response?.data?.message || 'Erro ao reverter pagamento')
+    }
+  }
+
+  function openReissueModal(payment: Payment) {
+    setReissuingPayment(payment)
+    setReissueDueDate('')
+    setReissueValue(String(payment.value))
+    setError('')
+  }
+
+  async function confirmReissue() {
+    if (!reissuingPayment) return
+    if (!reissueDueDate) { setError('Informe a nova data de vencimento'); return }
+    setReissuing(true)
+    setError('')
+    try {
+      const value = parseFloat(reissueValue)
+      const res = await api.post(`/inter/payments/${reissuingPayment.id}/reissue`, {
+        dueDate: reissueDueDate,
+        value: Number.isFinite(value) && value > 0 ? value : undefined,
+      })
+      notify('Boleto reemitido com sucesso.', 'success')
+      setReviewSaleId(res.data.saleId)
+      setReissuingPayment(null)
+      await load()
+    } catch (error: any) {
+      setError(error.response?.data?.message || 'Erro ao reemitir boleto')
+    } finally {
+      setReissuing(false)
     }
   }
 
@@ -277,6 +311,7 @@ export function Payments() {
                           <button onClick={() => viewPdf(p.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>
                           <button onClick={() => downloadPdf(p.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
                           {!['cancelado', 'pago'].includes(p.status) && <button onClick={() => cancelPayment(p)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar boleto"><XCircle className="w-4 h-4" /></button>}
+                          {!['cancelado', 'pago'].includes(p.status) && <button onClick={() => openReissueModal(p)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Reemitir com nova data de vencimento"><CalendarClock className="w-4 h-4" /></button>}
                         </>
                       )}
                       <button onClick={() => checkStatus(p.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
@@ -293,6 +328,113 @@ export function Payments() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {reissuingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Reemitir boleto</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{reissuingPayment.customerName} - R$ {Number(reissuingPayment.value).toFixed(2)}</p>
+              </div>
+              <button onClick={() => setReissuingPayment(null)} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600 bg-purple-50 p-3 rounded-lg">O boleto atual será cancelado automaticamente e um novo será gerado com a data (e valor, se alterado) abaixo.</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nova data de vencimento *</label>
+                <input type="date" className="input" value={reissueDueDate} onChange={e => setReissueDueDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor (opcional - deixe igual para manter)</label>
+                <input type="number" step="0.01" min="0" className="input" value={reissueValue} onChange={e => setReissueValue(e.target.value)} />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+              <button onClick={() => setReissuingPayment(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={confirmReissue} disabled={reissuing} className="btn btn-primary flex items-center gap-2">
+                {reissuing ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <CalendarClock className="w-4 h-4" />}
+                {reissuing ? 'Reemitindo...' : 'Reemitir boleto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewSaleId && <ReviewSaleModal saleId={reviewSaleId} onClose={() => setReviewSaleId(null)} />}
+    </div>
+  )
+}
+
+function ReviewSaleModal({ saleId, onClose }: { saleId: string; onClose: () => void }) {
+  const [sale, setSale] = useState<any>(null)
+  const [installments, setInstallments] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/sales/' + saleId),
+      api.get('/financial/accounts/by-sale/' + saleId).catch(() => ({ data: {} })),
+    ]).then(([saleRes, accRes]) => {
+      setSale(saleRes.data)
+      setInstallments(accRes.data?.installmentsList || [])
+    }).finally(() => setLoading(false))
+  }, [saleId])
+
+  const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', pago: 'bg-green-100 text-green-700', parcial: 'bg-blue-100 text-blue-700', vencido: 'bg-red-100 text-red-700', cancelado: 'bg-gray-100 text-gray-700' }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h2 className="text-lg font-semibold text-gray-900">Revisar venda após reemissão</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+        </div>
+        {loading ? (
+          <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+        ) : !sale ? (
+          <p className="p-6 text-sm text-gray-500">Não foi possível carregar a venda.</p>
+        ) : (
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><span className="text-gray-500">Cliente:</span> <strong>{sale.customer?.name}</strong></div>
+              <div><span className="text-gray-500">Técnico:</span> <strong>{sale.technician?.name}</strong></div>
+              <div><span className="text-gray-500">Total:</span> <strong className="text-green-600">R$ {Number(sale.totalAmount).toFixed(2)}</strong></div>
+              <div><span className="text-gray-500">Status:</span> <strong>{sale.status}</strong></div>
+            </div>
+            {installments.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">Parcelas ({installments.length}x)</h3>
+                <table className="table">
+                  <thead className="table-header">
+                    <tr>
+                      <th className="table-cell font-semibold text-gray-700">Parcela</th>
+                      <th className="table-cell font-semibold text-gray-700">Valor</th>
+                      <th className="table-cell font-semibold text-gray-700">Vencimento</th>
+                      <th className="table-cell font-semibold text-gray-700">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {installments.map((inst: any) => (
+                      <tr key={inst.id}>
+                        <td className="table-cell text-sm">{inst.number}ª parcela</td>
+                        <td className="table-cell text-sm">R$ {Number(inst.value).toFixed(2)}</td>
+                        <td className="table-cell text-sm">{inst.dueDate ? new Date(inst.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+                        <td className="table-cell"><span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (statusColors[inst.status] || '')}>{inst.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+          <a href={`/sales/new?edit=${saleId}`} className="btn btn-secondary">Editar venda</a>
+          <button onClick={onClose} className="btn btn-primary">Fechar</button>
+        </div>
       </div>
     </div>
   )

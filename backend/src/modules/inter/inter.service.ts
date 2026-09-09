@@ -250,6 +250,25 @@ export class InterService implements OnModuleInit {
   }
 
   /**
+   * Marca localmente um pagamento como cancelado. Só marca a VENDA inteira como cancelada
+   * (billing_status) quando esse pagamento não está vinculado a uma parcela isolada - senão,
+   * cancelar um dos N boletos de uma venda parcelada (pra reemitir com nova data, por exemplo)
+   * cancelava a venda inteira, mesmo com as outras parcelas em aberto normalmente.
+   */
+  private async markPaymentCancelledLocally(codigoSolicitacao: string, tenantId: string | null): Promise<void> {
+    await this.saleRepo.manager.query(
+      `WITH changed AS (
+         UPDATE payments SET status='cancelado', updated_at=NOW()
+         WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''}
+         RETURNING sale_id, installment_id
+       )
+       UPDATE sales SET billing_status='cancelado', updated_at=NOW()
+       WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL AND installment_id IS NULL)`,
+      tenantId ? [codigoSolicitacao, tenantId] : [codigoSolicitacao],
+    );
+  }
+
+  /**
    * Cria cobrança PIX imediata via POST /pix/v2/cob
    */
   /**
@@ -268,11 +287,7 @@ export class InterService implements OnModuleInit {
           'Content-Type': 'application/json',
         });
 
-        await this.saleRepo.manager.query(
-          `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''} RETURNING sale_id)
-           UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-          tenantId ? [codigoSolicitacao, tenantId] : [codigoSolicitacao],
-        );
+        await this.markPaymentCancelledLocally(codigoSolicitacao, tenantId);
 
         await this.auditInter('inter.boleto_cancelado', null, {
           codigoSolicitacao,
@@ -303,11 +318,7 @@ export class InterService implements OnModuleInit {
           if (this.getLocalPaymentStatus(situacao) === 'cancelado') {
             let localSyncPending = false;
             try {
-              await this.saleRepo.manager.query(
-                `WITH changed AS (UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''} RETURNING sale_id)
-                 UPDATE sales SET billing_status='cancelado', updated_at=NOW() WHERE id IN (SELECT sale_id FROM changed WHERE sale_id IS NOT NULL)`,
-                tenantId ? [codigoSolicitacao, tenantId] : [codigoSolicitacao],
-              );
+              await this.markPaymentCancelledLocally(codigoSolicitacao, tenantId);
               await this.auditInter('inter.boleto_cancelado_confirmado', null, { codigoSolicitacao, motivoCancelamento, boleto });
             } catch (syncError) {
               localSyncPending = true;
@@ -339,6 +350,112 @@ export class InterService implements OnModuleInit {
       `UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
       tenantId ? [txid, tenantId] : [txid],
     );
+  }
+
+  /**
+   * Reemite um boleto com uma nova data de vencimento (e, opcionalmente, um novo valor):
+   * cancela o boleto atual no Inter e gera um boleto novo pra substituí-lo, vinculado à mesma
+   * parcela/venda. Nunca mexe nos outros boletos da mesma venda - se o boleto reemitido faz
+   * parte de uma venda parcelada, só a parcela correspondente é alterada.
+   */
+  async reissuePayment(paymentId: string, newDueDate: string, newValue: number | undefined, userId?: string): Promise<{ saleId: string; oldPaymentId: string; newPaymentId: string; codigoSolicitacao: string }> {
+    const tenantId = this.currentTenantId();
+    const rows = await this.saleRepo.manager.query(
+      `SELECT id, sale_id, customer_id, type, codigo_solicitacao, status, value FROM payments WHERE id=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
+      tenantId ? [paymentId, tenantId] : [paymentId],
+    );
+    const payment = rows[0];
+    if (!payment) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
+    if (payment.type !== 'boleto') throw new HttpException('Só é possível reemitir boletos', HttpStatus.BAD_REQUEST);
+    if (['pago', 'cancelado'].includes(payment.status)) throw new HttpException('Este boleto já está pago ou cancelado - não pode ser reemitido', HttpStatus.BAD_REQUEST);
+    if (!payment.sale_id) throw new HttpException('Este boleto não está vinculado a uma venda', HttpStatus.BAD_REQUEST);
+
+    const newDueDateFormatted = this.formatInterDueDate(newDueDate, 'Nova data de vencimento');
+    const today = new Date();
+    const todayLocal = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+    if (newDueDateFormatted < todayLocal) throw new HttpException('A nova data de vencimento não pode estar no passado', HttpStatus.BAD_REQUEST);
+
+    const sale = await this.saleRepo.findOne({ where: { id: payment.sale_id }, relations: ['customer'] });
+    if (!sale?.customer) throw new HttpException('Venda ou cliente não encontrado', HttpStatus.NOT_FOUND);
+    const customer = sale.customer as any;
+    const document = (customer.cpfCnpj || '').replace(/\D/g, '');
+    const finalValue = newValue !== undefined && newValue !== null && Number(newValue) > 0 ? Number(newValue) : Number(payment.value);
+
+    // 1. Cancela o boleto atual no Inter (markPaymentCancelledLocally já garante que isso não
+    // mexe nas outras parcelas/boletos da mesma venda).
+    await this.cancelBoleto(payment.codigo_solicitacao, 'Reemissão com nova data de vencimento');
+
+    // 2. Se o boleto está ligado a uma parcela específica, atualiza a data/valor dela e reflete
+    // a diferença de valor na conta a receber (sem mexer no valor total da venda em si).
+    const installmentRow = await this.saleRepo.manager.query(`SELECT id, value, account_id FROM installments WHERE id = (SELECT installment_id FROM payments WHERE id=$1)`, [paymentId]);
+    const installment = installmentRow[0];
+    if (installment) {
+      const delta = finalValue - Number(installment.value);
+      await this.saleRepo.manager.query(`UPDATE installments SET due_date=$1, value=$2, updated_at=NOW() WHERE id=$3`, [newDueDateFormatted, finalValue, installment.id]);
+      if (delta !== 0 && installment.account_id) {
+        await this.saleRepo.manager.query(`UPDATE accounts_receivable SET total_value = total_value + $1, pending_value = pending_value + $1, updated_at = NOW() WHERE id=$2`, [delta, installment.account_id]);
+      }
+    }
+
+    // 3. Gera o boleto novo. seuNumero precisa ser inédito - reaproveitar o mesmo faria a API do
+    // Inter devolver o codigoSolicitacao do boleto ANTIGO (que acabou de ser cancelado) em vez
+    // de criar um de fato novo (ver o tratamento de "já existe" em createBoleto).
+    const tipoPessoa = document.length > 11 ? 'JURIDICA' : 'FISICA';
+    const seuNumero = `${payment.sale_id.replace(/-/g, '').substring(0, 9)}R${Date.now().toString().slice(-5)}`;
+    const boletoData: any = {
+      seuNumero,
+      valorNominal: finalValue,
+      dataVencimento: newDueDateFormatted,
+      numDiasAgenda: 30,
+      pagador: {
+        cpfCnpj: document,
+        tipoPessoa: tipoPessoa as 'FISICA' | 'JURIDICA',
+        nome: customer.name.substring(0, 50),
+        endereco: (customer.address || 'Rua nao informada').substring(0, 90),
+        cidade: (customer.city || 'Contagem').substring(0, 60),
+        uf: customer.uf || 'MG',
+        cep: (customer.cep || '32000000').replace(/\D/g, '').padEnd(8, '0').substring(0, 8),
+      },
+      mensagem: { linha1: 'Boleto reemitido com nova data de vencimento', linha2: `Venda #${payment.sale_id.substring(0, 8)}` },
+    };
+    const result = await this.createBoleto(boletoData);
+    const newCodigo = result.codigoSolicitacao || '';
+
+    const inserted = await this.saleRepo.manager.query(
+      `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, installment_id, tenant_id)
+       VALUES ($1,$2,'boleto','a_receber',$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [
+        payment.sale_id, payment.customer_id, finalValue, customer.name, document,
+        newDueDateFormatted, result.linhaDigitavel || '', result.nossoNumero || '',
+        installment?.id || null, tenantId,
+      ],
+    );
+    const newPaymentId = inserted[0]?.id;
+    await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.id=$1 AND a.sale_id=p.sale_id`, [newPaymentId]);
+
+    await this.auditInter('inter.payment_reissued', newPaymentId, {
+      userId, oldPaymentId: paymentId, oldCodigoSolicitacao: payment.codigo_solicitacao, newCodigoSolicitacao: newCodigo,
+      newDueDate: newDueDateFormatted, newValue: finalValue, saleId: payment.sale_id,
+    });
+
+    // Envia o novo boleto por email pro cliente, se possível - não bloqueia a reemissão se o
+    // PDF ainda não estiver disponível ou o cliente não tiver email cadastrado.
+    try {
+      const customerEmails = getCustomerEmailRecipients(customer);
+      if (customerEmails) {
+        const pdf = await this.getBoletoPdf(newCodigo);
+        await this.mailService.sendMailWithAttachment(
+          customerEmails,
+          `Novo boleto - Venda #${payment.sale_id.substring(0, 8)} - VGON`,
+          `<div style="font-family:Arial,sans-serif"><h2>Boleto reemitido</h2><p>Olá ${customer.name},</p><p>O boleto anterior foi cancelado. Segue em anexo o novo boleto, com vencimento em ${newDueDateFormatted.split('-').reverse().join('/')}.</p></div>`,
+          [{ filename: `boleto-${newDueDateFormatted}.pdf`, content: pdf, contentType: 'application/pdf' }],
+        );
+      }
+    } catch (error: any) {
+      this.logger.warn(`Boleto reemitido, mas não foi possível enviar por email: ${error.message}`);
+    }
+
+    return { saleId: payment.sale_id, oldPaymentId: paymentId, newPaymentId, codigoSolicitacao: newCodigo };
   }
 
   // Remove da lista da tela de Pagamentos um boleto/pix ja cancelado, so para limpar a poluicao
