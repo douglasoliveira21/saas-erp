@@ -385,16 +385,20 @@ export class InterService implements OnModuleInit {
     // mexe nas outras parcelas/boletos da mesma venda).
     await this.cancelBoleto(payment.codigo_solicitacao, 'Reemissão com nova data de vencimento');
 
-    // 2. Se o boleto está ligado a uma parcela específica, atualiza a data/valor dela e reflete
-    // a diferença de valor na conta a receber (sem mexer no valor total da venda em si).
-    const installmentRow = await this.saleRepo.manager.query(`SELECT id, value, account_id FROM installments WHERE id = (SELECT installment_id FROM payments WHERE id=$1)`, [paymentId]);
+    // 2. Se o valor mudou, propaga a diferença por toda a cadeia - parcela, conta a receber e o
+    // total da própria venda - senão a venda ficava mostrando o total antigo enquanto a parcela
+    // e o boleto já mostravam o valor novo.
+    const delta = finalValue - Number(payment.value);
+    const installmentRow = await this.saleRepo.manager.query(`SELECT id, account_id FROM installments WHERE id = (SELECT installment_id FROM payments WHERE id=$1)`, [paymentId]);
     const installment = installmentRow[0];
     if (installment) {
-      const delta = finalValue - Number(installment.value);
       await this.saleRepo.manager.query(`UPDATE installments SET due_date=$1, value=$2, updated_at=NOW() WHERE id=$3`, [newDueDateFormatted, finalValue, installment.id]);
       if (delta !== 0 && installment.account_id) {
         await this.saleRepo.manager.query(`UPDATE accounts_receivable SET total_value = total_value + $1, pending_value = pending_value + $1, updated_at = NOW() WHERE id=$2`, [delta, installment.account_id]);
       }
+    }
+    if (delta !== 0) {
+      await this.saleRepo.manager.query(`UPDATE sales SET total_amount = total_amount + $1, updated_at = NOW() WHERE id=$2`, [delta, payment.sale_id]);
     }
 
     // 3. Gera o boleto novo. seuNumero precisa ser inédito - reaproveitar o mesmo faria a API do
