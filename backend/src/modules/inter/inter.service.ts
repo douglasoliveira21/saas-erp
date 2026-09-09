@@ -1,6 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import * as https from 'https';
 import * as crypto from 'crypto';
 import { Sale } from '../sales/entities/sale.entity';
@@ -409,13 +409,42 @@ export class InterService implements OnModuleInit {
   }
 
   /**
-   * Reverte um boleto/PIX marcado "pago" por engano de volta pra "a receber", pelo id do
-   * PAGAMENTO (não da parcela) - usado pela tela de Pagamentos, onde nem todo boleto antigo tem
-   * installment_id preenchido (esse vínculo só passou a ser gravado depois; boletos de vendas
-   * parceladas criadas antes disso não têm essa coluna populada). Quando falta o vínculo, tenta
-   * achar a parcela certa pela data de vencimento (que sempre bateu com o boleto correspondente)
-   * e, se achar exatamente uma, aproveita e já preenche installment_id pra próxima vez.
+   * Acha (e preenche, se preciso) o installment_id de um pagamento - usado pelo botão de
+   * reverter, pela correção automática de consistência em syncBoletoStatus, e por
+   * applyPaymentStatus (pra nunca quitar a venda inteira em vez de só a parcela paga, quando o
+   * vínculo simplesmente não foi salvo ainda). Vendas antigas podem ter esse vínculo faltando;
+   * quando falta, tenta achar a parcela certa pela data de vencimento (com 1 dia de tolerância,
+   * por causa do bug de fuso já corrigido em formatInterDueDate que deixou boletos antigos com
+   * due_date um dia antes do real) e, de quebra, já preenche o vínculo de TODOS os boletos
+   * "irmãos" da venda que ainda estão sem ele - não só o pedido, senão o passo de limpeza de
+   * reverseMovement (pra vendas de boleto único, sem parcela) pega os irmãos ainda não
+   * vinculados e reverte todos juntos por engano.
+   *
+   * Aceita um EntityManager opcional pra rodar dentro da mesma transação do chamador (essencial
+   * em applyPaymentStatus, que já tem a linha do pagamento travada com FOR UPDATE - rodar essas
+   * queries numa conexão separada faria a atualização do próprio pagamento tentar travar a
+   * mesma linha e travar/dar deadlock esperando a transação de fora, que por sua vez está
+   * esperando esta função terminar).
    */
+  private async resolveInstallmentIdForPayment(saleId: string, paymentId: string, manager: EntityManager = this.saleRepo.manager): Promise<string | null> {
+    const siblings = await manager.query(
+      `SELECT id, due_date FROM payments WHERE sale_id=$1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
+      [saleId],
+    );
+    let resolved: string | null = null;
+    for (const sibling of siblings) {
+      const candidates = await manager.query(
+        `SELECT id FROM installments WHERE sale_id=$1 AND due_date BETWEEN $2::date - 1 AND $2::date + 1`,
+        [saleId, sibling.due_date],
+      );
+      if (candidates.length === 1) {
+        await manager.query(`UPDATE payments SET installment_id=$1 WHERE id=$2`, [candidates[0].id, sibling.id]);
+        if (sibling.id === paymentId) resolved = candidates[0].id;
+      }
+    }
+    return resolved;
+  }
+
   async revertPaymentToReceivable(paymentId: string, reason: string, userId?: string): Promise<{ saleId?: string }> {
     const tenantId = this.currentTenantId();
     const rows = await this.saleRepo.manager.query(
@@ -429,27 +458,7 @@ export class InterService implements OnModuleInit {
     let installmentId = payment.installment_id;
     if (!installmentId) {
       if (!payment.sale_id) throw new HttpException('Este pagamento não está vinculado a uma venda/parcela - reverta pelo Financeiro diretamente', HttpStatus.BAD_REQUEST);
-      // Importante: preenche o vínculo de TODOS os boletos "irmãos" dessa venda que ainda estão
-      // sem installment_id, não só o que está sendo revertido agora. Se deixasse os outros sem
-      // vínculo, o passo final de reverseMovement (que limpa pagamentos "orfãos" de uma venda de
-      // boleto único, sem parcela alguma) também pegaria os irmãos ainda não vinculados e
-      // revertia todos juntos por engano - reverter 1 de 3 acabava desfazendo os 3.
-      const siblings = await this.saleRepo.manager.query(
-        `SELECT id, due_date FROM payments WHERE sale_id=$1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
-        [payment.sale_id],
-      );
-      for (const sibling of siblings) {
-        // Tolerância de 1 dia: boletos gerados antes da correção do bug de fuso em
-        // formatInterDueDate ficaram com due_date um dia ANTES do vencimento real da parcela.
-        const candidates = await this.saleRepo.manager.query(
-          `SELECT id FROM installments WHERE sale_id=$1 AND due_date BETWEEN $2::date - 1 AND $2::date + 1`,
-          [payment.sale_id, sibling.due_date],
-        );
-        if (candidates.length === 1) {
-          await this.saleRepo.manager.query(`UPDATE payments SET installment_id=$1 WHERE id=$2`, [candidates[0].id, sibling.id]);
-          if (sibling.id === paymentId) installmentId = candidates[0].id;
-        }
-      }
+      installmentId = await this.resolveInstallmentIdForPayment(payment.sale_id, paymentId);
       if (!installmentId) {
         throw new HttpException(
           'Não foi possível identificar a parcela deste boleto automaticamente (venda antiga sem vínculo, ou mais de uma parcela com o mesmo vencimento). Reverta pela tela Financeiro > parcela correspondente.',
@@ -639,10 +648,19 @@ export class InterService implements OnModuleInit {
              paid_at = CASE WHEN $1::varchar = 'pago' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
              updated_at = NOW()
          WHERE codigo_solicitacao = $5::varchar
-         RETURNING sale_id, type, installment_id, value`,
+         RETURNING id, sale_id, type, installment_id, value`,
         [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao],
       );
-      const saleId = updated[0]?.sale_id; const type = updated[0]?.type; const installmentId = updated[0]?.installment_id; const paymentValue = updated[0]?.value;
+      const paymentId = updated[0]?.id; const saleId = updated[0]?.sale_id; const type = updated[0]?.type; const paymentValue = updated[0]?.value;
+      let installmentId = updated[0]?.installment_id;
+      // Antes de decidir se é uma venda de boleto único ou uma parcela isolada de um boleto
+      // parcelado, tenta achar/preencher o vínculo que falta - sem isso, uma venda parcelada
+      // cujos boletos nunca foram linkados (ex: criados antes desse vínculo existir) cai no
+      // "else" abaixo e quita a VENDA INTEIRA com base na confirmação de um único boleto, mesmo
+      // os outros nunca tendo sido pagos. Já causou esse exato problema uma vez.
+      if (!installmentId && saleId && paymentId) {
+        installmentId = await this.resolveInstallmentIdForPayment(saleId, paymentId, manager);
+      }
       // Parcela isolada de um boleto parcelado: quitar apenas essa parcela, nunca a venda inteira.
       const isSplitInstallment = !!installmentId;
       if (saleId && !isSplitInstallment) {
@@ -700,10 +718,13 @@ export class InterService implements OnModuleInit {
    * diferente pra mesma venda.
    */
   private async resyncPaymentFromInstallment(paymentId: string): Promise<void> {
-    const rows = await this.saleRepo.manager.query(`SELECT id, installment_id, due_date, status FROM payments WHERE id=$1`, [paymentId]);
+    const rows = await this.saleRepo.manager.query(`SELECT id, sale_id, installment_id, due_date, status FROM payments WHERE id=$1`, [paymentId]);
     const payment = rows[0];
-    if (!payment?.installment_id) return;
-    const installmentRows = await this.saleRepo.manager.query(`SELECT status, paid_at FROM installments WHERE id=$1`, [payment.installment_id]);
+    if (!payment) return;
+    let installmentId = payment.installment_id;
+    if (!installmentId && payment.sale_id) installmentId = await this.resolveInstallmentIdForPayment(payment.sale_id, paymentId);
+    if (!installmentId) return;
+    const installmentRows = await this.saleRepo.manager.query(`SELECT status, paid_at FROM installments WHERE id=$1`, [installmentId]);
     const installment = installmentRows[0];
     if (!installment) return;
     const shouldBePago = installment.status === 'pago';
