@@ -73,6 +73,14 @@ export class InterService implements OnModuleInit {
     }
 
     const pad = (part: number) => String(part).padStart(2, '0');
+    if (value instanceof Date) {
+      // Uma coluna DATE do Postgres sempre volta do driver como meia-noite UTC. Ler esse valor
+      // com getFullYear/getMonth/getDate (hora LOCAL) subtrai 1 dia em qualquer servidor rodando
+      // atrás do UTC (ex: horário de Brasília) - foi isso que fez todo boleto parcelado ser
+      // emitido no Inter com vencimento um dia ANTES do vencimento real da parcela, gerando a
+      // divergência entre a data mostrada na venda e a data mostrada no boleto/Pagamentos.
+      return `${parsed.getUTCFullYear()}-${pad(parsed.getUTCMonth() + 1)}-${pad(parsed.getUTCDate())}`;
+    }
     return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
   }
 
@@ -431,8 +439,10 @@ export class InterService implements OnModuleInit {
         [payment.sale_id],
       );
       for (const sibling of siblings) {
+        // Tolerância de 1 dia: boletos gerados antes da correção do bug de fuso em
+        // formatInterDueDate ficaram com due_date um dia ANTES do vencimento real da parcela.
         const candidates = await this.saleRepo.manager.query(
-          `SELECT id FROM installments WHERE sale_id=$1 AND due_date=$2`,
+          `SELECT id FROM installments WHERE sale_id=$1 AND due_date BETWEEN $2::date - 1 AND $2::date + 1`,
           [payment.sale_id, sibling.due_date],
         );
         if (candidates.length === 1) {
@@ -654,20 +664,62 @@ export class InterService implements OnModuleInit {
     });
   }
   async syncBoletoStatus(codigoSolicitacao: string): Promise<any> {
-    const local = await this.saleRepo.manager.query(`SELECT type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
+    const local = await this.saleRepo.manager.query(`SELECT id, type FROM payments WHERE codigo_solicitacao=$1 LIMIT 1`, [codigoSolicitacao]);
     if (!local[0]) throw new HttpException('Cobrança não encontrada', HttpStatus.NOT_FOUND);
     // Pedido explícito do usuário ("Consultar status") vale mais que uma proteção contra
     // reconciliação automática deixada por uma reversão manual anterior - limpa antes de checar,
     // assim o resultado desse clique manual passa a valer pra reconciliação automática de novo.
     await this.saleRepo.manager.query(`UPDATE payments SET reverted_at = NULL WHERE codigo_solicitacao = $1`, [codigoSolicitacao]);
     const boleto = local[0].type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
-    const statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
-    await this.auditInter('inter.status_sync', statusUpdate.saleId || null, {
+    let statusUpdate: any = null;
+    try {
+      statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
+    } catch (error: any) {
+      // Ex: Inter diz "pago" mas a parcela financeira vinculada já está paga/cancelada por outro
+      // motivo (ex: resíduo do bug de cascata já corrigido) - não deixa o clique em "Consultar
+      // status" falhar por isso, só loga e segue pro passo de correção de consistência abaixo.
+      this.logger.warn(`applyPaymentStatus falhou ao sincronizar ${codigoSolicitacao}, seguindo para correção de consistência: ${error.message}`);
+    }
+    // Segurança extra: independente do que o Inter respondeu, garante que o status exibido do
+    // boleto bate com o status REAL da parcela financeira vinculada (fonte da verdade) - corrige
+    // sozinho casos como o bug de cascata já corrigido, que deixava o boleto e a parcela
+    // mostrando informações diferentes pra mesma venda.
+    await this.resyncPaymentFromInstallment(local[0].id);
+    await this.auditInter('inter.status_sync', statusUpdate?.saleId || null, {
       codigoSolicitacao,
       statusUpdate,
       source: 'manual',
     });
     return boleto;
+  }
+
+  /**
+   * Corrige payments.status pra bater com o status REAL da parcela financeira vinculada (fonte
+   * da verdade) - usado como passo de segurança em syncBoletoStatus, pra casos em que o boleto
+   * (tela de Pagamentos) e a parcela (tela de detalhes da venda) ficaram mostrando informação
+   * diferente pra mesma venda.
+   */
+  private async resyncPaymentFromInstallment(paymentId: string): Promise<void> {
+    const rows = await this.saleRepo.manager.query(`SELECT id, installment_id, due_date, status FROM payments WHERE id=$1`, [paymentId]);
+    const payment = rows[0];
+    if (!payment?.installment_id) return;
+    const installmentRows = await this.saleRepo.manager.query(`SELECT status, paid_at FROM installments WHERE id=$1`, [payment.installment_id]);
+    const installment = installmentRows[0];
+    if (!installment) return;
+    const shouldBePago = installment.status === 'pago';
+    const currentlyPago = payment.status === 'pago';
+    if (shouldBePago === currentlyPago) return;
+    if (shouldBePago) {
+      await this.saleRepo.manager.query(
+        `UPDATE payments SET status='pago', paid_at=COALESCE(paid_at,$2), reverted_at=NULL, updated_at=NOW() WHERE id=$1`,
+        [paymentId, installment.paid_at || new Date()],
+      );
+    } else {
+      await this.saleRepo.manager.query(
+        `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END, paid_at=NULL, updated_at=NOW() WHERE id=$1`,
+        [paymentId],
+      );
+    }
   }
 
   // Reconcilia os pagamentos pendentes do tenant do contexto atual. Quando chamada manualmente
