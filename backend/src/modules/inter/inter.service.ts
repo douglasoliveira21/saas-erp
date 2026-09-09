@@ -602,7 +602,7 @@ export class InterService implements OnModuleInit {
 
   private getLocalPaymentStatus(situacao?: string): string {
     const status = (situacao || '').toUpperCase();
-    if (['RECEBIDO', 'CONFIRMADO', 'PAGO', 'REALIZADO', 'CONCLUIDA'].includes(status)) {
+    if (['RECEBIDO', 'CONFIRMADO', 'PAGO', 'REALIZADO', 'CONCLUIDA', 'LIQUIDADO', 'PAGAMENTO_CONFIRMADO', 'BAIXADO'].includes(status)) {
       return 'pago';
     }
     if (['VENCIDO', 'EXPIRADO'].includes(status)) {
@@ -610,6 +610,11 @@ export class InterService implements OnModuleInit {
     }
     if (['CANCELADO', 'CANCELADA', 'REMOVIDA_PELO_USUARIO_RECEBEDOR', 'REMOVIDA_PELO_PSP'].includes(status)) {
       return 'cancelado';
+    }
+    if (status && !['EM_PROCESSAMENTO', 'A_RECEBER', 'ATIVA', 'EM_ABERTO'].includes(status)) {
+      // Não reconhecemos esse valor - loga a resposta crua do Inter pra dar pra ajustar a lista
+      // acima com o valor real, em vez de esse boleto ficar preso silenciosamente em "a_receber".
+      this.logger.warn(`Situação de cobrança não reconhecida pelo mapeamento local: "${situacao}" - tratando como não paga`);
     }
     return 'a_receber';
   }
@@ -690,13 +695,12 @@ export class InterService implements OnModuleInit {
     await this.saleRepo.manager.query(`UPDATE payments SET reverted_at = NULL WHERE codigo_solicitacao = $1`, [codigoSolicitacao]);
     const boleto = local[0].type === 'pix' ? await this.getPixQrCode(codigoSolicitacao) : await this.getBoleto(codigoSolicitacao);
     let statusUpdate: any = null;
+    let applyError: string | null = null;
     try {
       statusUpdate = await this.applyPaymentStatus(codigoSolicitacao, boleto);
     } catch (error: any) {
-      // Ex: Inter diz "pago" mas a parcela financeira vinculada já está paga/cancelada por outro
-      // motivo (ex: resíduo do bug de cascata já corrigido) - não deixa o clique em "Consultar
-      // status" falhar por isso, só loga e segue pro passo de correção de consistência abaixo.
-      this.logger.warn(`applyPaymentStatus falhou ao sincronizar ${codigoSolicitacao}, seguindo para correção de consistência: ${error.message}`);
+      applyError = error.message;
+      this.logger.warn(`applyPaymentStatus falhou ao sincronizar ${codigoSolicitacao}: ${error.message}`);
     }
     // Segurança extra: independente do que o Inter respondeu, garante que o status exibido do
     // boleto bate com o status REAL da parcela financeira vinculada (fonte da verdade) - corrige
@@ -706,8 +710,16 @@ export class InterService implements OnModuleInit {
     await this.auditInter('inter.status_sync', statusUpdate?.saleId || null, {
       codigoSolicitacao,
       statusUpdate,
+      applyError,
       source: 'manual',
     });
+    // "Parcela já está paga/cancelada" é um resultado benigno (só significa que já estava
+    // consistente) e não deve virar erro pro usuário. Qualquer OUTRO erro precisa aparecer de
+    // verdade - antes ficava só no log, e o botão mostrava "Status atualizado!" mesmo quando a
+    // consulta real ao Inter tinha falhado silenciosamente, escondendo o problema.
+    if (applyError && !/já está paga ou cancelada/i.test(applyError)) {
+      throw new HttpException(`Consulta feita, mas não foi possível aplicar o novo status: ${applyError}`, HttpStatus.CONFLICT);
+    }
     return boleto;
   }
 
