@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import {
-  Download, Search, RefreshCw, CreditCard, Eye, XCircle, Trash2, CheckCircle, Undo2, CalendarClock,
+  Download, Search, RefreshCw, CreditCard, XCircle, Trash2, CheckCircle, Undo2, CalendarClock,
   ChevronLeft, ChevronRight, Plus, Check, X, AlertTriangle, DollarSign, Clock, Edit2, Receipt, Users,
-  TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle,
+  TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle, FileDown, FileCode,
 } from 'lucide-react'
 import { useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
@@ -29,6 +29,11 @@ interface Payment {
   settledManually?: boolean
   paymentNote?: string
   installmentId?: string
+  invoiceId?: string
+  invoiceType?: string
+  invoiceSeries?: number
+  invoiceStatus?: string
+  invoiceAccessKey?: string
 }
 
 interface Supplier {
@@ -201,14 +206,42 @@ export function Payments() {
     } catch { setError('Erro ao baixar PDF') }
   }
 
-  async function viewPdf(codigoSolicitacao: string) {
+  function saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  async function downloadInvoicePdf(p: Payment) {
+    if (!p.invoiceId) return
     try {
-      const res = await fetch(`/api/inter/pdf/${codigoSolicitacao}`, { credentials: 'include' })
-      if (!res.ok) { setError('Erro ao visualizar boleto'); return }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
-    } catch { setError('Erro ao visualizar boleto') }
+      if (p.invoiceType === 'nfe') {
+        const res = await api.get(`/fiscal/nfe/danfe-pdf/${p.invoiceId}`, { responseType: 'blob' })
+        saveBlob(res.data, `DANFE_${p.invoiceNumber || 'nota'}_serie${p.invoiceSeries || 1}.pdf`)
+      } else {
+        const res = await api.get(`/fiscal/nfse/pdf/${p.invoiceId}`, { responseType: 'blob' })
+        saveBlob(res.data, `NFSe_${p.invoiceNumber || 'nota'}_serie${p.invoiceSeries || 1}.pdf`)
+      }
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar a nota fiscal') }
+  }
+
+  async function downloadInvoiceXml(p: Payment) {
+    if (!p.invoiceId) return
+    try {
+      const path = p.invoiceType === 'nfe'
+        ? `/fiscal/nfe/download-xml/${p.invoiceId}`
+        : p.invoiceStatus === 'autorizada' && p.invoiceAccessKey
+          ? `/fiscal/nfse/xml-oficial/${p.invoiceId}`
+          : `/fiscal/invoices/${p.invoiceId}/download-xml`
+      const filename = p.invoiceType === 'nfe'
+        ? `NFe_${p.invoiceNumber || 'nota'}_serie${p.invoiceSeries || 1}.xml`
+        : `NFSe_${p.invoiceNumber || 'nota'}_serie${p.invoiceSeries || 1}.xml`
+      const res = await api.get(path, { responseType: 'blob' })
+      saveBlob(res.data, filename)
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar o XML') }
   }
 
   async function checkStatus(codigoSolicitacao: string) {
@@ -718,16 +751,18 @@ export function Payments() {
                           )}
                           {row.data.type === 'boleto' && (
                             <>
-                              <button onClick={() => viewPdf(row.data.codigoSolicitacao)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar boleto"><Eye className="w-4 h-4" /></button>
                               <button onClick={() => downloadPdf(row.data.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
                               {!['cancelado', 'pago'].includes(row.data.status) && <button onClick={() => cancelPayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar boleto"><XCircle className="w-4 h-4" /></button>}
                               {!['cancelado', 'pago'].includes(row.data.status) && <button onClick={() => openReissueModal(row.data)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Reemitir com nova data de vencimento"><CalendarClock className="w-4 h-4" /></button>}
                             </>
                           )}
-                          <button onClick={() => checkStatus(row.data.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
-                          {row.data.linhaDigitavel && (
-                            <button onClick={() => { navigator.clipboard.writeText(row.data.linhaDigitavel!).then(() => trackAction('Copiando...', Promise.resolve(), 'Linha digitável copiada!')) }} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Copiar linha digitável"><CreditCard className="w-4 h-4" /></button>
+                          {row.data.invoiceId && (
+                            <>
+                              <button onClick={() => downloadInvoicePdf(row.data)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded" title="Baixar PDF da nota fiscal"><FileDown className="w-4 h-4" /></button>
+                              <button onClick={() => downloadInvoiceXml(row.data)} className="p-1 text-teal-600 hover:bg-teal-50 rounded" title="Baixar XML da nota fiscal"><FileCode className="w-4 h-4" /></button>
+                            </>
                           )}
+                          <button onClick={() => checkStatus(row.data.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
                           {row.data.status === 'cancelado' && (
                             <button onClick={() => deletePayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir da lista"><Trash2 className="w-4 h-4" /></button>
                           )}

@@ -87,11 +87,19 @@ export class InterController {
       `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt", p.settled_manually as "settledManually", p.payment_note as "paymentNote", p.installment_id as "installmentId",
        CASE WHEN p.sale_id IS NOT NULL THEN 'venda' ELSE COALESCE((SELECT 'contrato' FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1), 'outro') END as "origem",
        CASE WHEN p.sale_id IS NOT NULL THEN NULL ELSE (SELECT c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1) END as "contractTitle",
-       COALESCE(
-         (SELECT i.number FROM invoices i WHERE i.sale_id = p.sale_id AND i.status = 'autorizada' ORDER BY i.issued_at DESC NULLS LAST, i.created_at DESC LIMIT 1),
-         (SELECT i.number FROM contract_billings cb JOIN invoices i ON i.id = cb.invoice_id WHERE cb.boleto_code = p.codigo_solicitacao AND i.status = 'autorizada' ORDER BY i.issued_at DESC NULLS LAST, i.created_at DESC LIMIT 1)
-       ) as "invoiceNumber"
-       FROM payments p ${whereClause} ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
+       inv.number as "invoiceNumber", inv.id as "invoiceId", inv.type as "invoiceType", inv.series as "invoiceSeries", inv.status as "invoiceStatus", inv.access_key as "invoiceAccessKey"
+       FROM payments p
+       LEFT JOIN LATERAL (
+         SELECT i.id, i.type, i.series, i.status, i.access_key, i.number
+         FROM invoices i
+         WHERE i.status = 'autorizada' AND (
+           (p.sale_id IS NOT NULL AND i.sale_id = p.sale_id)
+           OR (p.sale_id IS NULL AND i.id = (SELECT cb.invoice_id FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1))
+         )
+         ORDER BY i.issued_at DESC NULLS LAST, i.created_at DESC
+         LIMIT 1
+       ) inv ON true
+       ${whereClause} ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`,
       params,
     );
     const count = monthFilter
