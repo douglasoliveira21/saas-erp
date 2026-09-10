@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -71,6 +71,7 @@ const categories = [
   'Equipamentos', 'Manutenção', 'Marketing', 'Outros'
 ]
 const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const LEDGER_PAGE_SIZE = 10
 
 function currentMonth() {
   const d = new Date()
@@ -122,6 +123,8 @@ export function Payments() {
   const [reissueValue, setReissueValue] = useState('')
   const [reissuing, setReissuing] = useState(false)
   const [reviewSaleId, setReviewSaleId] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(LEDGER_PAGE_SIZE)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
 
   // Bill Modal
   const [showBillModal, setShowBillModal] = useState(false)
@@ -508,6 +511,24 @@ export function Payments() {
       (b.documentNumber || '').toLowerCase().includes(s)
   })
 
+  // Volta pra primeira leva de 10 sempre que o filtro/mes muda o resultado, senao a rolagem
+  // infinita ficaria "adiantada" mostrando linhas de mais que nao batem com o novo filtro.
+  useEffect(() => { setVisibleCount(LEDGER_PAGE_SIZE) }, [month, search, typeFilter, statusFilter])
+
+  useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        setVisibleCount(c => Math.min(c + LEDGER_PAGE_SIZE, filteredRows.length))
+      }
+    }, { rootMargin: '200px' })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [filteredRows.length])
+
+  const visibleRows = filteredRows.slice(0, visibleCount)
+
   const totalRecebido = payments.filter(p => p.status === 'pago').reduce((s, p) => s + Number(p.value), 0)
   const totalAReceber = payments.filter(p => ['pendente', 'a_receber', 'vencido'].includes(p.status)).reduce((s, p) => s + Number(p.value), 0)
   const totalPago = bills.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
@@ -727,7 +748,7 @@ export function Payments() {
                 <tbody className="divide-y divide-gray-200">
                   {filteredRows.length === 0 ? (
                     <tr><td colSpan={7} className="table-cell text-center text-gray-500 py-8">Nenhum lançamento neste mês</td></tr>
-                  ) : filteredRows.map(row => row.kind === 'credito' ? (
+                  ) : visibleRows.map(row => row.kind === 'credito' ? (
                     <tr key={'c-' + row.data.id} className="hover:bg-gray-50 border-l-2 border-l-green-400">
                       <td className="table-cell">
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Crédito</span>
@@ -806,6 +827,11 @@ export function Payments() {
                   ))}
                 </tbody>
               </table>
+            )}
+            {!loading && visibleCount < filteredRows.length && (
+              <div ref={loadMoreRef} className="flex justify-center p-4">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600" />
+              </div>
             )}
           </div>
         </>
