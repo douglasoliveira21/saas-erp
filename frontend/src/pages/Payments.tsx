@@ -163,10 +163,6 @@ export function Payments() {
     city: '', uf: '', cep: '', contactPerson: '', observations: ''
   })
 
-  // Report filters
-  const [reportStart, setReportStart] = useState('')
-  const [reportEnd, setReportEnd] = useState('')
-
   // Inadimplentes
   const [overdueInstallments, setOverdueInstallments] = useState<Installment[]>([])
   const [loadingOverdue, setLoadingOverdue] = useState(false)
@@ -177,7 +173,7 @@ export function Payments() {
 
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [month])
   useEffect(() => { loadSuppliersAndAlerts() }, [])
-  useEffect(() => { if (activeTab === 'relatorio') loadReport() }, [activeTab])
+  useEffect(() => { if (activeTab === 'relatorio') loadReport() }, [activeTab, month])
   useEffect(() => { if (activeTab === 'inadimplentes') loadOverdue() }, [activeTab])
 
   async function load() {
@@ -209,10 +205,8 @@ export function Payments() {
 
   async function loadReport() {
     try {
-      const params: any = {}
-      if (reportStart) params.startDate = reportStart
-      if (reportEnd) params.endDate = reportEnd
-      const res = await api.get('/bills/report', { params })
+      const { start, end } = monthBounds(month)
+      const res = await api.get('/bills/report', { params: { startDate: start, endDate: end } })
       setReport(res.data)
     } catch { setError('Erro ao carregar relatório') }
   }
@@ -1039,11 +1033,7 @@ export function Payments() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 dark:text-white">Relatório por Fornecedor</h3>
-            <div className="flex gap-2 items-center">
-              <input className="input w-36" type="date" value={reportStart} onChange={e => setReportStart(e.target.value)} />
-              <input className="input w-36" type="date" value={reportEnd} onChange={e => setReportEnd(e.target.value)} />
-              <button onClick={loadReport} className="btn btn-primary text-sm">Filtrar</button>
-            </div>
+            <span className="text-sm text-gray-500 capitalize">{monthLabel(month)}</span>
           </div>
           {report.length === 0 ? (
             <p className="text-gray-500 text-center py-4">Nenhum dado disponível.</p>
