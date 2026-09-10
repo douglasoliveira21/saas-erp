@@ -41,8 +41,7 @@ export const navigationSections: NavSection[] = [
   ]},
   { id: 'financeiro', title: 'Financeiro', icon: Landmark, expandable: true, items: [
     { name: 'Visão financeira', href: '/financeiro', icon: DollarSign, roles: office, module: 'financeiro' },
-    { name: 'Contas a pagar', href: '/contas-pagar', icon: Receipt, roles: office, module: 'contas_pagar' },
-    { name: 'Pagamentos e recebimentos', href: '/pagamentos', icon: CreditCard, roles: office, module: 'pagamentos' },
+    { name: 'Contas a pagar e receber', href: '/contas-pagar', icon: CreditCard, roles: office, module: 'pagamentos' },
     { name: 'Conciliação bancária', href: '/conciliacao', icon: ArrowDownUp, roles: office, module: 'conciliacao' },
     { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: all, module: 'commissions' },
     { name: 'DRE', href: '/dre', icon: BarChart3, roles: office, module: 'dre' },
