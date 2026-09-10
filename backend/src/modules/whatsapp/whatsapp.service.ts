@@ -13,6 +13,10 @@ export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
   private readonly credentialKey = requireEncryptionSecret('CREDENTIAL_ENCRYPTION_KEY');
   private readonly previousCredentialKey = process.env.CREDENTIAL_ENCRYPTION_KEY_PREVIOUS || '';
+  // Quantas checagens seguidas leram "não conectado" vindo de um estado anterior "conectado" -
+  // usado por checkConnectionStatus pra não acreditar numa única leitura ruim/instável da
+  // Evolution (ver comentário lá).
+  private disconnectStreak = 0;
 
   constructor(
     @InjectRepository(WhatsappConfig) private configRepository: Repository<WhatsappConfig>,
@@ -175,19 +179,49 @@ export class WhatsappService {
 
   async checkConnectionStatus(): Promise<{ connectionStatus: string; lastCheckedAt: Date; lastError: string | null }> {
     const row = await this.getOrCreateRow();
+    const previousStatus = row.connectionStatus;
     try {
       const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
       const { state, raw, response } = await this.fetchConnectionState(apiUrl, apiKey, instanceName);
-      row.connectionStatus = state === 'open' || state === 'connected' ? 'conectado' : state === 'connecting' ? 'conectando' : 'desconectado';
+      const freshStatus = state === 'open' || state === 'connected' ? 'conectado' : state === 'connecting' ? 'conectando' : 'desconectado';
+      if (freshStatus === 'conectado') {
+        this.disconnectStreak = 0;
+        row.connectionStatus = 'conectado';
+      } else if (previousStatus === 'conectado') {
+        // Uma instância que já estava confirmada conectada não vira "desconectada" na tela por
+        // causa de uma única leitura ruim - a Evolution já mostrou instabilidade passageira
+        // (leitura isolada errada) sem a instância ter caído de verdade. Só assume a queda
+        // depois de 2 checagens seguidas discordando.
+        this.disconnectStreak++;
+        if (this.disconnectStreak < 2) {
+          this.logger.warn(`Leitura "${freshStatus}" após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/2)`);
+          row.connectionStatus = 'conectado';
+        } else {
+          row.connectionStatus = freshStatus;
+        }
+      } else {
+        this.disconnectStreak = 0;
+        row.connectionStatus = freshStatus;
+      }
       row.phoneNumber = response?.instance?.owner ? String(response.instance.owner).split('@')[0] : row.phoneNumber;
       row.lastError = null;
-      if (row.connectionStatus === 'desconectado' && raw !== 'close' && raw !== 'closed') {
+      if (freshStatus === 'desconectado' && raw !== 'close' && raw !== 'closed') {
         // O manager da Evolution costuma mostrar "conectado" com um estado que a gente ainda não
         // mapeia aqui - loga a resposta crua pra dar pra ajustar sem precisar adivinhar.
         this.logger.warn(`Estado de conexão não reconhecido, marcando como desconectado por segurança: ${JSON.stringify(response)}`);
       }
     } catch (error: any) {
-      row.connectionStatus = 'erro';
+      if (previousStatus === 'conectado') {
+        this.disconnectStreak++;
+        if (this.disconnectStreak < 2) {
+          this.logger.warn(`Erro ao checar conexão após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/2): ${error.message}`);
+        } else {
+          row.connectionStatus = 'erro';
+        }
+      } else {
+        this.disconnectStreak = 0;
+        row.connectionStatus = 'erro';
+      }
       row.lastError = error.message;
     } finally {
       row.lastCheckedAt = new Date();
