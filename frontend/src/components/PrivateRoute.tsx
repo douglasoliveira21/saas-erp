@@ -21,7 +21,7 @@ export function PrivateRoute({ children }: PrivateRouteProps) {
 
   const adminOnly = ['/users', '/email-settings', '/vehicles']
   const officeOnly = [
-    '/contracts', '/sla', '/reports', '/fiscal', '/financeiro', '/pagamentos',
+    '/contracts', '/sla', '/reports', '/fiscal', '/pagamentos',
     '/conciliacao', '/compras', '/contas-pagar', '/dre', '/financeiro-avancado',
     '/estoque-avancado', '/fiscal-avancado', '/inter-avancado', '/compras-avancado',
     '/controles-erp', '/cashback', '/fidelidade', '/assinaturas',

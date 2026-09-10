@@ -68,7 +68,7 @@ export function Layout() {
       await api.patch(`/operations/notifications/${item.id}/read`)
       setNotifications(items => items.map(current => current.id === item.id ? { ...current, status: 'lida' } : current))
     }
-    const routes: Record<string,string> = { account_receivable: '/financeiro', invoice: '/fiscal-avancado', approval_request: '/controles-erp', product: '/stock' }
+    const routes: Record<string,string> = { account_receivable: '/contas-pagar', invoice: '/fiscal-avancado', approval_request: '/controles-erp', product: '/stock' }
     setNotificationsOpen(false)
     navigate(routes[item.entity_type || ''] || '/controles-erp')
   }

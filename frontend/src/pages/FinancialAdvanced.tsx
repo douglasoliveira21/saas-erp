@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
-import { Building2, Landmark, ListTree, Lock, RefreshCw, Save } from 'lucide-react'
+import { Building2, CreditCard, Landmark, ListTree, Lock, RefreshCw, Save, X } from 'lucide-react'
 
-type Tab = 'cost-centers' | 'chart-accounts' | 'bank-accounts' | 'closings'
+type Tab = 'cost-centers' | 'chart-accounts' | 'bank-accounts' | 'closings' | 'card-fees'
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'cost-centers', label: 'Centro de custo' },
   { id: 'chart-accounts', label: 'Plano de contas' },
   { id: 'bank-accounts', label: 'Contas/caixa' },
   { id: 'closings', label: 'Fechamento' },
+  { id: 'card-fees', label: 'Taxas de cartão' },
 ]
 
 function currency(value: number) {
@@ -24,9 +25,11 @@ export function FinancialAdvanced() {
   const [chartAccounts, setChartAccounts] = useState<any[]>([])
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [closings, setClosings] = useState<any[]>([])
+  const [cardFees, setCardFees] = useState<any[]>([])
   const [costCenterForm, setCostCenterForm] = useState({ code: '', name: '', description: '' })
   const [chartForm, setChartForm] = useState({ code: '', name: '', type: 'despesa', parentId: '' })
   const [bankForm, setBankForm] = useState({ name: '', type: 'banco', bankName: '', agency: '', account: '', openingBalance: '' })
+  const [feeForm, setFeeForm] = useState({ operator: '', paymentType: 'credito', feePercentage: '', daysToReceive: '' })
   const [closingForm, setClosingForm] = useState(() => {
     const d = new Date()
     return { period: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, notes: '' }
@@ -42,6 +45,7 @@ export function FinancialAdvanced() {
       if (tab === 'chart-accounts') setChartAccounts((await api.get('/financial/chart-accounts')).data)
       if (tab === 'bank-accounts') setBankAccounts((await api.get('/financial/bank-accounts')).data)
       if (tab === 'closings') setClosings((await api.get('/financial/monthly-closings')).data)
+      if (tab === 'card-fees') setCardFees((await api.get('/financial/card-fees')).data)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Falha ao carregar dados')
     } finally {
@@ -67,6 +71,19 @@ export function FinancialAdvanced() {
   async function closeMonth(e: React.FormEvent) {
     e.preventDefault()
     await submit(() => api.post('/financial/monthly-closings', closingForm), () => setClosingForm({ ...closingForm, notes: '' }))
+  }
+
+  async function saveCardFee(e: React.FormEvent) {
+    e.preventDefault()
+    await submit(
+      () => api.post('/financial/card-fees', { operator: feeForm.operator, paymentType: feeForm.paymentType, feePercentage: Number(feeForm.feePercentage), daysToReceive: Number(feeForm.daysToReceive) }),
+      () => setFeeForm({ operator: '', paymentType: 'credito', feePercentage: '', daysToReceive: '' }),
+    )
+  }
+
+  async function deleteCardFee(id: string) {
+    if (!confirm('Remover taxa?')) return
+    await submit(() => api.delete(`/financial/card-fees/${id}`), () => {})
   }
 
   async function submit(request: () => Promise<any>, reset: () => void) {
@@ -149,6 +166,43 @@ export function FinancialAdvanced() {
             <Input label="Observações" value={closingForm.notes} onChange={(v) => setClosingForm({ ...closingForm, notes: v })} />
           </FormPanel>
           <DataTable loading={loading} rows={closings.map((c) => ({ ...c, closedAt: c.closedAt ? new Date(c.closedAt).toLocaleString('pt-BR') : '-' }))} columns={['period', 'closedAt', 'notes']} labels={['Competência', 'Fechado em', 'Observações']} />
+        </section>
+      )}
+
+      {tab === 'card-fees' && (
+        <section className="grid gap-6 lg:grid-cols-[360px_1fr]">
+          <FormPanel icon={<CreditCard />} title="Nova taxa de cartão" onSubmit={saveCardFee}>
+            <Input label="Operadora" value={feeForm.operator} onChange={(v) => setFeeForm({ ...feeForm, operator: v })} required />
+            <Select label="Tipo" value={feeForm.paymentType} onChange={(v) => setFeeForm({ ...feeForm, paymentType: v })} options={['credito', 'debito']} />
+            <Input label="Taxa (%)" type="number" value={feeForm.feePercentage} onChange={(v) => setFeeForm({ ...feeForm, feePercentage: v })} required />
+            <Input label="Dias para receber" type="number" value={feeForm.daysToReceive} onChange={(v) => setFeeForm({ ...feeForm, daysToReceive: v })} required />
+          </FormPanel>
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">Operadora</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">Tipo</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">Taxa</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">Dias p/ receber</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading && <tr><td className="px-4 py-8 text-center text-gray-500" colSpan={5}>Carregando...</td></tr>}
+                {!loading && cardFees.length === 0 && <tr><td className="px-4 py-8 text-center text-gray-500" colSpan={5}>Nenhuma taxa cadastrada</td></tr>}
+                {!loading && cardFees.map((fee) => (
+                  <tr key={fee.id}>
+                    <td className="px-4 py-3 font-medium text-gray-900">{fee.operator}</td>
+                    <td className="px-4 py-3 text-gray-700 capitalize">{fee.paymentType}</td>
+                    <td className="px-4 py-3 text-gray-700">{Number(fee.feePercentage).toFixed(2)}%</td>
+                    <td className="px-4 py-3 text-gray-700">{fee.daysToReceive} dias</td>
+                    <td className="px-4 py-3"><button onClick={() => deleteCardFee(fee.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Remover"><X className="w-4 h-4" /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>

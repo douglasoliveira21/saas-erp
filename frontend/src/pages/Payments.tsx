@@ -57,12 +57,18 @@ interface Bill {
   customer?: Customer | null;
 }
 
+interface Installment {
+  id: string; number: number; value: number; paidValue: number;
+  dueDate: string; paidAt: string | null; status: string; paymentMethod: string;
+  customer?: { name: string };
+}
+
 interface ReportRow {
   supplierId: string; supplierName: string; totalBills: string;
   totalValue: string; totalPaid: string; totalPending: string;
 }
 
-type Tab = 'lancamentos' | 'fornecedores' | 'relatorio'
+type Tab = 'lancamentos' | 'inadimplentes' | 'fornecedores' | 'relatorio'
 type LedgerRow = { kind: 'credito'; source: 'inter'; data: Payment } | { kind: 'credito'; source: 'manual'; data: Bill } | { kind: 'debito'; source: 'manual'; data: Bill }
 
 const receivableStatusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', vencido: 'Vencido', cancelado: 'Cancelado', a_receber: 'A Receber' }
@@ -161,9 +167,18 @@ export function Payments() {
   const [reportStart, setReportStart] = useState('')
   const [reportEnd, setReportEnd] = useState('')
 
+  // Inadimplentes
+  const [overdueInstallments, setOverdueInstallments] = useState<Installment[]>([])
+  const [loadingOverdue, setLoadingOverdue] = useState(false)
+  const [payingInstallment, setPayingInstallment] = useState<Installment | null>(null)
+  const [payInstallmentValue, setPayInstallmentValue] = useState('')
+  const [payInstallmentMethod, setPayInstallmentMethod] = useState('pix')
+  const [payingInstallmentSaving, setPayingInstallmentSaving] = useState(false)
+
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [month])
   useEffect(() => { loadSuppliersAndAlerts() }, [])
   useEffect(() => { if (activeTab === 'relatorio') loadReport() }, [activeTab])
+  useEffect(() => { if (activeTab === 'inadimplentes') loadOverdue() }, [activeTab])
 
   async function load() {
     setLoading(true)
@@ -200,6 +215,33 @@ export function Payments() {
       const res = await api.get('/bills/report', { params })
       setReport(res.data)
     } catch { setError('Erro ao carregar relatório') }
+  }
+
+  // ==================== INADIMPLENTES ====================
+  async function loadOverdue() {
+    setLoadingOverdue(true)
+    try {
+      const res = await api.get('/financial/overdue')
+      setOverdueInstallments(res.data)
+    } catch { setError('Erro ao carregar inadimplentes') }
+    finally { setLoadingOverdue(false) }
+  }
+
+  function openPayInstallment(inst: Installment) {
+    setPayingInstallment(inst)
+    setPayInstallmentValue(String(Number(inst.value) - Number(inst.paidValue || 0)))
+    setPayInstallmentMethod('pix')
+  }
+
+  async function confirmPayInstallment() {
+    if (!payingInstallment || !payInstallmentValue || Number(payInstallmentValue) <= 0) return
+    setPayingInstallmentSaving(true)
+    try {
+      await api.post(`/financial/pay/${payingInstallment.id}`, { value: Number(payInstallmentValue), paymentMethod: payInstallmentMethod })
+      setPayingInstallment(null)
+      loadOverdue()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao pagar') }
+    finally { setPayingInstallmentSaving(false) }
   }
 
   // ==================== RECEBIMENTOS (créditos) ====================
@@ -396,8 +438,6 @@ export function Payments() {
 
   async function saveBill() {
     if (!billForm.type) { setError('Escolha se é uma conta a pagar ou a receber'); return }
-    if (billForm.type === 'pagar' && !billForm.supplierId) { setError('Selecione o fornecedor'); return }
-    if (billForm.type === 'receber' && !billForm.customerId) { setError('Selecione o cliente'); return }
     if (!billForm.description || !billForm.value || !billForm.dueDate) {
       setError('Descrição, valor e vencimento são obrigatórios'); return
     }
@@ -563,6 +603,7 @@ export function Payments() {
 
   const tabItems: { key: Tab; label: string; icon: any }[] = [
     { key: 'lancamentos', label: 'Lançamentos', icon: Receipt },
+    { key: 'inadimplentes', label: 'Inadimplentes', icon: AlertTriangle },
     { key: 'fornecedores', label: 'Fornecedores', icon: Users },
     { key: 'relatorio', label: 'Relatório', icon: TrendingUp },
   ]
@@ -898,6 +939,51 @@ export function Payments() {
         </>
       )}
 
+      {/* ==================== TAB: INADIMPLENTES ==================== */}
+      {activeTab === 'inadimplentes' && (
+        <div className="card overflow-hidden p-0">
+          <div className="flex items-center gap-2 p-4 pb-2">
+            <AlertTriangle className="w-5 h-5 text-red-600" />
+            <h3 className="text-sm font-semibold text-red-700">Inadimplentes ({overdueInstallments.length})</h3>
+          </div>
+          {loadingOverdue ? (
+            <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+          ) : (
+            <table className="table">
+              <thead className="table-header">
+                <tr>
+                  <th className="table-cell font-semibold text-gray-700">Cliente</th>
+                  <th className="table-cell font-semibold text-gray-700">Parcela</th>
+                  <th className="table-cell font-semibold text-gray-700">Valor</th>
+                  <th className="table-cell font-semibold text-gray-700">Vencimento</th>
+                  <th className="table-cell font-semibold text-gray-700">Dias Atraso</th>
+                  <th className="table-cell font-semibold text-gray-700">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {overdueInstallments.length === 0 ? (
+                  <tr><td colSpan={6} className="table-cell text-center text-gray-500 py-8">Nenhum inadimplente</td></tr>
+                ) : overdueInstallments.map(inst => {
+                  const daysOverdue = Math.floor((new Date().getTime() - new Date(inst.dueDate).getTime()) / (1000 * 60 * 60 * 24))
+                  return (
+                    <tr key={inst.id} className="bg-red-50/50 hover:bg-red-50">
+                      <td className="table-cell font-medium text-sm">{inst.customer?.name || '-'}</td>
+                      <td className="table-cell text-sm">#{inst.number}</td>
+                      <td className="table-cell font-semibold text-red-600">{formatCurrency(Number(inst.value) - Number(inst.paidValue || 0))}</td>
+                      <td className="table-cell text-sm text-red-600">{formatDate(inst.dueDate)}</td>
+                      <td className="table-cell"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{daysOverdue} dias</span></td>
+                      <td className="table-cell">
+                        <button onClick={() => openPayInstallment(inst)} className="btn btn-primary px-3 py-1 text-xs flex items-center gap-1"><DollarSign className="w-3 h-3" /> Pagar</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* ==================== TAB: FORNECEDORES ==================== */}
       {activeTab === 'fornecedores' && (
         <div className="card">
@@ -1064,18 +1150,18 @@ export function Payments() {
 
               {billForm.type === 'pagar' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fornecedor *</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fornecedor (opcional, deixe em branco para uma despesa avulsa)</label>
                   <select className="input" value={billForm.supplierId} onChange={e => setBillForm({ ...billForm, supplierId: e.target.value })}>
-                    <option value="">Selecione...</option>
+                    <option value="">Sem fornecedor (despesa avulsa)</option>
                     {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
               )}
               {billForm.type === 'receber' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente *</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente (opcional, deixe em branco para uma receita avulsa)</label>
                   <select className="input" value={billForm.customerId} onChange={e => setBillForm({ ...billForm, customerId: e.target.value })}>
-                    <option value="">Selecione...</option>
+                    <option value="">Sem cliente (receita avulsa)</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
@@ -1211,6 +1297,47 @@ export function Payments() {
               <button onClick={() => setShowPayModal(false)} className="btn btn-secondary">Cancelar</button>
               <button onClick={confirmPay} className="btn btn-primary flex items-center gap-2">
                 <CreditCard className="w-4 h-4" /> {payingBill.type === 'receber' ? 'Confirmar Recebimento' : 'Confirmar Pagamento'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: PAGAR PARCELA INADIMPLENTE ==================== */}
+      {payingInstallment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Registrar Pagamento</h2>
+              <button onClick={() => setPayingInstallment(null)}><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
+                <p className="text-sm text-gray-500">Parcela #{payingInstallment.number} - {payingInstallment.customer?.name}</p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(Number(payingInstallment.value))}</p>
+                {Number(payingInstallment.paidValue) > 0 && <p className="text-xs text-green-600">Já pago: {formatCurrency(Number(payingInstallment.paidValue))}</p>}
+                <p className="text-xs text-gray-500">Restante: {formatCurrency(Number(payingInstallment.value) - Number(payingInstallment.paidValue || 0))}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Valor do Pagamento (R$)</label>
+                <input className="input" type="number" step="0.01" min="0.01" value={payInstallmentValue} onChange={e => setPayInstallmentValue(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Forma de Pagamento</label>
+                <select className="input" value={payInstallmentMethod} onChange={e => setPayInstallmentMethod(e.target.value)}>
+                  <option value="pix">PIX</option>
+                  <option value="dinheiro">Dinheiro</option>
+                  <option value="cartao_credito">Cartão Crédito</option>
+                  <option value="cartao_debito">Cartão Débito</option>
+                  <option value="boleto">Boleto</option>
+                  <option value="transferencia">Transferência</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
+              <button onClick={() => setPayingInstallment(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={confirmPayInstallment} disabled={payingInstallmentSaving || !payInstallmentValue || Number(payInstallmentValue) <= 0} className="btn btn-primary flex items-center gap-2 disabled:opacity-50">
+                {payingInstallmentSaving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />} Confirmar Pagamento
               </button>
             </div>
           </div>

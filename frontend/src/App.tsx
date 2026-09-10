@@ -24,7 +24,6 @@ const Contracts = lazy(() => import('./pages/Contracts').then(module => ({ defau
 const Sla = lazy(() => import('./pages/Sla').then(module => ({ default: module.Sla })))
 const Profile = lazy(() => import('./pages/Profile').then(module => ({ default: module.Profile })))
 const Fiscal = lazy(() => import('./pages/Fiscal').then(module => ({ default: module.Fiscal })))
-const Financial = lazy(() => import('./pages/Financial').then(module => ({ default: module.Financial })))
 const Payments = lazy(() => import('./pages/Payments').then(module => ({ default: module.Payments })))
 const Reconciliation = lazy(() => import('./pages/Reconciliation').then(module => ({ default: module.Reconciliation })))
 const Vehicles = lazy(() => import('./pages/Vehicles').then(module => ({ default: module.Vehicles })))
@@ -121,7 +120,6 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/fiscal" element={<Fiscal />} />
-              <Route path="/financeiro" element={<Financial />} />
               <Route path="/pagamentos" element={<Payments />} />
               <Route path="/conciliacao" element={<Reconciliation />} />
               <Route path="/compras" element={<Purchases />} />

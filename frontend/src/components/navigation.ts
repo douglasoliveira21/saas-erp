@@ -40,7 +40,6 @@ export const navigationSections: NavSection[] = [
     { name: 'Cotações e recebimento', href: '/compras-avancado', icon: ClipboardList, roles: office, module: 'compras' },
   ]},
   { id: 'financeiro', title: 'Financeiro', icon: Landmark, expandable: true, items: [
-    { name: 'Visão financeira', href: '/financeiro', icon: DollarSign, roles: office, module: 'financeiro' },
     { name: 'Contas a pagar e receber', href: '/contas-pagar', icon: CreditCard, roles: office, module: 'pagamentos' },
     { name: 'Conciliação bancária', href: '/conciliacao', icon: ArrowDownUp, roles: office, module: 'conciliacao' },
     { name: 'Comissões', href: '/commissions', icon: PiggyBank, roles: all, module: 'commissions' },

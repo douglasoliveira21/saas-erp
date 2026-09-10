@@ -225,7 +225,7 @@ export function Dashboard() {
                   (total R$ {overdueCustomers.reduce((s, c) => s + Number(c.overdueAmount), 0).toFixed(2)})
                 </span>
               </div>
-              <Link to="/financeiro" className="text-xs text-primary-600 hover:underline font-medium">Ver todos no Financeiro →</Link>
+              <Link to="/contas-pagar" className="text-xs text-primary-600 hover:underline font-medium">Ver todos em Contas a Pagar e Receber →</Link>
             </div>
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
               {(showAllOverdueCustomers ? overdueCustomers : overdueCustomers.slice(0, 5)).map(c => (

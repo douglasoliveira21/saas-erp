@@ -42,11 +42,8 @@ export class SuppliersService {
   // ==================== BILLS ====================
   async createBill(dto: any, userId: string): Promise<Bill | Bill[]> {
     const installments = dto.installments || 1;
-    if (dto.type === 'receber') {
-      if (!dto.customerId) throw new BadRequestException('Selecione o cliente');
-    } else if (!dto.supplierId) {
-      throw new BadRequestException('Selecione o fornecedor');
-    }
+    // Fornecedor/cliente ficam opcionais - permite lançar uma despesa/receita avulsa (ex: taxa
+    // bancária, receita extra) sem precisar cadastrar um fornecedor ou cliente só pra isso.
 
     if (dto.isFixedCost) {
       // Custo fixo mensal: diferente de parcelamento (que divide um valor total em N partes),
