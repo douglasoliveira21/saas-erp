@@ -171,7 +171,7 @@ export function Payments() {
   const [payInstallmentMethod, setPayInstallmentMethod] = useState('pix')
   const [payingInstallmentSaving, setPayingInstallmentSaving] = useState(false)
 
-  useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [month])
+  useEffect(() => { load() }, [month])
   useEffect(() => { loadSuppliersAndAlerts() }, [])
   useEffect(() => { if (activeTab === 'relatorio') loadReport() }, [activeTab, month])
   useEffect(() => { if (activeTab === 'inadimplentes') loadOverdue() }, [activeTab])
