@@ -42,14 +42,19 @@ interface Supplier {
   cep: string; contactPerson: string; observations: string; active: boolean;
 }
 
+interface Customer {
+  id: string; name: string; cpfCnpj?: string;
+}
+
 interface Bill {
-  id: string; supplierId: string; description: string; value: number;
+  id: string; type: string; supplierId: string; customerId?: string; description: string; value: number;
   paidValue: number; dueDate: string; paidAt: string; status: string;
   category: string; paymentMethod: string; installments: number;
   installmentNumber: number; recurringGroupId: string; documentNumber: string;
   barcode: string; observations: string; createdAt: string;
   isFixedCost?: boolean;
   supplier: Supplier | null;
+  customer?: Customer | null;
 }
 
 interface ReportRow {
@@ -58,7 +63,7 @@ interface ReportRow {
 }
 
 type Tab = 'lancamentos' | 'fornecedores' | 'relatorio'
-type LedgerRow = { kind: 'credito'; data: Payment } | { kind: 'debito'; data: Bill }
+type LedgerRow = { kind: 'credito'; source: 'inter'; data: Payment } | { kind: 'credito'; source: 'manual'; data: Bill } | { kind: 'debito'; source: 'manual'; data: Bill }
 
 const receivableStatusLabels: Record<string, string> = { pendente: 'Pendente', pago: 'Pago', vencido: 'Vencido', cancelado: 'Cancelado', a_receber: 'A Receber' }
 const receivableStatusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', pago: 'bg-green-100 text-green-700', vencido: 'bg-red-100 text-red-700', cancelado: 'bg-gray-100 text-gray-700', a_receber: 'bg-blue-100 text-blue-700' }
@@ -110,6 +115,7 @@ export function Payments() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [bills, setBills] = useState<Bill[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [alerts, setAlerts] = useState<{ overdue: Bill[]; upcoming: Bill[] }>({ overdue: [], upcoming: [] })
   const [report, setReport] = useState<ReportRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -131,7 +137,7 @@ export function Payments() {
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
   const [saving, setSaving] = useState(false)
   const [billForm, setBillForm] = useState({
-    supplierId: '', description: '', value: '', dueDate: '',
+    type: '' as '' | 'pagar' | 'receber', supplierId: '', customerId: '', description: '', value: '', dueDate: '',
     category: '', installments: '1', barcode: '', documentNumber: '',
     paymentMethod: '', observations: '', isFixedCost: false, recurringMonths: '12'
   })
@@ -175,11 +181,13 @@ export function Payments() {
 
   async function loadSuppliersAndAlerts() {
     try {
-      const [sRes, alertRes] = await Promise.all([
+      const [sRes, cRes, alertRes] = await Promise.all([
         api.get('/suppliers'),
+        api.get('/customers'),
         api.get('/bills/alerts'),
       ])
       setSuppliers(sRes.data)
+      setCustomers(cRes.data)
       setAlerts(alertRes.data)
     } catch { /* ignora - não bloqueia a tela de lançamentos */ }
   }
@@ -369,14 +377,14 @@ export function Payments() {
   // ==================== CONTAS A PAGAR (débitos) ====================
   function openNewBill() {
     setEditingBill(null)
-    setBillForm({ supplierId: '', description: '', value: '', dueDate: '', category: '', installments: '1', barcode: '', documentNumber: '', paymentMethod: '', observations: '', isFixedCost: false, recurringMonths: '12' })
+    setBillForm({ type: '', supplierId: '', customerId: '', description: '', value: '', dueDate: '', category: '', installments: '1', barcode: '', documentNumber: '', paymentMethod: '', observations: '', isFixedCost: false, recurringMonths: '12' })
     setError(''); setShowBillModal(true)
   }
 
   function openEditBill(b: Bill) {
     setEditingBill(b)
     setBillForm({
-      supplierId: b.supplierId, description: b.description,
+      type: (b.type as 'pagar' | 'receber') || 'pagar', supplierId: b.supplierId || '', customerId: b.customerId || '', description: b.description,
       value: String(b.value), dueDate: b.dueDate,
       category: b.category || '', installments: String(b.installments),
       barcode: b.barcode || '', documentNumber: b.documentNumber || '',
@@ -387,13 +395,18 @@ export function Payments() {
   }
 
   async function saveBill() {
-    if (!billForm.supplierId || !billForm.description || !billForm.value || !billForm.dueDate) {
-      setError('Fornecedor, descrição, valor e vencimento são obrigatórios'); return
+    if (!billForm.type) { setError('Escolha se é uma conta a pagar ou a receber'); return }
+    if (billForm.type === 'pagar' && !billForm.supplierId) { setError('Selecione o fornecedor'); return }
+    if (billForm.type === 'receber' && !billForm.customerId) { setError('Selecione o cliente'); return }
+    if (!billForm.description || !billForm.value || !billForm.dueDate) {
+      setError('Descrição, valor e vencimento são obrigatórios'); return
     }
     setSaving(true)
     try {
       const payload: any = {
-        supplierId: billForm.supplierId,
+        type: billForm.type,
+        supplierId: billForm.type === 'pagar' ? billForm.supplierId : null,
+        customerId: billForm.type === 'receber' ? billForm.customerId : null,
         description: billForm.description.trim(),
         value: parseFloat(billForm.value),
         dueDate: billForm.dueDate,
@@ -488,17 +501,21 @@ export function Payments() {
   }
 
   // ==================== LANÇAMENTOS (unificado) ====================
+  const billsPagar = useMemo(() => bills.filter(b => b.type !== 'receber'), [bills])
+  const billsReceber = useMemo(() => bills.filter(b => b.type === 'receber'), [bills])
+
   const ledgerRows: LedgerRow[] = useMemo(() => [
-    ...payments.map(p => ({ kind: 'credito' as const, data: p })),
-    ...bills.map(b => ({ kind: 'debito' as const, data: b })),
-  ].sort((a, b) => (a.data.dueDate || '').localeCompare(b.data.dueDate || '')), [payments, bills])
+    ...payments.map(p => ({ kind: 'credito' as const, source: 'inter' as const, data: p })),
+    ...billsReceber.map(b => ({ kind: 'credito' as const, source: 'manual' as const, data: b })),
+    ...billsPagar.map(b => ({ kind: 'debito' as const, source: 'manual' as const, data: b })),
+  ].sort((a, b) => (a.data.dueDate || '').localeCompare(b.data.dueDate || '')), [payments, billsReceber, billsPagar])
 
   const filteredRows = ledgerRows.filter(row => {
     if (typeFilter && row.kind !== typeFilter) return false
     if (statusFilter && row.data.status !== statusFilter) return false
     if (!search) return true
     const s = search.toLowerCase()
-    if (row.kind === 'credito') {
+    if (row.source === 'inter') {
       const p = row.data
       return (p.customerName || '').toLowerCase().includes(s) ||
         (p.codigoSolicitacao || '').includes(s) ||
@@ -508,6 +525,7 @@ export function Payments() {
     const b = row.data
     return (b.description || '').toLowerCase().includes(s) ||
       (b.supplier?.name || '').toLowerCase().includes(s) ||
+      (b.customer?.name || '').toLowerCase().includes(s) ||
       (b.documentNumber || '').toLowerCase().includes(s)
   })
 
@@ -530,13 +548,16 @@ export function Payments() {
   const visibleRows = filteredRows.slice(0, visibleCount)
 
   const totalRecebido = payments.filter(p => p.status === 'pago').reduce((s, p) => s + Number(p.value), 0)
+    + billsReceber.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
   const totalAReceber = payments.filter(p => ['pendente', 'a_receber', 'vencido'].includes(p.status)).reduce((s, p) => s + Number(p.value), 0)
-  const totalPago = bills.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
-  const totalAPagar = bills.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
+    + billsReceber.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
+  const totalPago = billsPagar.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
+  const totalAPagar = billsPagar.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
   // Total de créditos/débitos do mês: soma de todos os lançamentos não cancelados, recebidos ou
   // não - diferente do "Recebido"/"Pago" abaixo, que só contam o que já entrou/saiu de fato.
   const totalCreditos = payments.filter(p => p.status !== 'cancelado').reduce((s, p) => s + Number(p.value), 0)
-  const totalDebitos = bills.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
+    + billsReceber.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
+  const totalDebitos = billsPagar.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
   // Caixa líquido = só o que já entrou e já saiu de fato (recebido - pago), não projeção do que falta.
   const saldo = totalRecebido - totalPago
 
@@ -565,7 +586,7 @@ export function Payments() {
                 <RefreshCw className={'w-4 h-4 ' + (reconciling ? 'animate-spin' : '')} /> Conciliar Inter
               </button>
               <button onClick={openNewBill} className="btn btn-primary flex items-center gap-2">
-                <Plus className="w-4 h-4" /> Nova Conta a Pagar
+                <Plus className="w-4 h-4" /> Nova Conta
               </button>
               <button onClick={load} className="btn btn-secondary flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Atualizar</button>
             </>
@@ -748,7 +769,7 @@ export function Payments() {
                 <tbody className="divide-y divide-gray-200">
                   {filteredRows.length === 0 ? (
                     <tr><td colSpan={7} className="table-cell text-center text-gray-500 py-8">Nenhum lançamento neste mês</td></tr>
-                  ) : visibleRows.map(row => row.kind === 'credito' ? (
+                  ) : visibleRows.map(row => row.source === 'inter' ? (
                     <tr key={'c-' + row.data.id} className="hover:bg-gray-50 border-l-2 border-l-green-400">
                       <td className="table-cell">
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Crédito</span>
@@ -792,6 +813,40 @@ export function Payments() {
                           )}
                           {row.data.status === 'cancelado' && (
                             <button onClick={() => deletePayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir da lista"><Trash2 className="w-4 h-4" /></button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : row.kind === 'credito' ? (
+                    <tr key={'m-' + row.data.id} className="hover:bg-gray-50 border-l-2 border-l-green-400">
+                      <td className="table-cell">
+                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Crédito</span>
+                        {row.data.category && <p className="text-[10px] text-gray-400 mt-0.5">{row.data.category}</p>}
+                      </td>
+                      <td className="table-cell text-sm font-medium">
+                        {row.data.customer?.name || '-'}
+                        <p className="text-xs text-gray-500 truncate max-w-[180px]" title={row.data.description}>{row.data.description}</p>
+                      </td>
+                      <td className="table-cell font-semibold text-green-600">+ {formatCurrency(Number(row.data.value))}</td>
+                      <td className="table-cell text-sm">{formatDate(row.data.dueDate)}</td>
+                      <td className="table-cell">
+                        <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (billStatusColors[row.data.status] || '')}>{billStatusLabels[row.data.status] || row.data.status}</span>
+                        {row.data.installments > 1 && <p className="text-xs text-gray-500 mt-0.5">{row.data.installmentNumber}/{row.data.installments}</p>}
+                      </td>
+                      <td className="table-cell text-sm">{row.data.documentNumber || '-'}</td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          {['pendente', 'vencido', 'parcial'].includes(row.data.status) && (
+                            <button onClick={() => openPay(row.data)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar recebimento"><DollarSign className="w-4 h-4" /></button>
+                          )}
+                          {['pendente', 'vencido'].includes(row.data.status) && (
+                            <button onClick={() => openEditBill(row.data)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit2 className="w-4 h-4" /></button>
+                          )}
+                          {['pendente', 'vencido'].includes(row.data.status) && (
+                            <button onClick={() => cancelBill(row.data.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Cancelar"><Ban className="w-4 h-4" /></button>
+                          )}
+                          {isAdmin && (
+                            <button onClick={() => removeBill(row.data.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
                       </td>
@@ -984,20 +1039,47 @@ export function Payments() {
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {editingBill ? 'Editar Conta' : 'Nova Conta a Pagar'}
+                {editingBill ? 'Editar Conta' : 'Nova Conta'}
               </h2>
               <button onClick={() => setShowBillModal(false)}><X className="w-5 h-5 text-gray-500" /></button>
             </div>
             <div className="p-6 space-y-4">
               {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fornecedor *</label>
-                <select className="input" value={billForm.supplierId} onChange={e => setBillForm({ ...billForm, supplierId: e.target.value })}>
-                  <option value="">Selecione...</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
+              {!editingBill && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Essa conta é... *</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => setBillForm({ ...billForm, type: 'pagar', customerId: '' })}
+                      className={'p-3 rounded-lg border-2 text-sm font-medium flex items-center justify-center gap-2 ' + (billForm.type === 'pagar' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600 hover:border-gray-300')}>
+                      <ArrowUpCircle className="w-4 h-4" /> A Pagar (fornecedor)
+                    </button>
+                    <button type="button" onClick={() => setBillForm({ ...billForm, type: 'receber', supplierId: '' })}
+                      className={'p-3 rounded-lg border-2 text-sm font-medium flex items-center justify-center gap-2 ' + (billForm.type === 'receber' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-600 hover:border-gray-300')}>
+                      <ArrowDownCircle className="w-4 h-4" /> A Receber (cliente)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {billForm.type === 'pagar' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fornecedor *</label>
+                  <select className="input" value={billForm.supplierId} onChange={e => setBillForm({ ...billForm, supplierId: e.target.value })}>
+                    <option value="">Selecione...</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {billForm.type === 'receber' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente *</label>
+                  <select className="input" value={billForm.customerId} onChange={e => setBillForm({ ...billForm, customerId: e.target.value })}>
+                    <option value="">Selecione...</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição *</label>
@@ -1016,13 +1098,15 @@ export function Payments() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Categoria</label>
-                  <select className="input" value={billForm.category} onChange={e => setBillForm({ ...billForm, category: e.target.value })}>
-                    <option value="">Selecione...</option>
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
+                {billForm.type !== 'receber' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Categoria</label>
+                    <select className="input" value={billForm.category} onChange={e => setBillForm({ ...billForm, category: e.target.value })}>
+                      <option value="">Selecione...</option>
+                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Parcelas</label>
                   <input className="input" type="number" min="1" max="48" value={billForm.installments} onChange={e => setBillForm({ ...billForm, installments: e.target.value })} disabled={!!editingBill || billForm.isFixedCost} />
@@ -1032,7 +1116,7 @@ export function Payments() {
                 </div>
               </div>
 
-              {!editingBill && (
+              {!editingBill && billForm.type === 'pagar' && (
                 <div className="p-3 bg-gray-50 dark:bg-gray-700/40 rounded-lg space-y-2">
                   <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
                     <input type="checkbox" checked={billForm.isFixedCost} onChange={e => setBillForm({ ...billForm, isFixedCost: e.target.checked, installments: '1' })} />
@@ -1093,12 +1177,12 @@ export function Payments() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Confirmar Pagamento</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{payingBill.type === 'receber' ? 'Confirmar Recebimento' : 'Confirmar Pagamento'}</h2>
               <button onClick={() => setShowPayModal(false)}><X className="w-5 h-5 text-gray-500" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-sm text-gray-600 dark:text-gray-400">Fornecedor: <strong>{payingBill.supplier?.name}</strong></p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{payingBill.type === 'receber' ? 'Cliente' : 'Fornecedor'}: <strong>{payingBill.type === 'receber' ? payingBill.customer?.name : payingBill.supplier?.name}</strong></p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Descrição: <strong>{payingBill.description}</strong></p>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Valor: <strong>{formatCurrency(Number(payingBill.value))}</strong></p>
               </div>
@@ -1126,7 +1210,7 @@ export function Payments() {
             <div className="flex justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
               <button onClick={() => setShowPayModal(false)} className="btn btn-secondary">Cancelar</button>
               <button onClick={confirmPay} className="btn btn-primary flex items-center gap-2">
-                <CreditCard className="w-4 h-4" /> Confirmar Pagamento
+                <CreditCard className="w-4 h-4" /> {payingBill.type === 'receber' ? 'Confirmar Recebimento' : 'Confirmar Pagamento'}
               </button>
             </div>
           </div>

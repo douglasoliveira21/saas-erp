@@ -1,13 +1,20 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, DeleteDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Supplier } from './supplier.entity';
+import { Customer } from '../../customers/entities/customer.entity';
 
 @Entity('bills')
 export class Bill {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'supplier_id' })
+  @Column({ type: 'varchar', length: 10, default: 'pagar' })
+  type: string; // pagar (fornecedor) | receber (cliente, avulso)
+
+  @Column({ name: 'supplier_id', nullable: true })
   supplierId: string;
+
+  @Column({ name: 'customer_id', nullable: true })
+  customerId: string;
 
   @Column({ length: 255 })
   description: string;
@@ -81,4 +88,8 @@ export class Bill {
   @ManyToOne(() => Supplier)
   @JoinColumn({ name: 'supplier_id' })
   supplier: Supplier;
+
+  @ManyToOne(() => Customer)
+  @JoinColumn({ name: 'customer_id' })
+  customer: Customer;
 }

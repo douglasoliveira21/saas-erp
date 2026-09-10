@@ -44,7 +44,7 @@ export class BillsController {
   createBill(@Body() dto: any, @Request() req: any) { return this.service.createBill(dto, req.user.id); }
 
   @Get()
-  findAllBills(@Query() query: any) { return this.service.findAllBills(query); }
+  findAllBills(@Query() query: { status?: string; supplierId?: string; customerId?: string; type?: string; startDate?: string; endDate?: string; category?: string }) { return this.service.findAllBills(query); }
 
   @Get('alerts')
   getAlerts(@Query('days') days?: string) { return this.service.getAlerts(days ? parseInt(days) : 7); }

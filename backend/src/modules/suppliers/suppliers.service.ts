@@ -42,6 +42,11 @@ export class SuppliersService {
   // ==================== BILLS ====================
   async createBill(dto: any, userId: string): Promise<Bill | Bill[]> {
     const installments = dto.installments || 1;
+    if (dto.type === 'receber') {
+      if (!dto.customerId) throw new BadRequestException('Selecione o cliente');
+    } else if (!dto.supplierId) {
+      throw new BadRequestException('Selecione o fornecedor');
+    }
 
     if (dto.isFixedCost) {
       // Custo fixo mensal: diferente de parcelamento (que divide um valor total em N partes),
@@ -101,13 +106,16 @@ export class SuppliersService {
     return this.billRepo.save(bill);
   }
 
-  async findAllBills(filters?: { status?: string; supplierId?: string; startDate?: string; endDate?: string; category?: string }): Promise<Bill[]> {
+  async findAllBills(filters?: { status?: string; supplierId?: string; customerId?: string; type?: string; startDate?: string; endDate?: string; category?: string }): Promise<Bill[]> {
     const qb = this.billRepo.createQueryBuilder('bill')
       .leftJoinAndSelect('bill.supplier', 'supplier')
+      .leftJoinAndSelect('bill.customer', 'customer')
       .orderBy('bill.dueDate', 'ASC');
 
     if (filters?.status) qb.andWhere('bill.status = :status', { status: filters.status });
     if (filters?.supplierId) qb.andWhere('bill.supplierId = :supplierId', { supplierId: filters.supplierId });
+    if (filters?.customerId) qb.andWhere('bill.customerId = :customerId', { customerId: filters.customerId });
+    if (filters?.type) qb.andWhere('bill.type = :type', { type: filters.type });
     if (filters?.startDate) qb.andWhere('bill.dueDate >= :startDate', { startDate: filters.startDate });
     if (filters?.endDate) qb.andWhere('bill.dueDate <= :endDate', { endDate: filters.endDate });
     if (filters?.category) qb.andWhere('bill.category = :category', { category: filters.category });
@@ -158,12 +166,14 @@ export class SuppliersService {
       const existingMov = await manager.query('SELECT id FROM financial_movements WHERE idempotency_key=$1', [movIdempotencyKey]);
       if (!existingMov[0]) {
         const today = new Date().toISOString().split('T')[0];
+        const isReceivable = bill.type === 'receber';
         await manager.query(
           `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, idempotency_key, created_by)
-           VALUES ('despesa', $1, $2, $3, $4, $5, $6, 'bill_payment', $7, false, $8, $9)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'bill_payment', $8, false, $9, $10)`,
           [
+            isReceivable ? 'receita' : 'despesa',
             bill.category || 'outros',
-            `Pgto: ${bill.description || 'Conta a pagar'}${bill.installments > 1 ? ` (${bill.installmentNumber}/${bill.installments})` : ''}`,
+            `${isReceivable ? 'Receb' : 'Pgto'}: ${bill.description || (isReceivable ? 'Conta a receber' : 'Conta a pagar')}${bill.installments > 1 ? ` (${bill.installmentNumber}/${bill.installments})` : ''}`,
             paidValue,
             today,
             id,
@@ -209,7 +219,7 @@ export class SuppliersService {
     const futureDateStr = futureDate.toISOString().split('T')[0];
 
     const overdue = await this.billRepo.find({
-      where: { status: In(['pendente', 'vencido']), dueDate: LessThanOrEqual(today) },
+      where: { type: 'pagar', status: In(['pendente', 'vencido']), dueDate: LessThanOrEqual(today) },
       relations: ['supplier'],
       order: { dueDate: 'ASC' },
     });
@@ -224,7 +234,8 @@ export class SuppliersService {
 
     const upcoming = await this.billRepo.createQueryBuilder('bill')
       .leftJoinAndSelect('bill.supplier', 'supplier')
-      .where('bill.status = :status', { status: 'pendente' })
+      .where('bill.type = :type', { type: 'pagar' })
+      .andWhere('bill.status = :status', { status: 'pendente' })
       .andWhere('bill.dueDate > :today', { today })
       .andWhere('bill.dueDate <= :future', { future: futureDateStr })
       .orderBy('bill.dueDate', 'ASC')
@@ -237,6 +248,7 @@ export class SuppliersService {
   async getReportBySupplier(startDate?: string, endDate?: string): Promise<any[]> {
     let query = this.billRepo.createQueryBuilder('bill')
       .leftJoin('bill.supplier', 'supplier')
+      .where('bill.type = :type', { type: 'pagar' })
       .select('supplier.id', 'supplierId')
       .addSelect('supplier.name', 'supplierName')
       .addSelect('COUNT(bill.id)', 'totalBills')
@@ -259,7 +271,7 @@ export class SuppliersService {
     const endOfMonth = new Date();
     endOfMonth.setMonth(endOfMonth.getMonth() + 1, 0);
 
-    const all = await this.billRepo.find({ where: { status: In(['pendente', 'vencido', 'pago', 'parcial']) } });
+    const all = await this.billRepo.find({ where: { type: 'pagar', status: In(['pendente', 'vencido', 'pago', 'parcial']) } });
     const overdue = all.filter(b => (b.status === 'pendente' || b.status === 'vencido') && b.dueDate <= today);
     const pending = all.filter(b => b.status === 'pendente' && b.dueDate > today);
     const paid = all.filter(b => b.status === 'pago');

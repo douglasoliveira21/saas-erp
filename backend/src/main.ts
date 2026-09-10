@@ -28,6 +28,11 @@ async function bootstrap() {
     // (synchronize desligado) toda conta parcelada em mais de 1x quebrava silenciosamente.
     await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS recurring_group_id VARCHAR(100)`).catch(() => {});
     await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS is_fixed_cost BOOLEAN DEFAULT FALSE`).catch(() => {});
+    // 'bills' agora também guarda contas a receber avulsas (sem venda vinculada) - supplier_id
+    // vira opcional e ganha um par customer_id/type (ver migration BillsReceivableType).
+    await ds.query(`ALTER TABLE bills ALTER COLUMN supplier_id DROP NOT NULL`).catch(() => {});
+    await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'pagar'`).catch(() => {});
+    await ds.query(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS customer_id UUID`).catch(() => {});
     await ds.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS origin VARCHAR(20) DEFAULT 'manual'`).catch(() => {});
     await ds.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS registration_status VARCHAR(20) DEFAULT 'completo'`).catch(() => {});
     await ds.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS financial_status VARCHAR(20)`).catch(() => {});
