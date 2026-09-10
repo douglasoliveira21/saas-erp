@@ -479,6 +479,11 @@ export function Payments() {
   const totalAReceber = payments.filter(p => ['pendente', 'a_receber', 'vencido'].includes(p.status)).reduce((s, p) => s + Number(p.value), 0)
   const totalPago = bills.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
   const totalAPagar = bills.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
+  // Total de créditos/débitos do mês: soma de todos os lançamentos não cancelados, recebidos ou
+  // não - diferente do "Recebido"/"Pago" abaixo, que só contam o que já entrou/saiu de fato.
+  const totalCreditos = payments.filter(p => p.status !== 'cancelado').reduce((s, p) => s + Number(p.value), 0)
+  const totalDebitos = bills.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
+  // Caixa líquido = só o que já entrou e já saiu de fato (recebido - pago), não projeção do que falta.
   const saldo = totalRecebido - totalPago
 
   const tabItems: { key: Tab; label: string; icon: any }[] = [
@@ -533,8 +538,33 @@ export function Payments() {
         )}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      {/* Resumo do mês */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className="card flex items-center gap-3 py-4 border-l-4 border-l-green-500">
+          <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center"><ArrowDownCircle className="w-5 h-5 text-green-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Total de Créditos (mês)</p>
+            <p className="text-xl font-bold text-green-600">{formatCurrency(totalCreditos)}</p>
+          </div>
+        </div>
+        <div className="card flex items-center gap-3 py-4 border-l-4 border-l-red-500">
+          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center"><ArrowUpCircle className="w-5 h-5 text-red-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Total de Débitos (mês)</p>
+            <p className="text-xl font-bold text-red-600">{formatCurrency(totalDebitos)}</p>
+          </div>
+        </div>
+        <div className={'card flex items-center gap-3 py-4 border-l-4 ' + (saldo >= 0 ? 'border-l-green-500' : 'border-l-red-500')}>
+          <div className={'w-10 h-10 rounded-lg flex items-center justify-center ' + (saldo >= 0 ? 'bg-green-100' : 'bg-red-100')}><DollarSign className={'w-5 h-5 ' + (saldo >= 0 ? 'text-green-600' : 'text-red-600')} /></div>
+          <div>
+            <p className="text-xs text-gray-500">Valor Líquido em Caixa</p>
+            <p className={'text-xl font-bold ' + (saldo >= 0 ? 'text-green-600' : 'text-red-600')}>{formatCurrency(saldo)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Cards - detalhamento */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="card flex items-center gap-3 py-3">
           <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center"><ArrowDownCircle className="w-4 h-4 text-green-600" /></div>
           <div>
@@ -561,13 +591,6 @@ export function Payments() {
           <div>
             <p className="text-xs text-gray-500">A Pagar</p>
             <p className="text-lg font-bold text-yellow-600">{formatCurrency(totalAPagar)}</p>
-          </div>
-        </div>
-        <div className="card flex items-center gap-3 py-3">
-          <div className={'w-9 h-9 rounded-lg flex items-center justify-center ' + (saldo >= 0 ? 'bg-green-100' : 'bg-red-100')}><DollarSign className={'w-4 h-4 ' + (saldo >= 0 ? 'text-green-600' : 'text-red-600')} /></div>
-          <div>
-            <p className="text-xs text-gray-500">Saldo do mês</p>
-            <p className={'text-lg font-bold ' + (saldo >= 0 ? 'text-green-600' : 'text-red-600')}>{formatCurrency(saldo)}</p>
           </div>
         </div>
       </div>
