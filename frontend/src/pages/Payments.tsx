@@ -764,26 +764,32 @@ export function Payments() {
                       <td className="table-cell text-sm">{row.data.invoiceNumber || '-'}</td>
                       <td className="table-cell">
                         <div className="flex gap-1">
+                          {/* Ordem pensada pro fluxo de uso: confirmar que pagou, baixar os documentos
+                              (boleto/NF/XML), e só então as ações que alteram o boleto (mudar
+                              data/valor, cancelar). O resto (consultar status, reverter, excluir)
+                              fica no fim por serem ações de exceção/correção, não do dia a dia. */}
                           {!['pago', 'cancelado'].includes(row.data.status) && (
-                            <button onClick={() => markAsReceived(row.data)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Marcar como recebido (pago por outra forma)"><CheckCircle className="w-4 h-4" /></button>
-                          )}
-                          {row.data.status === 'pago' && row.data.origem === 'venda' && (
-                            <button onClick={() => revertToReceivable(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter para A Receber (marcado como pago por engano)"><Undo2 className="w-4 h-4" /></button>
+                            <button onClick={() => markAsReceived(row.data)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Confirmar pagamento (recebido por fora do Inter)"><CheckCircle className="w-4 h-4" /></button>
                           )}
                           {row.data.type === 'boleto' && (
-                            <>
-                              <button onClick={() => downloadPdf(row.data.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF do boleto"><Download className="w-4 h-4" /></button>
-                              {!['cancelado', 'pago'].includes(row.data.status) && <button onClick={() => cancelPayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar boleto"><XCircle className="w-4 h-4" /></button>}
-                              {!['cancelado', 'pago'].includes(row.data.status) && <button onClick={() => openReissueModal(row.data)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Reemitir com nova data de vencimento"><CalendarClock className="w-4 h-4" /></button>}
-                            </>
+                            <button onClick={() => downloadPdf(row.data.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar boleto"><Download className="w-4 h-4" /></button>
                           )}
                           {row.data.invoiceId && (
                             <>
-                              <button onClick={() => downloadInvoicePdf(row.data)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded" title="Baixar PDF da nota fiscal"><FileDown className="w-4 h-4" /></button>
-                              <button onClick={() => downloadInvoiceXml(row.data)} className="p-1 text-teal-600 hover:bg-teal-50 rounded" title="Baixar XML da nota fiscal"><FileCode className="w-4 h-4" /></button>
+                              <button onClick={() => downloadInvoicePdf(row.data)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded" title="Baixar nota fiscal"><FileDown className="w-4 h-4" /></button>
+                              <button onClick={() => downloadInvoiceXml(row.data)} className="p-1 text-teal-600 hover:bg-teal-50 rounded" title="Baixar XML"><FileCode className="w-4 h-4" /></button>
                             </>
                           )}
+                          {row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status) && (
+                            <button onClick={() => openReissueModal(row.data)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Mudar data e valor"><CalendarClock className="w-4 h-4" /></button>
+                          )}
+                          {row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status) && (
+                            <button onClick={() => cancelPayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>
+                          )}
                           <button onClick={() => checkStatus(row.data.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
+                          {row.data.status === 'pago' && row.data.origem === 'venda' && (
+                            <button onClick={() => revertToReceivable(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter para A Receber (marcado como pago por engano)"><Undo2 className="w-4 h-4" /></button>
+                          )}
                           {row.data.status === 'cancelado' && (
                             <button onClick={() => deletePayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir da lista"><Trash2 className="w-4 h-4" /></button>
                           )}
