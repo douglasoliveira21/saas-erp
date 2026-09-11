@@ -14,8 +14,8 @@ export class WhatsappService {
   private readonly credentialKey = requireEncryptionSecret('CREDENTIAL_ENCRYPTION_KEY');
   private readonly previousCredentialKey = process.env.CREDENTIAL_ENCRYPTION_KEY_PREVIOUS || '';
   // Quantas checagens seguidas leram "não conectado" vindo de um estado anterior "conectado" -
-  // usado por checkConnectionStatus pra não acreditar numa única leitura ruim/instável da
-  // Evolution (ver comentário lá).
+  // usado por checkConnectionStatus pra não acreditar em leituras ruins/instáveis isoladas da
+  // Evolution (precisa de 3 seguidas, ver comentário lá).
   private disconnectStreak = 0;
 
   constructor(
@@ -129,13 +129,20 @@ export class WhatsappService {
     await this.ensureInstance();
     const { apiUrl, apiKey, instanceName } = await this.getEffectiveCreds();
 
-    // Nunca desloga a instância sem antes confirmar que ela genuinamente não está conectada.
-    // Antes esta função sempre chamava /instance/logout incondicionalmente - bastava a tela de
-    // WhatsApp achar (mesmo por engano, ex: um erro de leitura do status) que estava
-    // desconectada e tentar gerar um QR automaticamente (ela refaz isso a cada ~28s enquanto
-    // não vê "conectado") para essa chamada derrubar uma sessão que na verdade estava
-    // funcionando normalmente no celular/Evolution - exatamente o "fica desconectando sozinho".
-    const currentStateValue = await this.fetchConnectionState(apiUrl, apiKey, instanceName).then(r => r.state).catch(() => '');
+    // Nunca desloga a instância sem antes confirmar (2x, com um intervalo) que ela genuinamente
+    // não está conectada. Antes esta função chamava /instance/logout incondicionalmente após uma
+    // ÚNICA leitura - bastava essa leitura vir ruim por uma instabilidade passageira da Evolution
+    // (mesmo problema que afeta checkConnectionStatus, ver o disconnectStreak lá) para essa
+    // chamada tentar derrubar uma sessão que na verdade estava funcionando normalmente. A tela de
+    // WhatsApp já refaz essa chamada sozinha a cada ~28s enquanto não vê "conectado", então uma
+    // leitura ruim isolada bastava pra isso disparar.
+    const readState = () => this.fetchConnectionState(apiUrl, apiKey, instanceName).then(r => r.state).catch(() => '');
+    let currentStateValue = await readState();
+    if (currentStateValue === 'open' || currentStateValue === 'connected') {
+      return { base64: null, alreadyConnected: true };
+    }
+    await new Promise(r => setTimeout(r, 2000));
+    currentStateValue = await readState();
     if (currentStateValue === 'open' || currentStateValue === 'connected') {
       return { base64: null, alreadyConnected: true };
     }
@@ -189,12 +196,12 @@ export class WhatsappService {
         row.connectionStatus = 'conectado';
       } else if (previousStatus === 'conectado') {
         // Uma instância que já estava confirmada conectada não vira "desconectada" na tela por
-        // causa de uma única leitura ruim - a Evolution já mostrou instabilidade passageira
-        // (leitura isolada errada) sem a instância ter caído de verdade. Só assume a queda
-        // depois de 2 checagens seguidas discordando.
+        // causa de uma leitura ruim isolada - a Evolution já mostrou instabilidade passageira
+        // que às vezes dura mais de um ciclo de checagem (1 min). Só assume a queda depois de 3
+        // checagens seguidas discordando (3 minutos de instabilidade contínua).
         this.disconnectStreak++;
-        if (this.disconnectStreak < 2) {
-          this.logger.warn(`Leitura "${freshStatus}" após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/2)`);
+        if (this.disconnectStreak < 3) {
+          this.logger.warn(`Leitura "${freshStatus}" após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/3)`);
           row.connectionStatus = 'conectado';
         } else {
           row.connectionStatus = freshStatus;
@@ -213,8 +220,8 @@ export class WhatsappService {
     } catch (error: any) {
       if (previousStatus === 'conectado') {
         this.disconnectStreak++;
-        if (this.disconnectStreak < 2) {
-          this.logger.warn(`Erro ao checar conexão após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/2): ${error.message}`);
+        if (this.disconnectStreak < 3) {
+          this.logger.warn(`Erro ao checar conexão após estar conectado - aguardando confirmação antes de atualizar a tela (tentativa ${this.disconnectStreak}/3): ${error.message}`);
         } else {
           row.connectionStatus = 'erro';
         }
