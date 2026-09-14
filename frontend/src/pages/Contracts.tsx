@@ -225,13 +225,24 @@ export function Contracts() {
 
   async function generateBoleto(id: string) {
     const contract = contracts.find(c => c.id === id)
-    if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?`)) return
+    const alreadyHasBoleto = billingStatus[id]?.hasBoleto
+    let dueDate: string | undefined
+    if (alreadyHasBoleto) {
+      // Já existe um boleto emitido pra esse período - só reemite se o usuário escolher uma data
+      // de vencimento diferente (o backend bloqueia se for exatamente a mesma).
+      const input = window.prompt(`Já existe um boleto emitido para "${contract?.title}" neste período. Informe a nova data de vencimento (AAAA-MM-DD) para reemitir com outra data:`)
+      if (!input) return
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) { setError('Data inválida. Use o formato AAAA-MM-DD.'); return }
+      dueDate = input
+    } else if (!confirm(`Gerar Boleto para o contrato "${contract?.title}"?`)) {
+      return
+    }
     setError('')
     try {
       await trackAction(
-        'Gerando boleto...',
-        api.post(`/contracts/${id}/billing/boleto`),
-        'Boleto gerado com sucesso!'
+        alreadyHasBoleto ? 'Reemitindo boleto...' : 'Gerando boleto...',
+        api.post(`/contracts/${id}/billing/boleto`, dueDate ? { dueDate } : undefined),
+        alreadyHasBoleto ? 'Boleto reemitido com sucesso!' : 'Boleto gerado com sucesso!'
       )
       // Refresh billing status
       const currentPeriod = getCurrentPeriod()

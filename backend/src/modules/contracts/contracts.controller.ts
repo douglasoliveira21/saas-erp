@@ -160,8 +160,8 @@ export class ContractsController {
 
   @Post(':id/billing/boleto')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  generateBoleto(@Param('id') id: string) {
-    return this.billingService.manualBoleto(id);
+  generateBoleto(@Param('id') id: string, @Body('dueDate') dueDate?: string) {
+    return this.billingService.manualBoleto(id, dueDate);
   }
 
   @Post(':id/billing/send')

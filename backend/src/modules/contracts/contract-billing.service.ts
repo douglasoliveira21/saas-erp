@@ -673,7 +673,7 @@ export class ContractBillingService implements OnModuleInit {
   /**
    * Generate only Boleto for a contract
    */
-  async manualBoleto(contractId: string): Promise<any> {
+  async manualBoleto(contractId: string, customDueDate?: string): Promise<any> {
     const contract = await this.contractRepo.findOne({
       where: { id: contractId },
       relations: ['customer'],
@@ -688,10 +688,18 @@ export class ContractBillingService implements OnModuleInit {
     const monthlyValue = Number(contract.monthlyValue || contract.totalValue);
     if (monthlyValue <= 0) throw new Error('Valor mensal do contrato é zero');
 
-    const now = new Date();
-    const chargeDay = contract.chargeDay || 10;
-    const dueDate = new Date(now.getFullYear(), now.getMonth(), chargeDay);
-    if (dueDate <= now) dueDate.setMonth(dueDate.getMonth() + 1);
+    let dueDate: Date;
+    if (customDueDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(customDueDate)) throw new Error('Data de vencimento inválida');
+      dueDate = new Date(customDueDate + 'T12:00:00');
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (dueDate < today) throw new Error('A data de vencimento não pode estar no passado');
+    } else {
+      const now = new Date();
+      const chargeDay = contract.chargeDay || 10;
+      dueDate = new Date(now.getFullYear(), now.getMonth(), chargeDay);
+      if (dueDate <= now) dueDate.setMonth(dueDate.getMonth() + 1);
+    }
     const dueDateStr = dueDate.toISOString().split('T')[0];
     const billingPeriod = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}`;
 
@@ -702,10 +710,22 @@ export class ContractBillingService implements OnModuleInit {
   }
 
   private async manualBoletoImpl(contract: Contract, customer: any, contractId: string, billingPeriod: string, dueDate: Date, dueDateStr: string, monthlyValue: number): Promise<any> {
-    // Check if Boleto already exists for this period (prevent duplicate)
+    // Já existe boleto pra esse período? Só bloqueia de verdade quando o vencimento pedido é
+    // IGUAL ao do boleto já emitido (duplicata genuína) - um vencimento diferente é uma reemissão
+    // legítima (ex: cliente pediu pra adiar), então cancela o antigo no Inter e emite o novo.
     const existingStatus = await this.getBillingStatusForPeriod(contractId, billingPeriod);
     if (existingStatus.hasBoleto) {
-      throw new Error(`Já existe um boleto emitido para o período ${billingPeriod}. Não é possível emitir novamente.`);
+      const existingBilling = await this.dataSource.query(
+        `SELECT due_date::text as due_date FROM contract_billings WHERE contract_id = $1 AND billing_period = $2`,
+        [contractId, billingPeriod]
+      ).catch(() => []);
+      const existingDueDate = existingBilling[0]?.due_date;
+      if (existingDueDate === dueDateStr) {
+        throw new Error(`Já existe um boleto emitido para o período ${billingPeriod} com esse mesmo vencimento (${dueDateStr}). Para reemitir, escolha uma data de vencimento diferente.`);
+      }
+      await this.interService.cancelBoleto(existingStatus.boletoCode!, 'Reemissão com nova data de vencimento').catch((error: any) => {
+        this.logger.warn(`Não foi possível cancelar o boleto anterior (${existingStatus.boletoCode}) antes de reemitir: ${error.message}`);
+      });
     }
 
     // Calculate boleto value: if ISS is retained by tomador, deduct ISS from boleto
