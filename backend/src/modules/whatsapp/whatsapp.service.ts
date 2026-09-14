@@ -92,9 +92,20 @@ export class WhatsappService {
   // getQrCode() (pra decidir se pode pular o logout) quanto checkConnectionStatus() (pra exibir
   // o status na tela) precisam do mesmo mapeamento, e divergiam antes.
   private async fetchConnectionState(apiUrl: string, apiKey: string, instanceName: string): Promise<{ state: string; raw: string; response: any }> {
-    const response = await this.request('GET', `/instance/connectionState/${instanceName}`, apiUrl, apiKey);
-    const raw = response?.instance?.state ?? response?.instance?.connectionStatus ?? response?.state ?? response?.connectionStatus ?? '';
-    return { state: String(raw || '').toLowerCase(), raw: String(raw || ''), response };
+    const read = async () => {
+      const response = await this.request('GET', `/instance/connectionState/${instanceName}`, apiUrl, apiKey);
+      const raw = response?.instance?.state ?? response?.instance?.connectionStatus ?? response?.state ?? response?.connectionStatus ?? '';
+      return { state: String(raw || '').toLowerCase(), raw: String(raw || ''), response };
+    };
+    const first = await read();
+    if (first.state === 'open' || first.state === 'connected' || first.state === 'connecting') return first;
+    // Confirmado pelo usuário: com o WhatsApp genuinamente conectado no celular, /connectionState
+    // às vezes fica preso reportando "close" - e um GET /instance/connect (o mesmo endpoint por
+    // trás de "Gerar QR Code") "acorda" o socket Baileys e corrige a leitura seguinte, sem precisar
+    // escanear nada. Reproduz aqui automaticamente o que "gerar QR Code e depois testar de novo"
+    // fazia manualmente, pra não depender do usuário descobrir esse contorno sozinho.
+    await this.request('GET', `/instance/connect/${instanceName}`, apiUrl, apiKey).catch(() => {});
+    return read();
   }
 
   // Cria a instância na Evolution API caso ainda não exista.
