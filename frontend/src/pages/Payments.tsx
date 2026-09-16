@@ -61,7 +61,7 @@ interface Bill {
 interface Installment {
   id: string; number: number; value: number; paidValue: number;
   dueDate: string; paidAt: string | null; status: string; paymentMethod: string;
-  customer?: { name: string };
+  customer?: { id?: string; name: string };
   account?: { saleId?: string };
 }
 
@@ -118,7 +118,13 @@ export function Payments() {
   const { isAdmin } = useAuth()
   const { confirm: confirmAction, runOperation, notify } = useFeedback()
   const { trackAction } = useActionToast()
-  const [activeTab, setActiveTab] = useState<Tab>('lancamentos')
+  const initialParams = new URLSearchParams(window.location.search)
+  const [activeTab, setActiveTab] = useState<Tab>(initialParams.get('tab') === 'inadimplentes' ? 'inadimplentes' : 'lancamentos')
+  const [overdueCustomerFilter, setOverdueCustomerFilter] = useState<{ id: string; name: string } | null>(() => {
+    const id = initialParams.get('customerId')
+    const name = initialParams.get('customerName')
+    return id ? { id, name: name || '' } : null
+  })
   const [month, setMonth] = useState(currentMonth())
   const [payments, setPayments] = useState<Payment[]>([])
   const [bills, setBills] = useState<Bill[]>([])
@@ -938,9 +944,16 @@ export function Payments() {
       {/* ==================== TAB: INADIMPLENTES ==================== */}
       {activeTab === 'inadimplentes' && (
         <div className="card overflow-hidden p-0">
-          <div className="flex items-center gap-2 p-4 pb-2">
-            <AlertTriangle className="w-5 h-5 text-red-600" />
-            <h3 className="text-sm font-semibold text-red-700">Inadimplentes ({overdueInstallments.length})</h3>
+          <div className="flex items-center justify-between gap-2 p-4 pb-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h3 className="text-sm font-semibold text-red-700">Inadimplentes ({(overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).length})</h3>
+            </div>
+            {overdueCustomerFilter && (
+              <button onClick={() => setOverdueCustomerFilter(null)} className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 font-medium flex items-center gap-1">
+                Filtrado por: {overdueCustomerFilter.name || 'cliente'} <XCircle className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
           {loadingOverdue ? (
             <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
@@ -957,9 +970,9 @@ export function Payments() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {overdueInstallments.length === 0 ? (
+                {(overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).length === 0 ? (
                   <tr><td colSpan={6} className="table-cell text-center text-gray-500 py-8">Nenhum inadimplente</td></tr>
-                ) : overdueInstallments.map(inst => {
+                ) : (overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).map(inst => {
                   const daysOverdue = Math.floor((new Date().getTime() - new Date(inst.dueDate).getTime()) / (1000 * 60 * 60 * 24))
                   return (
                     <tr key={inst.id} className="bg-red-50/50 hover:bg-red-50">

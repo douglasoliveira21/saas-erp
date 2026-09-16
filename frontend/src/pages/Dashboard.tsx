@@ -240,12 +240,12 @@ export function Dashboard() {
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
               {(showAllOverdueCustomers ? overdueCustomers : overdueCustomers.slice(0, 5)).map(c => (
                 <div key={c.customerId} className="py-2 flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{c.customerName}</p>
+                  <Link to={`/contas-pagar?tab=inadimplentes&customerId=${c.customerId}&customerName=${encodeURIComponent(c.customerName)}`} className="group">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white group-hover:text-primary-600 group-hover:underline">{c.customerName}</p>
                     <p className="text-xs text-gray-500">
                       {c.overdueCount} parcela{c.overdueCount > 1 ? 's' : ''} vencida{c.overdueCount > 1 ? 's' : ''} · até {c.maxDaysOverdue} dia{c.maxDaysOverdue !== 1 ? 's' : ''} de atraso
                     </p>
-                  </div>
+                  </Link>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-red-600">R$ {Number(c.overdueAmount).toFixed(2)}</span>
                     {c.customerPhone && (
