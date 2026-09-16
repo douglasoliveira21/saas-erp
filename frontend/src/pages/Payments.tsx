@@ -441,8 +441,8 @@ export function Payments() {
     try {
       const payload: any = {
         type: billForm.type,
-        supplierId: billForm.type === 'pagar' ? billForm.supplierId : null,
-        customerId: billForm.type === 'receber' ? billForm.customerId : null,
+        supplierId: (billForm.type === 'pagar' && billForm.supplierId) || null,
+        customerId: (billForm.type === 'receber' && billForm.customerId) || null,
         description: billForm.description.trim(),
         value: parseFloat(billForm.value),
         dueDate: billForm.dueDate,

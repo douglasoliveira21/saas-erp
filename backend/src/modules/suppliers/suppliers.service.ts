@@ -44,6 +44,10 @@ export class SuppliersService {
     const installments = dto.installments || 1;
     // Fornecedor/cliente ficam opcionais - permite lançar uma despesa/receita avulsa (ex: taxa
     // bancária, receita extra) sem precisar cadastrar um fornecedor ou cliente só pra isso.
+    // String vazia (campo em branco no formulário) não é um uuid válido pro Postgres - normaliza
+    // pra null antes de qualquer INSERT, senão a query falha com "invalid input syntax for type uuid".
+    if (!dto.supplierId) dto.supplierId = null;
+    if (!dto.customerId) dto.customerId = null;
 
     if (dto.isFixedCost) {
       // Custo fixo mensal: diferente de parcelamento (que divide um valor total em N partes),
@@ -128,6 +132,8 @@ export class SuppliersService {
 
   async updateBill(id: string, dto: any): Promise<Bill> {
     const b = await this.findOneBill(id);
+    if ('supplierId' in dto && !dto.supplierId) dto.supplierId = null;
+    if ('customerId' in dto && !dto.customerId) dto.customerId = null;
     Object.assign(b, dto);
     return this.billRepo.save(b);
   }
