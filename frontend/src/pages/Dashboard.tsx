@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
-import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText } from 'lucide-react'
+import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, X } from 'lucide-react'
 import { MarketTicker } from '../components/MarketTicker'
 
 interface DashboardData {
@@ -107,6 +107,16 @@ export function Dashboard() {
       ]).then(results => results.forEach(result => {
         if (result.status === 'rejected') console.error('Erro ao carregar bloco secundário da dashboard:', result.reason)
       }))
+    }
+  }
+
+  async function dismissFinancialTask(taskId: string, type: 'nf' | 'boleto' | 'overdue') {
+    if (!confirm('Remover essa pendência da lista? Use apenas quando ela não se aplica mais (ex: já foi resolvida por fora).')) return
+    try {
+      await api.patch(`/financial-tasks/${taskId}/complete`, { observations: 'Removida manualmente pelo usuário no dashboard' })
+      setFinancialTasks(prev => ({ ...prev, [type]: prev[type].filter(t => t.id !== taskId) }))
+    } catch {
+      alert('Não foi possível remover a pendência.')
     }
   }
 
@@ -277,9 +287,12 @@ export function Dashboard() {
                 </div>
                 <div className="space-y-2">
                   {financialTasks.overdue.slice(0, 5).map(t => (
-                    <div key={t.id} className="text-sm flex justify-between">
-                      <span className="text-gray-700">{financialTaskLabels[t.type] || t.type} - {t.sale?.customer?.name}</span>
-                      <span className="text-red-600 font-medium text-xs">{new Date(t.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                    <div key={t.id} className="text-sm flex items-center justify-between gap-2 group">
+                      <Link to={`/sales/new?edit=${t.sale?.id}`} className="text-gray-700 hover:text-primary-600 hover:underline truncate">{financialTaskLabels[t.type] || t.type} - {t.sale?.customer?.name}</Link>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-red-600 font-medium text-xs">{new Date(t.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                        <button onClick={() => dismissFinancialTask(t.id, 'overdue')} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100" title="Remover pendência manualmente"><X className="w-3.5 h-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                   {financialTasks.overdue.length > 5 && <p className="text-xs text-gray-500">+{financialTasks.overdue.length - 5} mais...</p>}
@@ -294,9 +307,12 @@ export function Dashboard() {
                 </div>
                 <div className="space-y-2">
                   {financialTasks.nf.map(t => (
-                    <div key={t.id} className="text-sm flex justify-between">
-                      <span className="text-gray-700">{t.sale?.customer?.name}</span>
-                      <span className="text-gray-500">R$ {Number(t.sale?.totalAmount || 0).toFixed(2)}</span>
+                    <div key={t.id} className="text-sm flex items-center justify-between gap-2 group">
+                      <Link to={`/sales/new?edit=${t.sale?.id}`} className="text-gray-700 hover:text-primary-600 hover:underline truncate">{t.sale?.customer?.name}</Link>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-gray-500">R$ {Number(t.sale?.totalAmount || 0).toFixed(2)}</span>
+                        <button onClick={() => dismissFinancialTask(t.id, 'nf')} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100" title="Remover pendência manualmente"><X className="w-3.5 h-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -310,9 +326,12 @@ export function Dashboard() {
                 </div>
                 <div className="space-y-2">
                   {financialTasks.boleto.map(t => (
-                    <div key={t.id} className="text-sm flex justify-between">
-                      <span className="text-gray-700">{t.sale?.customer?.name}</span>
-                      <span className="text-gray-500">R$ {Number(t.sale?.totalAmount || 0).toFixed(2)}</span>
+                    <div key={t.id} className="text-sm flex items-center justify-between gap-2 group">
+                      <Link to={`/sales/new?edit=${t.sale?.id}`} className="text-gray-700 hover:text-primary-600 hover:underline truncate">{t.sale?.customer?.name}</Link>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-gray-500">R$ {Number(t.sale?.totalAmount || 0).toFixed(2)}</span>
+                        <button onClick={() => dismissFinancialTask(t.id, 'boleto')} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100" title="Remover pendência manualmente"><X className="w-3.5 h-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                 </div>

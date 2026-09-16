@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -61,6 +62,7 @@ interface Installment {
   id: string; number: number; value: number; paidValue: number;
   dueDate: string; paidAt: string | null; status: string; paymentMethod: string;
   customer?: { name: string };
+  account?: { saleId?: string };
 }
 
 interface ReportRow {
@@ -961,7 +963,11 @@ export function Payments() {
                   const daysOverdue = Math.floor((new Date().getTime() - new Date(inst.dueDate).getTime()) / (1000 * 60 * 60 * 24))
                   return (
                     <tr key={inst.id} className="bg-red-50/50 hover:bg-red-50">
-                      <td className="table-cell font-medium text-sm">{inst.customer?.name || '-'}</td>
+                      <td className="table-cell font-medium text-sm">
+                        {inst.account?.saleId ? (
+                          <Link to={`/sales/new?edit=${inst.account.saleId}`} className="hover:text-primary-600 hover:underline">{inst.customer?.name || '-'}</Link>
+                        ) : (inst.customer?.name || '-')}
+                      </td>
                       <td className="table-cell text-sm">#{inst.number}</td>
                       <td className="table-cell font-semibold text-red-600">{formatCurrency(Number(inst.value) - Number(inst.paidValue || 0))}</td>
                       <td className="table-cell text-sm text-red-600">{formatDate(inst.dueDate)}</td>
