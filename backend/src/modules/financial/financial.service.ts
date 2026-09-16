@@ -150,7 +150,11 @@ export class FinancialService implements OnModuleInit {
         if (duplicate) return { installment: duplicate.installment, oldData: null, duplicate: true };
       }
       const installmentRepo = manager.getRepository(Installment);
-      const installment = await installmentRepo.findOne({ where: { id: installmentId }, relations: ['account'], lock: { mode: 'pessimistic_write' } });
+      // Sem relations aqui: Postgres recusa FOR UPDATE numa query com LEFT JOIN pro lado que
+      // pode ser nulo ("FOR UPDATE cannot be applied to the nullable side of an outer join"),
+      // que é exatamente o que relations:['account'] gera. A relação nem era usada abaixo -
+      // o código só precisa de installment.accountId, que já é uma coluna direta da entidade.
+      const installment = await installmentRepo.findOne({ where: { id: installmentId }, lock: { mode: 'pessimistic_write' } });
       if (!installment) throw new NotFoundException('Parcela não encontrada');
       if (['pago', 'cancelado'].includes(installment.status)) throw new BadRequestException('Parcela já está paga ou cancelada');
       const oldData = { ...installment };
@@ -219,11 +223,14 @@ export class FinancialService implements OnModuleInit {
     if (!reason?.trim()) throw new BadRequestException('Motivo do cancelamento obrigatório');
     const result = await this.dataSource.transaction(async (manager) => {
       const accountRepo=manager.getRepository(AccountReceivable), installmentRepo=manager.getRepository(Installment), movementRepo=manager.getRepository(FinancialMovement);
-      const account=await accountRepo.findOne({where:{id:accountId},relations:['installmentsList'],lock:{mode:'pessimistic_write'}});
+      // Mesmo motivo do payInstallment: FOR UPDATE não roda numa query com relations (LEFT JOIN)
+      // - trava só a conta aqui e busca as parcelas numa query separada, sem lock combinado.
+      const account=await accountRepo.findOne({where:{id:accountId},lock:{mode:'pessimistic_write'}});
       if (!account) throw new NotFoundException('Conta a receber não encontrada');
       if (account.status==='cancelado') throw new BadRequestException('Conta já está cancelada');
       const oldData={...account};
-      for (const installment of account.installmentsList.filter(i=>['pendente','parcial','vencido'].includes(i.status))) { installment.status='cancelado'; await installmentRepo.save(installment); }
+      const installmentsList=await installmentRepo.find({where:{accountId:account.id}});
+      for (const installment of installmentsList.filter(i=>['pendente','parcial','vencido'].includes(i.status))) { installment.status='cancelado'; await installmentRepo.save(installment); }
       account.status='cancelado'; account.canceledAt=new Date(); account.cancelReason=reason.trim(); account.pendingValue=0; await accountRepo.save(account);
       if (Number(account.paidValue)>0) await movementRepo.save(movementRepo.create({type:'estorno',category:'estorno',description:`Cancelamento: ${reason.trim()}`,value:Number(account.paidValue),date:new Date().toISOString().split('T')[0],saleId:account.saleId,accountId:account.id,paymentMethod:account.paymentMethod,isForecast:false,createdBy:userId,referenceId:account.id,referenceType:'account_receivable_cancellation'}));
       await manager.query(`UPDATE payments SET status='cancelado',updated_at=NOW() WHERE sale_id=$1 AND status<>'cancelado'`,[account.saleId]);
