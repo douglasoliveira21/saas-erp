@@ -66,6 +66,10 @@ export class BillsController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   payBill(@Param('id') id: string, @Body() body: any, @Headers('idempotency-key') idempotencyKey?: string) { return this.service.payBill(id, body, idempotencyKey); }
 
+  @Patch(':id/revert-payment')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  revertLastPayment(@Param('id') id: string, @Body('reason') reason: string, @Request() req: any) { return this.service.revertLastPayment(id, reason, req.user.id); }
+
   @Patch(':id/cancel')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   cancelBill(@Param('id') id: string) { return this.service.cancelBill(id); }

@@ -499,6 +499,17 @@ export function Payments() {
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao cancelar') }
   }
 
+  async function revertBillPayment(bill: Bill) {
+    const reason = window.prompt('Motivo da reversão (obrigatório) - ex: valor lançado errado, paguei com juros')
+    if (reason === null) return
+    if (!reason.trim()) { setError('Informe o motivo da reversão'); return }
+    if (!await confirmAction({ title: 'Reverter pagamento', message: `Isso desfaz a última baixa de "${bill.description}" e volta a conta para pendente/parcial, pra você poder pagar de novo com o valor certo.`, confirmLabel: 'Reverter', danger: true })) return
+    try {
+      await trackAction('Revertendo pagamento...', api.patch(`/bills/${bill.id}/revert-payment`, { reason: reason.trim() }), 'Pagamento revertido.')
+      load()
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao reverter pagamento') }
+  }
+
   async function removeBill(id: string) {
     if (!await confirmAction({ title: 'Excluir conta', message: 'Excluir esta conta permanentemente?', confirmLabel: 'Excluir', danger: true })) return
     try { await trackAction('Excluindo conta...', api.delete('/bills/' + id), 'Conta excluída!'); load() }
@@ -889,6 +900,9 @@ export function Payments() {
                           {['pendente', 'vencido'].includes(row.data.status) && (
                             <button onClick={() => cancelBill(row.data.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Cancelar"><Ban className="w-4 h-4" /></button>
                           )}
+                          {['pago', 'parcial'].includes(row.data.status) && (
+                            <button onClick={() => revertBillPayment(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter pagamento (valor errado, pagou com juros, etc)"><Undo2 className="w-4 h-4" /></button>
+                          )}
                           {isAdmin && (
                             <button onClick={() => removeBill(row.data.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
                           )}
@@ -922,6 +936,9 @@ export function Payments() {
                           )}
                           {['pendente', 'vencido'].includes(row.data.status) && (
                             <button onClick={() => cancelBill(row.data.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Cancelar"><Ban className="w-4 h-4" /></button>
+                          )}
+                          {['pago', 'parcial'].includes(row.data.status) && (
+                            <button onClick={() => revertBillPayment(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter pagamento (valor errado, pagou com juros, etc)"><Undo2 className="w-4 h-4" /></button>
                           )}
                           {isAdmin && (
                             <button onClick={() => removeBill(row.data.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>

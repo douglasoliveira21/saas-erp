@@ -203,6 +203,64 @@ export class SuppliersService {
     });
   }
 
+  // Desfaz a ÚLTIMA baixa de uma conta (pago/parcial) - permite corrigir um pagamento lançado com
+  // valor errado (ex: pagou com juros e o valor não bateu com o previsto) sem precisar excluir a
+  // conta inteira. Antes, depois de "pago" a única ação disponível era excluir.
+  async revertLastPayment(id: string, reason: string, userId: string): Promise<Bill> {
+    if (!reason?.trim()) throw new BadRequestException('Motivo da reversão obrigatório');
+    return this.dataSource.transaction(async manager => {
+      const repo = manager.getRepository(Bill);
+      const bill = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!bill) throw new NotFoundException('Conta não encontrada');
+      if (!['pago', 'parcial'].includes(bill.status)) throw new BadRequestException('Esta conta não tem pagamento para reverter');
+
+      const lastPayment = await manager.query(
+        `SELECT id, value FROM bill_payments WHERE bill_id=$1 ORDER BY paid_at DESC, created_at DESC LIMIT 1`,
+        [id],
+      );
+      if (!lastPayment[0]) throw new BadRequestException('Nenhum pagamento encontrado para reverter');
+      const revertedValue = Number(lastPayment[0].value);
+
+      bill.paidValue = Math.max(0, Math.round((Number(bill.paidValue) - revertedValue) * 100) / 100);
+      bill.status = bill.paidValue <= 0 ? 'pendente' : bill.paidValue + 0.001 >= Number(bill.value) ? 'pago' : 'parcial';
+      bill.paidAt = bill.status === 'pago' ? bill.paidAt : null;
+      const saved = await repo.save(bill);
+
+      await manager.query(`DELETE FROM bill_payments WHERE id=$1`, [lastPayment[0].id]);
+
+      const movement = await manager.query(
+        `SELECT id, category, payment_method FROM financial_movements WHERE reference_type='bill_payment' AND reference_id=$1 LIMIT 1`,
+        [lastPayment[0].id],
+      );
+      if (movement[0]) {
+        const isReceivable = bill.type === 'receber';
+        await manager.query(
+          `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, created_by)
+           VALUES ('estorno', $1, $2, $3, $4, $5, $6, 'bill_payment_reversal', $7, false, $8)`,
+          [
+            movement[0].category || 'outros',
+            `Reversão de pagamento: ${bill.description || 'Conta'} - ${reason.trim()}`,
+            revertedValue,
+            new Date().toISOString().split('T')[0],
+            id,
+            movement[0].id,
+            movement[0].payment_method || null,
+            userId || null,
+          ],
+        );
+      }
+
+      if (bill.purchaseId) {
+        const allBills = await manager.query('SELECT status FROM bills WHERE purchase_id = $1 AND archived_at IS NULL', [bill.purchaseId]);
+        const allPaid = allBills.every((b: any) => b.status === 'pago');
+        const somePaid = allBills.some((b: any) => ['pago', 'parcial'].includes(b.status));
+        await manager.query('UPDATE purchases SET financial_status = $1 WHERE id = $2', [allPaid ? 'paid' : somePaid ? 'partially_paid' : 'generated', bill.purchaseId]);
+      }
+
+      return saved;
+    });
+  }
+
   async cancelBill(id: string): Promise<Bill> {
     const bill = await this.findOneBill(id);
     bill.status = 'cancelado';
