@@ -113,6 +113,18 @@ export function Fiscal() {
     }
   }, [sales])
 
+  // Detectar parametro ?view=invoiceId na URL (ex: vindo do link de "nota fiscal" na aba
+  // Inadimplentes) para abrir direto a visualizacao daquela nota, sem precisar procurar na lista.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const viewInvoiceId = params.get('view')
+    if (viewInvoiceId) {
+      setTab('invoices')
+      openViewInvoice(viewInvoiceId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function load() {
     try {
       const [certs, invs, salesRes, cfgRes] = await Promise.all([

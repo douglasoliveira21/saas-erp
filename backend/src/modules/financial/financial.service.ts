@@ -379,7 +379,23 @@ export class FinancialService implements OnModuleInit {
       }
     }
 
-    return overdue.map(installment => ({ ...installment, customer: installment.account?.customer }));
+    // Busca a nota fiscal autorizada de cada venda em atraso, pra aba "Inadimplentes" já mostrar
+    // o número da nota vinculada e linkar direto pra ela (sem precisar procurar na tela de Fiscal).
+    const saleIds = [...new Set(overdue.map(i => i.account?.saleId).filter(Boolean))];
+    const invoicesBySaleId = new Map<string, { id: string; number: number }>();
+    if (saleIds.length > 0) {
+      const invoiceRows = await this.dataSource.query(
+        `SELECT DISTINCT ON (sale_id) sale_id, id, number FROM invoices WHERE sale_id = ANY($1) AND status = 'autorizada' ORDER BY sale_id, issued_at DESC NULLS LAST, created_at DESC`,
+        [saleIds],
+      );
+      for (const row of invoiceRows) invoicesBySaleId.set(row.sale_id, { id: row.id, number: row.number });
+    }
+
+    return overdue.map(installment => ({
+      ...installment,
+      customer: installment.account?.customer,
+      invoice: installment.account?.saleId ? invoicesBySaleId.get(installment.account.saleId) || null : null,
+    }));
   }
 
   async repairPaidPaymentIntegrity(source = 'manual'): Promise<{ checked: number; repaired: number; failed: number; details: any[] }> {

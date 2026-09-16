@@ -63,6 +63,7 @@ interface Installment {
   dueDate: string; paidAt: string | null; status: string; paymentMethod: string;
   customer?: { id?: string; name: string };
   account?: { saleId?: string };
+  invoice?: { id: string; number: number } | null;
 }
 
 interface ReportRow {
@@ -963,6 +964,7 @@ export function Payments() {
                 <tr>
                   <th className="table-cell font-semibold text-gray-700">Cliente</th>
                   <th className="table-cell font-semibold text-gray-700">Parcela</th>
+                  <th className="table-cell font-semibold text-gray-700">Nota Fiscal</th>
                   <th className="table-cell font-semibold text-gray-700">Valor</th>
                   <th className="table-cell font-semibold text-gray-700">Vencimento</th>
                   <th className="table-cell font-semibold text-gray-700">Dias Atraso</th>
@@ -971,7 +973,7 @@ export function Payments() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {(overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).length === 0 ? (
-                  <tr><td colSpan={6} className="table-cell text-center text-gray-500 py-8">Nenhum inadimplente</td></tr>
+                  <tr><td colSpan={7} className="table-cell text-center text-gray-500 py-8">Nenhum inadimplente</td></tr>
                 ) : (overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).map(inst => {
                   const daysOverdue = Math.floor((new Date().getTime() - new Date(inst.dueDate).getTime()) / (1000 * 60 * 60 * 24))
                   return (
@@ -982,6 +984,11 @@ export function Payments() {
                         ) : (inst.customer?.name || '-')}
                       </td>
                       <td className="table-cell text-sm">#{inst.number}</td>
+                      <td className="table-cell text-sm">
+                        {inst.invoice ? (
+                          <Link to={`/fiscal?view=${inst.invoice.id}`} className="text-primary-600 hover:underline font-medium">#{inst.invoice.number}</Link>
+                        ) : '-'}
+                      </td>
                       <td className="table-cell font-semibold text-red-600">{formatCurrency(Number(inst.value) - Number(inst.paidValue || 0))}</td>
                       <td className="table-cell text-sm text-red-600">{formatDate(inst.dueDate)}</td>
                       <td className="table-cell"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{daysOverdue} dias</span></td>
