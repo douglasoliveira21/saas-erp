@@ -97,11 +97,11 @@ export function Sales() {
     } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao cancelar')) }
   }
 
-  async function generatePayment(id: string, type: 'boleto' | 'pix') {
+  async function generatePayment(id: string, type: 'boleto' | 'pix', installmentDueDates?: Record<string, string>) {
     setError('')
     try {
-      await runOperation(
-        () => api.post(`/inter/generate/${id}?type=${type}`),
+      const res = await runOperation(
+        () => api.post(`/inter/generate/${id}?type=${type}`, installmentDueDates ? { installmentDueDates } : undefined),
         {
           title: type === 'pix' ? 'Gerando PIX' : 'Emitindo boleto',
           processingMessage: type === 'pix' ? 'Registrando a cobrança PIX no Banco Inter.' : 'Enviando as parcelas e confirmando cada boleto no Banco Inter.',
@@ -113,6 +113,19 @@ export function Sales() {
         },
       )
       load()
+
+      // Parcelas já vencidas (sem boleto ainda) não podem ser emitidas com o vencimento
+      // original - o Inter rejeita data no passado. As outras parcelas já foram emitidas
+      // normalmente; aqui só oferece corrigir o vencimento das que ficaram de fora.
+      const puladas = res.data?.data?.puladas as Array<{ installmentId: string; installmentNumber: number; dueDate: string; value: number }> | undefined
+      if (puladas?.length) {
+        const fixed: Record<string, string> = {}
+        for (const p of puladas) {
+          const novaData = window.prompt(`A parcela ${p.installmentNumber} (R$ ${Number(p.value).toFixed(2)}, venceu em ${new Date(p.dueDate + 'T12:00:00').toLocaleDateString('pt-BR')}) não pôde ser emitida porque já venceu.\n\nInforme uma nova data de vencimento (AAAA-MM-DD) para emitir o boleto dela agora, ou cancele para deixar pendente.`)
+          if (novaData && /^\d{4}-\d{2}-\d{2}$/.test(novaData)) fixed[p.installmentId] = novaData
+        }
+        if (Object.keys(fixed).length) await generatePayment(id, type, fixed)
+      }
     } catch (e: any) {
       setError(e.response?.data?.message || e.response?.data?.error || `Erro ao gerar ${type}`)
     }

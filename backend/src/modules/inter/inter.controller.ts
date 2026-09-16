@@ -176,6 +176,7 @@ export class InterController {
   async generate(
     @Param('saleId') saleId: string,
     @Query('type') type: 'boleto' | 'pix' = 'boleto',
+    @Body('installmentDueDates') installmentDueDates?: Record<string, string>,
   ) {
     this.logger.log(`Gerando ${type} para venda: ${saleId}`);
 
@@ -196,7 +197,7 @@ export class InterController {
       throw new HttpException('Cliente sem CPF/CNPJ cadastrado', HttpStatus.BAD_REQUEST);
     }
 
-    const result = await this.interService.generateForSale(sale, type);
+    const result = await this.interService.generateForSale(sale, type, installmentDueDates);
 
     return {
       success: true,

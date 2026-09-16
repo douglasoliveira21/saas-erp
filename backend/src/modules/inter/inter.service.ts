@@ -1028,7 +1028,7 @@ export class InterService implements OnModuleInit {
   /**
    * Gera boleto ou PIX para uma venda existente.
    */
-  private async generateInstallmentBoletos(sale: Sale, document: string): Promise<any> {
+  private async generateInstallmentBoletos(sale: Sale, document: string, dueDateOverrides?: Record<string, string>): Promise<any> {
     const customer = sale.customer;
     const customerEmails = getCustomerEmailRecipients(customer);
     const installments = await this.saleRepo.manager.query(
@@ -1044,12 +1044,27 @@ export class InterService implements OnModuleInit {
     const multa = parseFloat(Number((sale as any).multaPercentage ?? 2).toFixed(2));
     const mora = parseFloat(Number((sale as any).moraPercentage ?? 0.03).toFixed(2));
     const tipoPessoa = document.length > 11 ? 'JURIDICA' : 'FISICA';
-    const results: any[] = []; const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
+    const results: any[] = []; const puladas: any[] = []; const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
     for (const installment of installments) {
       const key = `charge:${sale.id}:boleto:${installment.number}`;
       if (existingKeys.has(key)) continue;
-      const dueDate = this.formatInterDueDate(installment.due_date, `Vencimento da parcela ${installment.number}`);
-      if (dueDate < today) throw new HttpException(`A parcela ${installment.number} está vencida. Atualize o vencimento antes de emitir.`, HttpStatus.BAD_REQUEST);
+      let dueDate = this.formatInterDueDate(installment.due_date, `Vencimento da parcela ${installment.number}`);
+      if (dueDate < today) {
+        const override = dueDateOverrides?.[installment.id];
+        const overrideFormatted = override ? this.formatInterDueDate(override, `Nova data da parcela ${installment.number}`) : null;
+        if (overrideFormatted && overrideFormatted >= today) {
+          await this.saleRepo.manager.query(`UPDATE installments SET due_date=$1, updated_at=NOW() WHERE id=$2`, [overrideFormatted, installment.id]);
+          dueDate = overrideFormatted;
+        } else {
+          // Uma parcela vencida sem boleto nao pode ser emitida com a data original (o Inter
+          // rejeita vencimento no passado) - mas travar a venda inteira por causa dela deixava as
+          // OUTRAS parcelas (com vencimento futuro) tambem sem boleto, mesmo sem nenhum problema.
+          // Pula so essa e continua as demais; quem chamar pode reenviar com uma data nova pra
+          // essa parcela especifica em installmentDueDates.
+          puladas.push({ installmentId: installment.id, installmentNumber: installment.number, dueDate, value: Number(installment.value) });
+          continue;
+        }
+      }
       const data: any = {
         seuNumero: `${sale.id.replace(/-/g,'').substring(0,11)}${String(installment.number).padStart(2,'0')}`,
         valorNominal: Number(installment.value), dataVencimento: dueDate, numDiasAgenda: 30,
@@ -1063,14 +1078,17 @@ export class InterService implements OnModuleInit {
       try { attachments.push({filename:`boleto-parcela-${installment.number}-de-${sale.installments}.pdf`,content:await this.getBoletoPdf(codigo),contentType:'application/pdf'}); } catch(error:any) { this.logger.error(`Boleto ${installment.number} criado, mas PDF indisponível: ${error?.message||error}`); }
       results.push({...result,installmentId:installment.id,installmentNumber:installment.number,value:Number(installment.value),dueDate});
     }
-    if (!results.length) throw new HttpException('Todos os boletos parcelados desta venda já foram emitidos',HttpStatus.CONFLICT);
-    await this.markBoletoAsIssued(sale.id);
-    if (customerEmails && attachments.length) await this.mailService.sendMailWithAttachment(customerEmails,`Boletos parcelados da venda #${sale.id.substring(0,8)} - VGON`,`<div style="font-family:Arial,sans-serif"><h2>Boletos da venda</h2><p>Olá ${customer.name},</p><p>Seguem em anexo os ${attachments.length} boletos correspondentes às parcelas da sua compra.</p><p>Confira o vencimento indicado em cada boleto.</p></div>`,attachments);
-    return {parcelado:true,quantidade:results.length,boletos:results};
+    if (!results.length && !puladas.length) throw new HttpException('Todos os boletos parcelados desta venda já foram emitidos',HttpStatus.CONFLICT);
+    if (results.length) {
+      await this.markBoletoAsIssued(sale.id);
+      if (customerEmails && attachments.length) await this.mailService.sendMailWithAttachment(customerEmails,`Boletos parcelados da venda #${sale.id.substring(0,8)} - VGON`,`<div style="font-family:Arial,sans-serif"><h2>Boletos da venda</h2><p>Olá ${customer.name},</p><p>Seguem em anexo os ${attachments.length} boletos correspondentes às parcelas da sua compra.</p><p>Confira o vencimento indicado em cada boleto.</p></div>`,attachments);
+    }
+    return {parcelado:true,quantidade:results.length,boletos:results,puladas:puladas.length?puladas:undefined};
   }
   async generateForSale(
     sale: Sale,
     type: 'boleto' | 'pix' = 'boleto',
+    installmentDueDates?: Record<string, string>,
   ): Promise<any> {
     const customer = sale.customer;
 
@@ -1094,7 +1112,7 @@ export class InterService implements OnModuleInit {
       const configuredInstallments = Number(sale.installments || 1);
       const effectiveInstallments = Math.max(configuredInstallments, financialInstallments);
       this.logger.log(`Parcelamento da venda ${sale.id}: configurado=${configuredInstallments}, financeiro=${financialInstallments}, efetivo=${effectiveInstallments}`);
-      if (effectiveInstallments > 1) return this.generateInstallmentBoletos(sale, document);
+      if (effectiveInstallments > 1) return this.generateInstallmentBoletos(sale, document, installmentDueDates);
     }
     const active = await this.saleRepo.manager.query(`SELECT id, codigo_solicitacao, type, status, due_date FROM payments WHERE sale_id=$1 AND type=$2 AND status IN ('pendente','a_receber','vencido') ORDER BY created_at DESC LIMIT 1`, [sale.id, type]);
     if (active[0]) throw new HttpException(`Já existe ${type === 'boleto' ? 'boleto' : 'PIX'} ativo para esta venda`, HttpStatus.CONFLICT);
