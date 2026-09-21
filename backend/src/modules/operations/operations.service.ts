@@ -1,31 +1,42 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class OperationsService {
-  constructor(private db: DataSource, private audit: AuditService) {}
+  constructor(private db: DataSource, private audit: AuditService, private tenantContext: TenantContextService) {}
 
+  // Sem o filtro de tenant abaixo, a busca global devolvia cliente/venda/nota/boleto de
+  // QUALQUER empresa do sistema pra quem tivesse login em qualquer uma delas - a query nem
+  // usava paramtro nenhum de tenant antes.
   async search(q: string) {
     if (!q?.trim() || q.trim().length < 2) return [];
     const term = `%${q.trim()}%`;
+    const tenantId = this.tenantContext.getTenantId();
+    const params = tenantId ? [term, tenantId] : [term];
+    const tenantFilter = tenantId ? 'AND tenant_id = $2' : '';
     return this.db.query(`
-      SELECT 'cliente' type, id, name title, COALESCE(cpf_cnpj,'') subtitle FROM customers WHERE name ILIKE $1 OR cpf_cnpj ILIKE $1
-      UNION ALL SELECT 'venda', s.id, 'Venda #' || LEFT(s.id::text,8), COALESCE(c.name,'') FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id::text ILIKE $1 OR c.name ILIKE $1
-      UNION ALL SELECT 'nota', i.id, UPPER(i.type) || ' ' || COALESCE(i.number::text,'sem numero'), COALESCE(i.access_key,i.recipient_name,'') FROM invoices i WHERE i.access_key ILIKE $1 OR i.recipient_name ILIKE $1 OR i.number::text ILIKE $1
-      UNION ALL SELECT 'boleto', p.id, 'Boleto ' || COALESCE(p.status,''), COALESCE(p.codigo_solicitacao,'') FROM payments p WHERE p.codigo_solicitacao ILIKE $1 OR p.sale_id::text ILIKE $1
-      LIMIT 50`, [term]);
+      SELECT 'cliente' type, id, name title, COALESCE(cpf_cnpj,'') subtitle FROM customers WHERE (name ILIKE $1 OR cpf_cnpj ILIKE $1) ${tenantFilter}
+      UNION ALL SELECT 'venda', s.id, 'Venda #' || LEFT(s.id::text,8), COALESCE(c.name,'') FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE (s.id::text ILIKE $1 OR c.name ILIKE $1) ${tenantId ? 'AND s.tenant_id = $2' : ''}
+      UNION ALL SELECT 'nota', i.id, UPPER(i.type) || ' ' || COALESCE(i.number::text,'sem numero'), COALESCE(i.access_key,i.recipient_name,'') FROM invoices i WHERE (i.access_key ILIKE $1 OR i.recipient_name ILIKE $1 OR i.number::text ILIKE $1) ${tenantId ? 'AND i.tenant_id = $2' : ''}
+      UNION ALL SELECT 'boleto', p.id, 'Boleto ' || COALESCE(p.status,''), COALESCE(p.codigo_solicitacao,'') FROM payments p WHERE (p.codigo_solicitacao ILIKE $1 OR p.sale_id::text ILIKE $1) ${tenantId ? 'AND p.tenant_id = $2' : ''}
+      LIMIT 50`, params);
   }
 
   dataQuality() {
+    const tenantId = this.tenantContext.getTenantId();
+    const params = tenantId ? [tenantId] : [];
+    const custFilter = tenantId ? 'AND tenant_id = $1' : '';
+    const prodFilter = tenantId ? 'AND tenant_id = $1' : '';
     return this.db.query(`SELECT 'cliente' type, id, name, ARRAY_REMOVE(ARRAY[
       CASE WHEN cpf_cnpj IS NULL OR cpf_cnpj='' THEN 'CPF/CNPJ' END, CASE WHEN email IS NULL OR email='' THEN 'email' END,
       CASE WHEN address IS NULL OR address='' THEN 'endereco' END, CASE WHEN city IS NULL OR city='' THEN 'cidade' END,
       CASE WHEN uf IS NULL OR uf='' THEN 'UF' END, CASE WHEN cep IS NULL OR cep='' THEN 'CEP' END],NULL) missing
-      FROM customers WHERE active=true AND (COALESCE(cpf_cnpj,'')='' OR COALESCE(email,'')='' OR COALESCE(address,'')='' OR COALESCE(city,'')='' OR COALESCE(uf,'')='' OR COALESCE(cep,'')='')
+      FROM customers WHERE active=true ${custFilter} AND (COALESCE(cpf_cnpj,'')='' OR COALESCE(email,'')='' OR COALESCE(address,'')='' OR COALESCE(city,'')='' OR COALESCE(uf,'')='' OR COALESCE(cep,'')='')
       UNION ALL SELECT 'produto', id, name, ARRAY_REMOVE(ARRAY[CASE WHEN COALESCE(ncm,'')='' THEN 'NCM' END,
       CASE WHEN COALESCE(cfop,'')='' THEN 'CFOP' END, CASE WHEN COALESCE(unit,'')='' THEN 'unidade' END],NULL)
-      FROM products WHERE active=true AND (COALESCE(ncm,'')='' OR COALESCE(cfop,'')='' OR COALESCE(unit,'')='') ORDER BY type,name`);
+      FROM products WHERE active=true ${prodFilter} AND (COALESCE(ncm,'')='' OR COALESCE(cfop,'')='' OR COALESCE(unit,'')='') ORDER BY type,name`, params);
   }
 
   list(table: string, order = 'created_at DESC') { return this.db.query(`SELECT * FROM ${table} ORDER BY ${order}`); }
@@ -106,8 +117,10 @@ export class OperationsService {
   }
 
   accountingExport(start: string, end: string) {
+    const tenantId = this.tenantContext.getTenantId();
+    const params = tenantId ? [start, end, tenantId] : [start, end];
     return this.db.query(`SELECT m.date,m.competence_date,m.type,m.category,m.description,m.value,cc.code cost_center,ca.code chart_account,ba.name bank_account
       FROM financial_movements m LEFT JOIN cost_centers cc ON cc.id=m.cost_center_id LEFT JOIN chart_accounts ca ON ca.id=m.chart_account_id
-      LEFT JOIN bank_accounts ba ON ba.id=m.bank_account_id WHERE m.date BETWEEN $1 AND $2 ORDER BY m.date,m.created_at`,[start,end]);
+      LEFT JOIN bank_accounts ba ON ba.id=m.bank_account_id WHERE m.date BETWEEN $1 AND $2 ${tenantId ? 'AND m.tenant_id = $3' : ''} ORDER BY m.date,m.created_at`, params);
   }
 }
