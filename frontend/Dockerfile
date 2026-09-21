@@ -16,6 +16,11 @@ COPY . .
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 
+# Build argument para a site key publica do Cloudflare Turnstile (captcha do login).
+# Sem isso configurado no build, o captcha fica desligado (ver Turnstile.tsx).
+ARG VITE_TURNSTILE_SITE_KEY=
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
+
 # Build the application (skip tsc strict checking for production build)
 RUN npx vite build
 
