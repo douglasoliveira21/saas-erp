@@ -13,7 +13,7 @@ interface User {
 interface AuthContextData {
   user: User | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, captchaToken?: string) => Promise<void>
   logout: () => Promise<void>
   isAdmin: boolean
   isFinanceiro: boolean
@@ -33,8 +33,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  async function login(email: string, password: string) {
-    const response = await api.post('/auth/login', { email, password })
+  async function login(email: string, password: string, captchaToken?: string) {
+    const response = await api.post('/auth/login', { email, password, captchaToken })
     const { access_token, user: userData } = response.data
     setSessionToken(access_token || null)
     setUser(userData)

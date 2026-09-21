@@ -1,13 +1,17 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { Turnstile } from '../components/Turnstile'
 import { Eye, EyeOff, User, Lock, Building2, Mail, Headphones } from 'lucide-react'
+
+const CAPTCHA_REQUIRED = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY)
 
 export function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
+  const [captchaToken, setCaptchaToken] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -20,13 +24,15 @@ export function Login() {
 
     if (!email.trim()) { setError('Informe seu usuário ou e-mail.'); return }
     if (!password) { setError('Informe sua senha.'); return }
+    if (CAPTCHA_REQUIRED && !captchaToken) { setError('Aguarde a verificação de segurança concluir.'); return }
 
     setLoading(true)
     try {
-      await login(email, password)
+      await login(email, password, captchaToken || undefined)
       navigate('/dashboard')
     } catch (err: any) {
       setError(err.response?.data?.message || 'Credenciais inválidas. Verifique seu email e senha.')
+      setCaptchaToken('')
     } finally {
       setLoading(false)
     }
@@ -193,10 +199,13 @@ export function Login() {
               </button>
             </div>
 
+            {/* Verificação de segurança (só aparece se configurada) */}
+            <Turnstile onVerify={setCaptchaToken} />
+
             {/* Submit */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (CAPTCHA_REQUIRED && !captchaToken)}
               className="w-full h-[56px] rounded-[9px] text-white font-semibold text-[16px] transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed hover:-translate-y-[1px] hover:shadow-lg hover:shadow-[#6D35E8]/30 active:translate-y-0 active:scale-[0.99]"
               style={{ background: 'linear-gradient(90deg, #8B3DFF 0%, #6D35E8 50%, #5424C7 100%)' }}
             >

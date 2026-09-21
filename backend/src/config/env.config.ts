@@ -39,6 +39,12 @@ export const env = {
     // strategies tenha um bug de validação do payload.
     superAdminJwtSecret: process.env.SUPER_ADMIN_JWT_SECRET || `${process.env.JWT_SECRET || 'dev'}-super-admin-dev-only`,
   },
+  turnstile: {
+    // Secret key do Cloudflare Turnstile (nunca vai pro frontend - só o site key, público, vai
+    // via VITE_TURNSTILE_SITE_KEY no build). Vazio = captcha desligado (login funciona sem ele),
+    // pra não travar ambientes que ainda não configuraram uma conta no Cloudflare.
+    secretKey: process.env.TURNSTILE_SECRET_KEY || '',
+  },
 };
 
 const unsafeSecrets = new Set([

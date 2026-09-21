@@ -12,6 +12,7 @@ import { BlockedIp } from './entities/blocked-ip.entity';
 import { MailService } from '../mail/mail.service';
 import { TenantsService } from '../platform/tenants.service';
 import { AuditService } from '../audit/audit.service';
+import { env } from '../../config/env.config';
 
 type ClientInfo = { ip?: string; userAgent?: string; deviceName?: string };
 
@@ -71,11 +72,34 @@ export class AuthService {
     if (current.count > limit) throw new HttpException('Muitas tentativas. Aguarde antes de tentar novamente.', HttpStatus.TOO_MANY_REQUESTS);
   }
 
+  // Confere o token do Cloudflare Turnstile resolvido no frontend contra a API da Cloudflare.
+  // Sem TURNSTILE_SECRET_KEY configurada, o captcha fica desligado (não bloqueia login) - assim
+  // dev local e ambientes que ainda não criaram uma conta no Cloudflare continuam funcionando.
+  // Falha de captcha não conta pro contador de tentativas de IP/conta (não é sinal de senha
+  // errada, é normalmente um bot que nem chegou a tentar credenciais de verdade).
+  private async verifyCaptcha(token: string | undefined, ip?: string): Promise<void> {
+    const secret = env.turnstile.secretKey;
+    if (!secret) return;
+    if (!token) throw new BadRequestException('Verificação de segurança (captcha) obrigatória.');
+    try {
+      const params = new URLSearchParams({ secret, response: token });
+      if (ip) params.set('remoteip', ip);
+      const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: params });
+      const data = await res.json();
+      if (!data.success) throw new BadRequestException('Falha na verificação de segurança. Recarregue a página e tente novamente.');
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      // Erro de rede ao falar com a Cloudflare não pode deixar ninguém logar sem captcha nenhum.
+      throw new BadRequestException('Não foi possível validar a verificação de segurança. Tente novamente.');
+    }
+  }
+
   async login(loginDto: LoginDto, client: ClientInfo = {}) {
     const email = loginDto.email.trim().toLowerCase();
     // Bloqueio por IP vem antes de qualquer outra checagem - um IP já bloqueado nem chega a
     // gastar uma tentativa de throttle ou consultar o banco por email.
     await this.assertIpNotBlocked(client.ip);
+    await this.verifyCaptcha(loginDto.captchaToken, client.ip);
     this.throttle('login:' + (client.ip || 'unknown') + ':' + email);
     const user = await this.usersService.findByEmail(email);
     if (!user) {
