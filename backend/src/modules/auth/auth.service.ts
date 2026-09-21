@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, MoreThan, Repository } from 'typeorm';
@@ -8,10 +8,14 @@ import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { PasswordReset } from './entities/password-reset.entity';
 import { AuthSession } from './entities/auth-session.entity';
+import { BlockedIp } from './entities/blocked-ip.entity';
 import { MailService } from '../mail/mail.service';
 import { TenantsService } from '../platform/tenants.service';
+import { AuditService } from '../audit/audit.service';
 
 type ClientInfo = { ip?: string; userAgent?: string; deviceName?: string };
+
+const IP_FAILURE_LIMIT = Number(process.env.AUTH_IP_BLOCK_ATTEMPTS || 5);
 
 @Injectable()
 export class AuthService {
@@ -21,10 +25,44 @@ export class AuthService {
 
   constructor(
     private usersService: UsersService, private jwtService: JwtService, private mailService: MailService,
-    private tenantsService: TenantsService,
+    private tenantsService: TenantsService, private auditService: AuditService,
     @InjectRepository(PasswordReset) private resetRepository: Repository<PasswordReset>,
     @InjectRepository(AuthSession) private sessionRepository: Repository<AuthSession>,
+    @InjectRepository(BlockedIp) private blockedIpRepository: Repository<BlockedIp>,
   ) {}
+
+  // Bloqueio por IP, independente de qual conta foi tentada (ou se ela existe) - complementa o
+  // bloqueio por conta (user.lockedUntil) que já existia e continua funcionando do mesmo jeito.
+  private async assertIpNotBlocked(ip?: string): Promise<void> {
+    if (!ip) return;
+    const row = await this.blockedIpRepository.findOne({ where: { ip } });
+    if (row?.blocked) throw new ForbiddenException('Este IP foi bloqueado por excesso de tentativas de login. Contate o suporte.');
+  }
+
+  private async registerIpFailure(ip: string | undefined, email: string): Promise<void> {
+    if (!ip) return;
+    let row = await this.blockedIpRepository.findOne({ where: { ip } });
+    if (!row) row = this.blockedIpRepository.create({ ip, failedAttempts: 0 });
+    if (row.blocked) return; // já bloqueado, nada a incrementar
+    row.failedAttempts += 1;
+    row.lastAttemptAt = new Date();
+    row.lastEmailAttempted = email;
+    const justBlocked = row.failedAttempts >= IP_FAILURE_LIMIT;
+    if (justBlocked) { row.blocked = true; row.blockedAt = new Date(); }
+    await this.blockedIpRepository.save(row);
+    if (justBlocked) {
+      await this.auditService.safeCreate({
+        action: 'auth.ip_blocked', entity: 'blocked_ip', entityId: row.id,
+        newData: { ip, failedAttempts: row.failedAttempts, lastEmailAttempted: email },
+        ipAddress: ip,
+      });
+    }
+  }
+
+  private async registerIpSuccess(ip?: string): Promise<void> {
+    if (!ip) return;
+    await this.blockedIpRepository.update({ ip, blocked: false }, { failedAttempts: 0 });
+  }
 
   private throttle(key: string, limit = this.maxAttempts) {
     const now = Date.now(); const current = this.attempts.get(key);
@@ -35,22 +73,46 @@ export class AuthService {
 
   async login(loginDto: LoginDto, client: ClientInfo = {}) {
     const email = loginDto.email.trim().toLowerCase();
+    // Bloqueio por IP vem antes de qualquer outra checagem - um IP já bloqueado nem chega a
+    // gastar uma tentativa de throttle ou consultar o banco por email.
+    await this.assertIpNotBlocked(client.ip);
     this.throttle('login:' + (client.ip || 'unknown') + ':' + email);
     const user = await this.usersService.findByEmail(email);
-    if (!user) throw new UnauthorizedException('Credenciais invalidas');
-    if (user.lockedUntil && user.lockedUntil > new Date()) throw new HttpException('Conta temporariamente bloqueada. Tente novamente mais tarde.', HttpStatus.TOO_MANY_REQUESTS);
+    if (!user) {
+      // Conta que nem existe também conta como falha pro IP - é exatamente o caso de alguém
+      // tentando adivinhar emails, não só senhas de contas reais.
+      await this.registerIpFailure(client.ip, email);
+      await this.auditService.safeCreate({ action: 'auth.login_failed', entity: 'user', newData: { email, reason: 'email_nao_encontrado' }, ipAddress: client.ip, userAgent: client.userAgent });
+      throw new UnauthorizedException('Credenciais invalidas');
+    }
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await this.registerIpFailure(client.ip, email);
+      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'conta_bloqueada' }, ipAddress: client.ip, userAgent: client.userAgent });
+      throw new HttpException('Conta temporariamente bloqueada. Tente novamente mais tarde.', HttpStatus.TOO_MANY_REQUESTS);
+    }
     const valid = await bcrypt.compare(loginDto.password, user.password);
     if (!valid) {
       const failures = (user.failedLoginAttempts || 0) + 1;
       const patch: any = { failedLoginAttempts: failures };
       if (failures >= this.maxAttempts) patch.lockedUntil = new Date(Date.now() + this.lockMinutes * 60000);
       await this.usersService.update(user.id, patch);
+      // Conta REAL e ATIVA com senha errada: conta pro bloqueio de IP E pro bloqueio da própria
+      // conta (que já acabou de acontecer acima) - as duas travas rodam em paralelo, cada uma
+      // com seu próprio limite e sua própria tela de desbloqueio no painel do super admin.
+      await this.registerIpFailure(client.ip, email);
+      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'senha_invalida', accountLocked: failures >= this.maxAttempts }, ipAddress: client.ip, userAgent: client.userAgent });
       throw new UnauthorizedException('Credenciais invalidas');
     }
-    if (!user.active) throw new UnauthorizedException('Usuario inativo');
+    if (!user.active) {
+      await this.registerIpFailure(client.ip, email);
+      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'usuario_inativo' }, ipAddress: client.ip, userAgent: client.userAgent });
+      throw new UnauthorizedException('Usuario inativo');
+    }
+    await this.registerIpSuccess(client.ip);
     const expiresAt = new Date(Date.now() + 7 * 86400000);
     const session = await this.sessionRepository.save(this.sessionRepository.create({ userId: user.id, deviceName: client.deviceName || this.describeDevice(client.userAgent), userAgent: client.userAgent, ipAddress: client.ip, lastSeenAt: new Date(), expiresAt }));
     await this.usersService.update(user.id, { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } as any);
+    await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_success', entity: 'user', entityId: user.id, ipAddress: client.ip, userAgent: client.userAgent });
     const payload = { sub: user.id, sid: session.id, email: user.email, role: user.role, tenantId: user.tenantId, permissions: user.permissions || [] };
     // Mesma resolução de módulos do plano que o JwtStrategy faz em requisições subsequentes —
     // sem isso, a resposta do login (usada para popular o AuthContext na hora) ficaria

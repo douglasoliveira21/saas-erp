@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet } from 'react-router-dom'
-import { LayoutDashboard, ShieldCheck, Building2, PackageCheck, LogOut, MapPin, Landmark, UserCircle, Users2, Menu, X } from 'lucide-react'
+import { LayoutDashboard, ShieldCheck, Building2, PackageCheck, LogOut, MapPin, Landmark, UserCircle, Users2, Menu, X, ShieldAlert } from 'lucide-react'
 import { getSuperAdminToken, setSuperAdminToken, superAdminApi } from '../../services/superAdminApi'
 
 const navItems = [
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/super-admin/municipalities', label: 'Municípios', icon: MapPin },
   { to: '/super-admin/banks', label: 'Bancos', icon: Landmark },
   { to: '/super-admin/admins', label: 'Administradores', icon: Users2 },
+  { to: '/super-admin/security', label: 'Segurança e logs', icon: ShieldAlert },
 ]
 
 export function SuperAdminLayout() {

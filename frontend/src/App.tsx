@@ -59,6 +59,7 @@ const SuperAdminBanks = lazy(() => import('./pages/super-admin/SuperAdminBanks')
 const SuperAdminAccount = lazy(() => import('./pages/super-admin/SuperAdminAccount').then(module => ({ default: module.SuperAdminAccount })))
 const SuperAdminAdmins = lazy(() => import('./pages/super-admin/SuperAdminAdmins').then(module => ({ default: module.SuperAdminAdmins })))
 const SuperAdminDashboard = lazy(() => import('./pages/super-admin/SuperAdminDashboard').then(module => ({ default: module.SuperAdminDashboard })))
+const SuperAdminSecurity = lazy(() => import('./pages/super-admin/SuperAdminSecurity').then(module => ({ default: module.SuperAdminSecurity })))
 
 function PageLoader() {
   const [delayed, setDelayed] = useState(false)
@@ -96,6 +97,7 @@ function App() {
               <Route path="municipalities" element={<SuperAdminMunicipalities />} />
               <Route path="banks" element={<SuperAdminBanks />} />
               <Route path="admins" element={<SuperAdminAdmins />} />
+              <Route path="security" element={<SuperAdminSecurity />} />
               <Route path="account" element={<SuperAdminAccount />} />
             </Route>
             <Route element={<PrivateRoute><Layout /></PrivateRoute>}>

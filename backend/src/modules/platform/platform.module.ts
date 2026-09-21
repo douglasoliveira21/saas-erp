@@ -27,10 +27,15 @@ import { BanksController } from './banks.controller';
 import { CatalogsController } from './catalogs.controller';
 import { SuperAdminsService } from './super-admins.service';
 import { SuperAdminsController } from './super-admins.controller';
+import { SecurityService } from './security.service';
+import { SecurityController } from './security.controller';
+import { BlockedIp } from '../auth/entities/blocked-ip.entity';
+import { ErrorLog } from '../../common/errors/error-log.entity';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tenant, Plan, SuperAdmin, SuperAdminLoginCode, Municipality, Bank]),
+    TypeOrmModule.forFeature([Tenant, Plan, SuperAdmin, SuperAdminLoginCode, Municipality, Bank, BlockedIp, ErrorLog, AuditLog]),
     UsersModule,
     PassportModule,
     forwardRef(() => MailModule),
@@ -39,8 +44,8 @@ import { SuperAdminsController } from './super-admins.controller';
       signOptions: { expiresIn: '12h' },
     }),
   ],
-  controllers: [SuperAdminAuthController, TenantsController, PlansController, MunicipalitiesController, BanksController, CatalogsController, SuperAdminsController],
-  providers: [SuperAdminAuthService, SuperAdminJwtStrategy, SuperAdminJwtAuthGuard, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService, SuperAdminsService],
+  controllers: [SuperAdminAuthController, TenantsController, PlansController, MunicipalitiesController, BanksController, CatalogsController, SuperAdminsController, SecurityController],
+  providers: [SuperAdminAuthService, SuperAdminJwtStrategy, SuperAdminJwtAuthGuard, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService, SuperAdminsService, SecurityService],
   exports: [TypeOrmModule, TenantsService, PlansService, PlanGuard, MunicipalitiesService, BanksService],
 })
 export class PlatformModule {}
