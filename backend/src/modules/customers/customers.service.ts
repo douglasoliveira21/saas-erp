@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import { getCustomerEmails } from '../../common/customer-emails';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class CustomersService {
@@ -10,30 +11,38 @@ export class CustomersService {
     @InjectRepository(Customer)
     private customersRepository: Repository<Customer>,
     private dataSource: DataSource,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(createCustomerDto: any): Promise<Customer> {
     const email = String(createCustomerDto.email || '').trim().toLowerCase() || null;
     createCustomerDto.email = email;
     createCustomerDto.additionalEmails = getCustomerEmails({ email, additionalEmails: createCustomerDto.additionalEmails }).filter(item => item !== email);
-    const customer = this.customersRepository.create(createCustomerDto);
+    const tenantId = this.tenantContext.getTenantId();
+    const customer = this.customersRepository.create({ ...createCustomerDto, ...(tenantId ? { tenantId } : {}) });
     const saved = await this.customersRepository.save(customer);
     return Array.isArray(saved) ? saved[0] : saved;
   }
 
+  // Escopado pelo tenant da requisição atual quando existe um - sem isso, qualquer usuário
+  // autenticado em QUALQUER empresa enxergava/editava o cadastro de clientes de todas as outras
+  // empresas do sistema (a tabela é compartilhada, id sozinho não isola nada).
   async findAll(): Promise<Customer[]> {
+    const tenantId = this.tenantContext.getTenantId();
     return this.customersRepository.find({
+      where: tenantId ? { tenantId } : {},
       order: { createdAt: 'DESC' },
     });
   }
 
   async findOne(id: string): Promise<Customer> {
-    const customer = await this.customersRepository.findOne({ where: { id } });
-    
+    const tenantId = this.tenantContext.getTenantId();
+    const customer = await this.customersRepository.findOne({ where: tenantId ? { id, tenantId } : { id } });
+
     if (!customer) {
       throw new NotFoundException('Cliente não encontrado');
     }
-    
+
     return customer;
   }
 

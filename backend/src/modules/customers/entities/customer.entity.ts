@@ -14,6 +14,11 @@ export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Coluna já existe no banco desde a migração MultiTenantFoundation (com DEFAULT pro tenant
+  // legado) - só não estava mapeada na entidade, então nenhuma query TypeORM filtrava por ela.
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ length: 255 })
   name: string;
 

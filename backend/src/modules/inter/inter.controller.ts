@@ -78,11 +78,14 @@ export class InterController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async listPayments(@Query('page') page = '1', @Query('limit') limit = '50', @Query('month') month?: string) {
+    const tenantId = this.tenantContext.requireTenantId();
     const safePage = Math.max(Number(page) || 1, 1); const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
     const monthFilter = month && /^\d{4}-\d{2}$/.test(month) ? month : null;
     // Filtra pelo vencimento (due_date), que e a data exibida na coluna "Vencimento" da tela.
-    const whereClause = monthFilter ? `WHERE to_char(p.due_date, 'YYYY-MM') = $3` : '';
-    const params = monthFilter ? [safeLimit, (safePage - 1) * safeLimit, monthFilter] : [safeLimit, (safePage - 1) * safeLimit];
+    // tenant_id SEMPRE entra no WHERE (era o unico ponto do modulo Inter que faltava isso -
+    // sem essa condicao, qualquer tenant enxergava os boletos/PIX de todos os outros).
+    const whereClause = monthFilter ? `WHERE p.tenant_id = $3 AND to_char(p.due_date, 'YYYY-MM') = $4` : `WHERE p.tenant_id = $3`;
+    const params = monthFilter ? [safeLimit, (safePage - 1) * safeLimit, tenantId, monthFilter] : [safeLimit, (safePage - 1) * safeLimit, tenantId];
     const payments = await this.saleRepo.manager.query(
       `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt", p.settled_manually as "settledManually", p.payment_note as "paymentNote", p.installment_id as "installmentId",
        CASE WHEN p.sale_id IS NOT NULL THEN 'venda' ELSE COALESCE((SELECT 'contrato' FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1), 'outro') END as "origem",
@@ -103,8 +106,8 @@ export class InterController {
       params,
     );
     const count = monthFilter
-      ? await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments p WHERE to_char(p.due_date, 'YYYY-MM') = $1`, [monthFilter])
-      : await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments`);
+      ? await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments p WHERE p.tenant_id = $1 AND to_char(p.due_date, 'YYYY-MM') = $2`, [tenantId, monthFilter])
+      : await this.saleRepo.manager.query(`SELECT COUNT(*)::int AS total FROM payments p WHERE p.tenant_id = $1`, [tenantId]);
     return { data: payments, total: Number(count[0]?.total || 0), page: safePage, limit: safeLimit };
   }
 

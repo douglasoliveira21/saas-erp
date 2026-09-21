@@ -56,14 +56,22 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
+  // Ambos escopados pelo tenant da requisição atual quando existe um (usuário comum, autenticado
+  // num tenant) - sem isso, um admin de um tenant enxergava/editava usuários de QUALQUER outro
+  // tenant do sistema, já que id sozinho não garante nada em uma tabela compartilhada. Quando não
+  // há tenant no contexto (chamada do painel do super admin, que já valida por outro caminho -
+  // ver findOneInTenant), cai no comportamento antigo de buscar só por id.
   async findAll(): Promise<User[]> {
+    const tenantId = this.tenantContext.getTenantId();
     return this.usersRepository.find({
+      where: tenantId ? { tenantId } : {},
       order: { createdAt: 'DESC' },
     });
   }
 
   async findOne(id: string): Promise<User> {
-    const user = await this.usersRepository.findOne({ where: { id } });
+    const tenantId = this.tenantContext.getTenantId();
+    const user = await this.usersRepository.findOne({ where: tenantId ? { id, tenantId } : { id } });
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');

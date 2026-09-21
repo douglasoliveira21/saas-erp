@@ -22,6 +22,7 @@ import { SaleAttachment } from './entities/sale-attachment.entity';
 import { money, moneySum, moneyMultiply } from '../../common/money';
 import { getCustomerEmailRecipients } from '../../common/customer-emails';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -53,6 +54,7 @@ export class SalesService {
     private danfePdfService: DanfePdfService,
     private auditService: AuditService,
     private whatsappService: WhatsappService,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(createSaleDto: any, userId?: string): Promise<Sale> {
@@ -64,6 +66,8 @@ export class SalesService {
 
     try {
       const { items, alreadyPaid = false, ...saleData } = createSaleDto;
+      const tenantId = this.tenantContext.getTenantId();
+      if (tenantId) saleData.tenantId = tenantId;
       if (alreadyPaid) {
         saleData.status = 'pago';
         saleData.paymentStatus = 'pago';
@@ -234,6 +238,10 @@ export class SalesService {
       .leftJoinAndSelect('sale.technician', 'technician').leftJoinAndSelect('sale.customer', 'customer')
       .leftJoinAndSelect('sale.items', 'items').leftJoinAndSelect('sale.events', 'events').leftJoinAndSelect('sale.attachments', 'attachments')
       .where('sale.archivedAt IS NULL').orderBy('sale.createdAt', 'DESC');
+    // Escopado pelo tenant da requisição atual quando existe um - sem isso, um usuário de
+    // QUALQUER empresa listava as vendas de todas as outras empresas do sistema.
+    const tenantId = this.tenantContext.getTenantId();
+    if (tenantId) qb.andWhere('sale.tenantId = :tenantId', { tenantId });
     // Técnicos só enxergam as próprias vendas (e o próprio netProfit/comissão), não as de toda a empresa.
     if (requesterRole === 'tecnico' && requesterId) {
       qb.andWhere('sale.technicianId = :requesterId', { requesterId });
@@ -338,8 +346,12 @@ export class SalesService {
   }
 
   async findOne(id: string, requesterId?: string, requesterRole?: string): Promise<Sale> {
+    // Escopado pelo tenant da requisição atual quando existe um - sem isso, qualquer usuário
+    // autenticado (de qualquer empresa) conseguia ler/editar a venda de outra empresa só sabendo
+    // o id (usado por praticamente toda ação de venda: aprovar, cancelar, pagar, gerar boleto...).
+    const tenantId = this.tenantContext.getTenantId();
     const sale = await this.salesRepository.findOne({
-      where: { id },
+      where: tenantId ? { id, tenantId } : { id },
       relations: ['technician', 'customer', 'items'],
     });
 
@@ -756,7 +768,8 @@ export class SalesService {
     let safeDto: any;
     let reassignedTechnician: { fromId: string; toId: string } | null = null;
     try {
-      const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      const tenantId = this.tenantContext.getTenantId();
+      const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: tenantId ? { id, tenantId } : { id }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       oldData = { ...sale };
       const { technician, customer, items, approver, alreadyPaid, technicianId, ...allowedDto } = updateSaleDto;
