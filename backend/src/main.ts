@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
@@ -6,7 +7,13 @@ import { env, validateProductionSecrets } from './config/env.config';
 
 async function bootstrap() {
   validateProductionSecrets();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // O backend roda atrás do nginx (ver frontend/nginx.conf.template, que já seta X-Forwarded-For
+  // e X-Real-IP) - sem "trust proxy", o Express ignora esses headers e req.ip sempre retorna o IP
+  // interno do container nginx, não o IP real de quem fez a requisição. Isso quebrava silenciosamente
+  // TUDO que depende de IP (bloqueio por tentativas de login, log de auditoria, sessões) - todo
+  // mundo aparecia com o mesmo IP. "1" confia só no primeiro proxy da cadeia (o nginx local).
+  app.set('trust proxy', 1);
 
   // Run pending schema migrations (add missing columns)
   try {
