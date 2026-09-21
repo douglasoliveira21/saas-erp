@@ -19,9 +19,11 @@ export class SuppliersController {
   createSupplier(@Body() dto: any) { return this.service.createSupplier(dto); }
 
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findAllSuppliers() { return this.service.findAllSuppliers(); }
 
   @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findOneSupplier(@Param('id') id: string) { return this.service.findOneSupplier(id); }
 
   @Patch(':id')
@@ -44,18 +46,23 @@ export class BillsController {
   createBill(@Body() dto: any, @Request() req: any) { return this.service.createBill(dto, req.user.id); }
 
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findAllBills(@Query() query: { status?: string; supplierId?: string; customerId?: string; type?: string; startDate?: string; endDate?: string; category?: string }) { return this.service.findAllBills(query); }
 
   @Get('alerts')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getAlerts(@Query('days') days?: string) { return this.service.getAlerts(days ? parseInt(days) : 7); }
 
   @Get('summary')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getSummary() { return this.service.getSummary(); }
 
   @Get('report')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getReport(@Query('startDate') startDate?: string, @Query('endDate') endDate?: string) { return this.service.getReportBySupplier(startDate, endDate); }
 
   @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findOneBill(@Param('id') id: string) { return this.service.findOneBill(id); }
 
   @Patch(':id')

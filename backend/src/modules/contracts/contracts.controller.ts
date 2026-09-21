@@ -74,16 +74,19 @@ export class ContractsController {
   }
 
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findAll() {
     return this.service.findAll();
   }
 
   @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
 
   @Get(':id/download')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async download(@Param('id') id: string, @Res() res: Response) {
     const contract = await this.service.findOne(id);
     if (!contract.filePath || !existsSync(contract.filePath)) {
@@ -95,6 +98,7 @@ export class ContractsController {
   }
 
   @Get('customer/:customerId')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   findByCustomer(@Param('customerId') customerId: string) {
     return this.service.findByCustomer(customerId);
   }
