@@ -263,16 +263,30 @@ export class InterController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.reprocess_webhook')
   async reprocessWebhook(@Param('auditId') auditId: string) {
-    const log = await this.auditRepo.findOne({ where: { id: auditId } });
-    const payload = (log as any)?.newData?.payload || (log as any)?.newData;
+    const tenantId = this.tenantContext.requireTenantId();
+    // Sem o filtro de tenant, qualquer admin conseguia ler o payload (dados financeiros) e forcar
+    // o reprocessamento de um webhook de OUTRA empresa só sabendo/adivinhando o auditId.
+    const rows = await this.saleRepo.manager.query(`SELECT new_data FROM audit_logs WHERE id=$1 AND tenant_id=$2 LIMIT 1`, [auditId, tenantId]);
+    const newData = rows[0]?.new_data;
+    const payload = newData?.payload || newData;
     if (!payload) throw new HttpException('Payload de webhook não encontrado', HttpStatus.NOT_FOUND);
     return this.interService.handleWebhook(payload);
+  }
+
+  // Confirma que o codigoSolicitacao pertence de fato ao tenant da requisicao atual antes de
+  // deixar consultar/cancelar no Inter - sem isso, um tenant conseguia operar em cima do boleto
+  // de OUTRO tenant só sabendo o codigo (ex: vazado por algum outro endpoint, ou adivinhado).
+  private async assertPaymentBelongsToTenant(codigoSolicitacao: string): Promise<void> {
+    const tenantId = this.tenantContext.requireTenantId();
+    const rows = await this.saleRepo.manager.query(`SELECT 1 FROM payments WHERE codigo_solicitacao=$1 AND tenant_id=$2 LIMIT 1`, [codigoSolicitacao, tenantId]);
+    if (!rows[0]) throw new HttpException('Pagamento não encontrado', HttpStatus.NOT_FOUND);
   }
 
   @Get('compare/:codigoSolicitacao')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async compareLocalInter(@Param('codigoSolicitacao') codigoSolicitacao: string) {
+    await this.assertPaymentBelongsToTenant(codigoSolicitacao);
     const local = await this.saleRepo.manager.query(
       `SELECT * FROM payments WHERE codigo_solicitacao = $1 LIMIT 1`,
       [codigoSolicitacao],
@@ -290,6 +304,7 @@ export class InterController {
     const results = [];
     for (const code of codes) {
       try {
+        await this.assertPaymentBelongsToTenant(code);
         results.push({ code, success: true, data: await this.interService.cancelBoleto(code, body.reason || 'ACERTOS') });
       } catch (error) {
         results.push({ code, success: false, error: error.message });
@@ -303,6 +318,7 @@ export class InterController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @Permissions('inter.handle_expired')
   async handleExpired(@Param('codigoSolicitacao') codigoSolicitacao: string, @Body() body: any) {
+    await this.assertPaymentBelongsToTenant(codigoSolicitacao);
     const action = body.action || 'manter';
     if (action === 'cancelar') {
       return this.interService.cancelBoleto(codigoSolicitacao, body.reason || 'ACERTOS');
