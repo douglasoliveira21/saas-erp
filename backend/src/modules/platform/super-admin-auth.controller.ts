@@ -11,6 +11,16 @@ export class SuperAdminAuthController {
     return this.authService.login(body.email, body.password);
   }
 
+  @Post('verify-code')
+  verifyCode(@Body() body: { pendingToken: string; code: string }) {
+    return this.authService.verifyCode(body.pendingToken, body.code);
+  }
+
+  @Post('resend-code')
+  resendCode(@Body() body: { pendingToken: string }) {
+    return this.authService.resendCode(body.pendingToken);
+  }
+
   @UseGuards(SuperAdminJwtAuthGuard)
   @Get('me')
   me(@Request() req: any) {

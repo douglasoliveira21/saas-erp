@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { MailModule } from '../mail/mail.module';
 import { Tenant } from './entities/tenant.entity';
 import { Plan } from './entities/plan.entity';
 import { SuperAdmin } from './entities/super-admin.entity';
+import { SuperAdminLoginCode } from './entities/super-admin-login-code.entity';
 import { Municipality } from './entities/municipality.entity';
 import { Bank } from './entities/bank.entity';
 import { UsersModule } from '../users/users.module';
@@ -28,9 +30,10 @@ import { SuperAdminsController } from './super-admins.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tenant, Plan, SuperAdmin, Municipality, Bank]),
+    TypeOrmModule.forFeature([Tenant, Plan, SuperAdmin, SuperAdminLoginCode, Municipality, Bank]),
     UsersModule,
     PassportModule,
+    forwardRef(() => MailModule),
     JwtModule.register({
       secret: env.platform.superAdminJwtSecret,
       signOptions: { expiresIn: '12h' },
