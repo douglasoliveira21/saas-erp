@@ -1183,7 +1183,18 @@ function FiscalConfigForm() {
   const [msg, setMsg] = useState('')
   const [municipality, setMunicipality] = useState<{ found?: boolean; name?: string; uf?: string; status?: string; nfseApiUrl?: string | null; nfseTestUrl?: string | null } | null>(null)
 
-  useEffect(() => { api.get('/fiscal/config').then(r => setCfg(r.data)).catch(() => setCfg({})) }, [])
+  useEffect(() => {
+    api.get('/fiscal/config').then(async r => {
+      const data = r.data || {}
+      // Sem cidade configurada ainda, sugere a do município vinculado ao tenant (escolhido na
+      // criação do cliente) em vez de deixar sempre o placeholder fixo de Contagem.
+      if (!data.cityCode) {
+        const myTenant = await api.get('/catalogs/my-tenant').then(res => res.data).catch(() => null)
+        if (myTenant?.municipality?.ibgeCode) data.cityCode = myTenant.municipality.ibgeCode
+      }
+      setCfg(data)
+    }).catch(() => setCfg({}))
+  }, [])
 
   // Consulta o catálogo de municípios (mantido pelo super admin) sempre que o código IBGE muda,
   // para avisar se aquela prefeitura já tem provedor de NFS-e homologado.

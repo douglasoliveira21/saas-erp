@@ -3,11 +3,21 @@ import { Plus, X, Copy, Users, Trash2, KeyRound, Ban, CheckCircle2 } from 'lucid
 import { superAdminApi } from '../../services/superAdminApi'
 
 interface Plan { id: string; name: string }
+interface Bank { id: string; name: string; hasIntegration: boolean; status: 'suportado' | 'em_teste' | 'nao_suportado' }
+interface Municipality { id: string; name: string; uf: string; status: 'suportado' | 'em_teste' | 'nao_suportado' }
 interface Tenant {
   id: string; name: string; slug: string; document: string | null; status: string
-  planId: string | null; plan?: Plan; userCount: number; createdAt: string
+  planId: string | null; plan?: Plan; bankId: string | null; bank?: Bank; municipalityId: string | null; municipality?: Municipality
+  userCount: number; createdAt: string
 }
 interface TenantUser { id: string; name: string; email: string; role: string; active: boolean }
+
+// "(em breve)" ao lado de bancos/municípios sem integração de verdade ainda - o super admin pode
+// escolher mesmo assim (deixa o tenant já configurado pra quando a integração existir), só não
+// pode achar que já funciona.
+function catalogLabel(name: string, status: 'suportado' | 'em_teste' | 'nao_suportado') {
+  return status === 'suportado' ? name : `${name} (em breve)`
+}
 
 const statusColors: Record<string, string> = {
   ativo: 'bg-green-500/20 text-green-300',
@@ -15,7 +25,7 @@ const statusColors: Record<string, string> = {
   cancelado: 'bg-red-500/20 text-red-300',
 }
 
-const emptyForm = { name: '', document: '', planId: '', adminName: '', adminEmail: '' }
+const emptyForm = { name: '', document: '', planId: '', bankId: '', municipalityId: '', adminName: '', adminEmail: '' }
 
 function TenantUsersModal({ tenant, onClose }: { tenant: Tenant; onClose: () => void }) {
   const [users, setUsers] = useState<TenantUser[] | null>(null)
@@ -155,6 +165,8 @@ function DeleteTenantModal({ tenant, onClose, onDeleted }: { tenant: Tenant; onC
 export function SuperAdminTenants() {
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
+  const [banks, setBanks] = useState<Bank[]>([])
+  const [municipalities, setMunicipalities] = useState<Municipality[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -167,9 +179,11 @@ export function SuperAdminTenants() {
   async function load() {
     setLoading(true)
     try {
-      const [t, p] = await Promise.all([superAdminApi.get('/tenants'), superAdminApi.get('/plans')])
+      const [t, p, b, m] = await Promise.all([superAdminApi.get('/tenants'), superAdminApi.get('/plans'), superAdminApi.get('/banks'), superAdminApi.get('/municipalities')])
       setTenants(t.data)
       setPlans(p.data)
+      setBanks(b.data)
+      setMunicipalities(m.data)
     } catch {
       setError('Erro ao carregar clientes')
     } finally {
@@ -209,6 +223,16 @@ export function SuperAdminTenants() {
     load()
   }
 
+  async function changeBank(tenant: Tenant, bankId: string) {
+    await superAdminApi.patch(`/tenants/${tenant.id}`, { bankId: bankId || null })
+    load()
+  }
+
+  async function changeMunicipality(tenant: Tenant, municipalityId: string) {
+    await superAdminApi.patch(`/tenants/${tenant.id}`, { municipalityId: municipalityId || null })
+    load()
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -243,6 +267,8 @@ export function SuperAdminTenants() {
                 <th className="p-3">Cliente</th>
                 <th className="p-3">Status</th>
                 <th className="p-3">Plano</th>
+                <th className="p-3">Banco</th>
+                <th className="p-3">Município</th>
                 <th className="p-3">Usuários</th>
                 <th className="p-3">Criado em</th>
                 <th className="p-3" />
@@ -266,6 +292,18 @@ export function SuperAdminTenants() {
                     <select value={tenant.planId || ''} onChange={e => changePlan(tenant, e.target.value)} className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-xs">
                       <option value="">Sem plano</option>
                       {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-3">
+                    <select value={tenant.bankId || ''} onChange={e => changeBank(tenant, e.target.value)} className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-xs">
+                      <option value="">Nenhum</option>
+                      {banks.map(b => <option key={b.id} value={b.id}>{catalogLabel(b.name, b.status)}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-3">
+                    <select value={tenant.municipalityId || ''} onChange={e => changeMunicipality(tenant, e.target.value)} className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-xs">
+                      <option value="">Nenhum</option>
+                      {municipalities.map(m => <option key={m.id} value={m.id}>{catalogLabel(`${m.name}/${m.uf}`, m.status)}</option>)}
                     </select>
                   </td>
                   <td className="p-3">{tenant.userCount}</td>
@@ -304,6 +342,21 @@ export function SuperAdminTenants() {
                 <select className="w-full rounded-lg border border-gray-700 bg-gray-800 p-2" value={form.planId} onChange={e => setForm({ ...form, planId: e.target.value })}>
                   <option value="">Selecione depois</option>
                   {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-gray-300">Banco integrado</label>
+                <select className="w-full rounded-lg border border-gray-700 bg-gray-800 p-2" value={form.bankId} onChange={e => setForm({ ...form, bankId: e.target.value })}>
+                  <option value="">Nenhum / configurar depois</option>
+                  {banks.map(b => <option key={b.id} value={b.id}>{catalogLabel(b.name, b.status)}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">Bancos marcados "(em breve)" ainda não têm integração pronta - o cliente fica vinculado, mas a tela de configuração dele mostra que ainda não funciona.</p>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-gray-300">Prefeitura (emissão de NFS-e)</label>
+                <select className="w-full rounded-lg border border-gray-700 bg-gray-800 p-2" value={form.municipalityId} onChange={e => setForm({ ...form, municipalityId: e.target.value })}>
+                  <option value="">Nenhum / configurar depois</option>
+                  {municipalities.map(m => <option key={m.id} value={m.id}>{catalogLabel(`${m.name}/${m.uf}`, m.status)}</option>)}
                 </select>
               </div>
               <div className="border-t border-gray-800 pt-4">

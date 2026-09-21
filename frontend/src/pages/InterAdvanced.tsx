@@ -7,13 +7,18 @@ const emptyBankForm = { environment: 'sandbox', clientId: '', clientSecret: '', 
 
 function BankConfigForm() {
   const [config, setConfig] = useState<any>(null)
+  const [myBank, setMyBank] = useState<{ name: string; provider: string | null; hasIntegration: boolean } | null | undefined>(undefined)
   const [form, setForm] = useState(emptyBankForm)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
   async function load() {
-    const { data } = await api.get('/inter/bank-config')
+    const [{ data }, myTenant] = await Promise.all([
+      api.get('/inter/bank-config'),
+      api.get('/catalogs/my-tenant').then(r => r.data).catch(() => null),
+    ])
     setConfig(data)
+    setMyBank(myTenant?.bank || null)
     setForm({
       environment: data.environment || 'sandbox', clientId: data.clientId || '', clientSecret: '',
       certificate: '', privateKey: '', pixKey: data.pixKey || '', account: data.account || '', active: data.active ?? true,
@@ -35,7 +40,19 @@ function BankConfigForm() {
     }
   }
 
-  if (!config) return null
+  if (!config || myBank === undefined) return null
+
+  // Tenant vinculado a um banco sem integração pronta ainda (Santander/Itaú/BB/Caixa) - mostra um
+  // aviso claro em vez do formulário do Inter, que não serviria pra nada nesse caso. Sem banco
+  // vinculado (myBank === null) mantém o comportamento de sempre: assume Banco Inter.
+  if (myBank && !myBank.hasIntegration) {
+    return (
+      <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-amber-800"><KeyRound className="h-4 w-4" /> Banco {myBank.name}</div>
+        <p className="text-sm text-amber-700">Este cliente está vinculado ao {myBank.name}, mas a integração com esse banco ainda não foi implementada no sistema — só o Banco Inter emite boleto/PIX automaticamente por enquanto. Fale com o suporte pra saber a previsão.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">

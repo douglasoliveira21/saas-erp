@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { Tenant } from './entities/tenant.entity';
 import { Plan } from './entities/plan.entity';
+import { Bank } from './entities/bank.entity';
+import { Municipality } from './entities/municipality.entity';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../../common/enums/user-role.enum';
 
@@ -47,11 +49,13 @@ export class TenantsService {
   constructor(
     @InjectRepository(Tenant) private tenantsRepository: Repository<Tenant>,
     @InjectRepository(Plan) private plansRepository: Repository<Plan>,
+    @InjectRepository(Bank) private banksRepository: Repository<Bank>,
+    @InjectRepository(Municipality) private municipalitiesRepository: Repository<Municipality>,
     private usersService: UsersService,
   ) {}
 
   async findAll() {
-    const tenants = await this.tenantsRepository.find({ relations: ['plan'], order: { createdAt: 'DESC' } });
+    const tenants = await this.tenantsRepository.find({ relations: ['plan', 'bank', 'municipality'], order: { createdAt: 'DESC' } });
     // Uso atual de cada tenant (só contagem de usuários por enquanto — os demais limites do
     // plano passam a ser medidos módulo a módulo conforme cada um for migrado, Fase 3).
     const usage = await this.tenantsRepository.manager.query(
@@ -62,7 +66,7 @@ export class TenantsService {
   }
 
   async findOne(id: string) {
-    const tenant = await this.tenantsRepository.findOne({ where: { id }, relations: ['plan'] });
+    const tenant = await this.tenantsRepository.findOne({ where: { id }, relations: ['plan', 'bank', 'municipality'] });
     if (!tenant) throw new NotFoundException('Tenant não encontrado');
     return tenant;
   }
@@ -103,17 +107,28 @@ export class TenantsService {
   // Cria o tenant e já provisiona o primeiro usuário admin dele — sem isso, ninguém consegue
   // logar no tenant recém-criado. A senha temporária só existe em texto puro no retorno desta
   // chamada (nunca é armazenada nem logada); o super admin repassa para o cliente uma vez.
-  async create(dto: { name: string; document?: string; planId?: string; adminName: string; adminEmail: string }) {
+  async create(dto: { name: string; document?: string; planId?: string; bankId?: string; municipalityId?: string; adminName: string; adminEmail: string }) {
     if (!dto.name?.trim()) throw new BadRequestException('Informe o nome do cliente');
     if (!dto.adminName?.trim() || !dto.adminEmail?.trim()) throw new BadRequestException('Informe nome e email do administrador do cliente');
     if (dto.planId) {
       const plan = await this.plansRepository.findOne({ where: { id: dto.planId } });
       if (!plan) throw new BadRequestException('Plano inválido');
     }
+    // Banco/município são opcionais na criação (o super admin pode configurar depois) - mas se
+    // vier um id, precisa existir de fato no catálogo, senão a FK quebraria o INSERT com um erro
+    // genérico de banco de dados em vez de uma mensagem clara.
+    if (dto.bankId) {
+      const bank = await this.banksRepository.findOne({ where: { id: dto.bankId } });
+      if (!bank) throw new BadRequestException('Banco inválido');
+    }
+    if (dto.municipalityId) {
+      const municipality = await this.municipalitiesRepository.findOne({ where: { id: dto.municipalityId } });
+      if (!municipality) throw new BadRequestException('Município inválido');
+    }
 
     const slug = await this.uniqueSlug(dto.name);
     const tenant = await this.tenantsRepository.save(
-      this.tenantsRepository.create({ name: dto.name.trim(), slug, document: dto.document || null, planId: dto.planId || null, status: 'ativo' }),
+      this.tenantsRepository.create({ name: dto.name.trim(), slug, document: dto.document || null, planId: dto.planId || null, bankId: dto.bankId || null, municipalityId: dto.municipalityId || null, status: 'ativo' }),
     );
 
     const tempPassword = crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
@@ -173,7 +188,7 @@ export class TenantsService {
     };
   }
 
-  async update(id: string, dto: { name?: string; document?: string; planId?: string; status?: string }) {
+  async update(id: string, dto: { name?: string; document?: string; planId?: string; bankId?: string; municipalityId?: string; status?: string }) {
     const tenant = await this.findOne(id);
     if (dto.planId !== undefined) {
       if (dto.planId) {
@@ -181,6 +196,20 @@ export class TenantsService {
         if (!plan) throw new BadRequestException('Plano inválido');
       }
       tenant.planId = dto.planId || null;
+    }
+    if (dto.bankId !== undefined) {
+      if (dto.bankId) {
+        const bank = await this.banksRepository.findOne({ where: { id: dto.bankId } });
+        if (!bank) throw new BadRequestException('Banco inválido');
+      }
+      tenant.bankId = dto.bankId || null;
+    }
+    if (dto.municipalityId !== undefined) {
+      if (dto.municipalityId) {
+        const municipality = await this.municipalitiesRepository.findOne({ where: { id: dto.municipalityId } });
+        if (!municipality) throw new BadRequestException('Município inválido');
+      }
+      tenant.municipalityId = dto.municipalityId || null;
     }
     if (dto.name !== undefined) tenant.name = dto.name.trim();
     if (dto.document !== undefined) tenant.document = dto.document || null;
