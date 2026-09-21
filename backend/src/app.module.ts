@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ErrorLog } from './common/errors/error-log.entity';
+import { AllExceptionsFilter } from './common/errors/all-exceptions.filter';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CustomersModule } from './modules/customers/customers.module';
@@ -32,7 +34,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { OperationTrackingInterceptor } from './modules/operations/operation-tracking.interceptor';
 import { TenantContextModule } from './common/tenant/tenant-context.module';
@@ -43,6 +45,7 @@ import { TenantContextInterceptor } from './common/tenant/tenant-context.interce
     TypeOrmModule.forRootAsync({
       useClass: DatabaseConfig,
     }),
+    TypeOrmModule.forFeature([ErrorLog]),
     TenantContextModule,
     PlatformModule,
     AuthModule,
@@ -80,6 +83,7 @@ import { TenantContextInterceptor } from './common/tenant/tenant-context.interce
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_INTERCEPTOR, useClass: OperationTrackingInterceptor },
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })
 export class AppModule {}
