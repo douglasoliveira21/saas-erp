@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { Response } from 'express';
 import { createReadStream, existsSync, mkdirSync } from 'fs';
-import { extname, join } from 'path';
+import { extname, join, resolve, sep } from 'path';
 import { PurchasesService } from './purchases.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -53,12 +53,15 @@ export class PurchasesController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async downloadAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @Res() res: Response) {
     const attachment = await this.service.getAttachment(id, attachmentId);
-    if (!existsSync(attachment.storagePath)) {
+    // Defesa extra: recusa servir qualquer anexo cujo storagePath nao esteja de fato dentro da
+    // pasta de uploads de compras (ver comentario em addAttachment abaixo).
+    const resolvedPath = resolve(attachment.storagePath);
+    if (!resolvedPath.startsWith(purchasesUploadDir + sep) || !existsSync(resolvedPath)) {
       return res.status(404).json({ message: 'Arquivo não encontrado' });
     }
     res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${attachment.filename}"`);
-    createReadStream(attachment.storagePath).pipe(res);
+    createReadStream(resolvedPath).pipe(res);
   }
 
   @Get(':id')
@@ -123,13 +126,15 @@ export class PurchasesController {
     limits: { fileSize: 20 * 1024 * 1024 },
   }))
   addAttachment(@Param('id') id: string, @Body() body: any, @UploadedFile() file: any, @Request() req: any) {
-    if (!file && !body.storagePath) throw new BadRequestException('Envie um arquivo ou informe o caminho do anexo');
-    const payload = file ? {
+    // storagePath NUNCA pode vir do corpo da requisicao - ver o mesmo fix em sales.controller.ts
+    // (permitia ler qualquer arquivo do servidor, ex: .env, via download de "anexo").
+    if (!file) throw new BadRequestException('Envie um arquivo para anexar');
+    const payload = {
       filename: file.originalname,
       type: body.type || (file.originalname.toLowerCase().endsWith('.xml') ? 'xml' : 'pdf'),
       mimeType: file.mimetype,
       storagePath: file.path,
-    } : body;
+    };
     return this.service.addAttachment(id, payload, req.user.id);
   }
 

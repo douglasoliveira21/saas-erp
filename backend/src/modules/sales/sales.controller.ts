@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { Response } from 'express';
 import { createReadStream, existsSync, mkdirSync } from 'fs';
-import { extname, join } from 'path';
+import { extname, join, resolve, sep } from 'path';
 import { SalesService } from './sales.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -118,13 +118,17 @@ export class SalesController {
     limits: { fileSize: 20 * 1024 * 1024 },
   }))
   addAttachment(@Param('id') id: string, @Body() body: any, @UploadedFile() file: any, @Request() req: any) {
-    if (!file && !body.storagePath) throw new BadRequestException('Envie um arquivo ou informe o caminho do anexo');
-    const payload = file ? {
+    // storagePath NUNCA pode vir do corpo da requisição - antes, sem arquivo enviado, o body
+    // inteiro (incluindo um storagePath arbitrário escolhido pelo cliente) virava o anexo, e o
+    // download servia qualquer caminho do servidor (ex: .env, chave do certificado) pra quem
+    // tivesse papel ADMIN/FINANCEIRO. Só o multer decide o caminho real (file.path).
+    if (!file) throw new BadRequestException('Envie um arquivo para anexar');
+    const payload = {
       filename: file.originalname,
       type: body.type || 'outro',
       mimeType: file.mimetype,
       storagePath: file.path,
-    } : body;
+    };
     return this.salesService.addAttachment(id, payload, req.user.id);
   }
 
@@ -132,12 +136,16 @@ export class SalesController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async downloadAttachment(@Param('id') id: string, @Param('attachmentId') attachmentId: string, @Res() res: Response) {
     const attachment = await this.salesService.getAttachment(id, attachmentId);
-    if (!existsSync(attachment.storagePath)) {
+    // Defesa extra: mesmo com addAttachment agora só aceitando caminho gerado pelo multer,
+    // recusa servir qualquer anexo cujo storagePath (dados antigos, ou qualquer outro caminho de
+    // escrita futuro) não esteja de fato dentro da pasta de uploads de vendas.
+    const resolvedPath = resolve(attachment.storagePath);
+    if (!resolvedPath.startsWith(salesUploadDir + sep) || !existsSync(resolvedPath)) {
       return res.status(404).json({ message: 'Arquivo não encontrado' });
     }
     res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${attachment.filename}"`);
-    createReadStream(attachment.storagePath).pipe(res);
+    createReadStream(resolvedPath).pipe(res);
   }
 
   @Get(':id/events')
