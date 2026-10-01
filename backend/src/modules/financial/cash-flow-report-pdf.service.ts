@@ -66,16 +66,19 @@ export class CashFlowReportPdfService {
     const saleIds = [...new Set(movements.map((m) => m.saleId).filter(Boolean))];
     const installmentIds = [...new Set(movements.map((m) => m.installmentId).filter(Boolean))];
     const accountIds = [...new Set(movements.map((m) => m.accountId).filter(Boolean))];
+    const billIds = [...new Set(movements.map((m) => m.billId).filter(Boolean))];
 
-    const [invoices, installments, accounts, saleItems] = await Promise.all([
+    const [invoices, installments, accounts, saleItems, linkedBills] = await Promise.all([
       saleIds.length ? this.invoiceRepo.find({ where: { saleId: In(saleIds) } }) : Promise.resolve([]),
       installmentIds.length ? this.installmentRepo.find({ where: { id: In(installmentIds) } }) : Promise.resolve([]),
       accountIds.length ? this.accountRepo.find({ where: { id: In(accountIds) } }) : Promise.resolve([]),
       saleIds.length ? this.saleItemRepo.find({ where: { saleId: In(saleIds) } }) : Promise.resolve([]),
+      billIds.length ? this.billRepo.find({ where: { id: In(billIds) } }) : Promise.resolve([]),
     ]);
     const invoiceBySale = new Map(invoices.map((inv) => [inv.saleId, inv]));
     const installmentById = new Map(installments.map((i) => [i.id, i]));
     const accountById = new Map(accounts.map((a) => [a.id, a]));
+    const billById = new Map(linkedBills.map((b) => [b.id, b]));
     // "Recebimento venda {uuid}"/"Pagamento parcela N"/"Venda #xxx (previsão)" são textos
     // genéricos de controle interno, não a descrição do que foi vendido - troca pelos nomes dos
     // itens da própria venda, que é o que o usuário espera ver no relatório.
@@ -89,6 +92,7 @@ export class CashFlowReportPdfService {
       const installment = m.installmentId ? installmentById.get(m.installmentId) : null;
       const account = m.accountId ? accountById.get(m.accountId) : null;
       const invoice = m.saleId ? invoiceBySale.get(m.saleId) : null;
+      const bill = m.billId ? billById.get(m.billId) : null;
       const isCredit = m.type === 'receita';
       const isReversal = m.type === 'estorno';
       const saleDescription = m.saleId ? itemNamesBySale.get(m.saleId) : null;
@@ -97,23 +101,31 @@ export class CashFlowReportPdfService {
         : (m.description || '-');
       return {
         date: m.date,
-        documentNumber: invoice ? String(invoice.number) : '-',
+        documentNumber: invoice ? String(invoice.number) : (bill?.documentNumber || '-'),
         saleNumber: m.saleId ? m.saleId.substring(0, 8).toUpperCase() : '-',
         description,
-        installmentLabel: installment && account ? `${installment.number}/${account.installments}` : '-',
+        installmentLabel: installment && account
+          ? `${installment.number}/${account.installments}`
+          : (bill && bill.installments > 1 ? `${bill.installmentNumber}/${bill.installments}` : '-'),
         credit: isCredit ? Number(m.value) : 0,
         debit: !isCredit ? Number(m.value) : 0,
       };
     });
 
-    // Lado "contas a pagar" - fornecedores pagos no período (bills.entity), que não passam por
-    // financial_movements (fluxos distintos no sistema - ver suppliers.module).
+    // Lado "contas a pagar/receber avulsas" (bills.entity) - suppliers.service.ts#payBill já
+    // insere um financial_movements (bill_id setado, descrição "Pgto: ..."/"Receb: ...") pra
+    // toda baixa de conta, então sem o NOT EXISTS abaixo cada conta paga aparecia duas vezes
+    // (uma vinda de bills, outra do movimento equivalente em movementRows). Igual ao fallback
+    // de contratos acima, isto aqui só cobre contas pagas ANTES dessa gravação em
+    // financial_movements existir (ou qualquer baixa que por algum motivo não tenha gerado o
+    // movimento correspondente).
     const bills = await this.billRepo
       .createQueryBuilder('bill')
       .where('bill.paidAt IS NOT NULL')
       .andWhere('bill.paidAt >= :start', { start: startDate })
       .andWhere('bill.paidAt <= :end', { end: endDate + ' 23:59:59' })
       .andWhere('bill.paidValue > 0')
+      .andWhere('NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.bill_id = bill.id)')
       .getMany();
 
     const billRows: LedgerRow[] = bills.map((b) => ({
@@ -122,8 +134,8 @@ export class CashFlowReportPdfService {
       saleNumber: '-',
       description: b.description || '-',
       installmentLabel: b.installments > 1 ? `${b.installmentNumber}/${b.installments}` : '-',
-      credit: 0,
-      debit: Number(b.paidValue),
+      credit: b.type === 'receber' ? Number(b.paidValue) : 0,
+      debit: b.type === 'receber' ? 0 : Number(b.paidValue),
     }));
 
     // Lado "boletos de contratos pagos" - desde a correção em inter.service.ts
