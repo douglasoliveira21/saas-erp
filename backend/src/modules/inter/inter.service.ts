@@ -522,6 +522,8 @@ export class InterService implements OnModuleInit {
         } else {
           await this.financialService.settleSale(saleId, 'outro', null as any, idempotencyKey, paidAt, undefined, manager);
         }
+      } else {
+        await this.recordContractPaymentMovement(manager, payment.codigo_solicitacao, Number(paymentValue), paidAt);
       }
 
       await this.auditInter('inter.payment_marked_received_manually', id, { userId, note, codigoSolicitacao: payment.codigo_solicitacao, saleId });
@@ -547,6 +549,29 @@ export class InterService implements OnModuleInit {
    * mesma linha e travar/dar deadlock esperando a transação de fora, que por sua vez está
    * esperando esta função terminar).
    */
+  /**
+   * Boleto/PIX de contrato recorrente (sale_id NULL em `payments`, ligado por boleto_code em
+   * contract_billings) nunca passava por financialService.payInstallment/settleSale - essas só
+   * rodam quando há saleId. Resultado: o pagamento confirmava em `payments`, mas nunca aparecia
+   * em financial_movements (livro-razão usado por Reports.tsx "Lançamentos", DRE e o relatório de
+   * fluxo de caixa). idempotencyKey evita duplicar se o Inter reenviar o mesmo webhook.
+   */
+  private async recordContractPaymentMovement(manager: EntityManager, codigoSolicitacao: string, value: number, paidAt: Date): Promise<void> {
+    const idempotencyKey = `contract:${codigoSolicitacao}`;
+    const existing = await manager.query(`SELECT 1 FROM financial_movements WHERE idempotency_key=$1 LIMIT 1`, [idempotencyKey]);
+    if (existing.length) return;
+    const billing = await manager.query(
+      `SELECT cb.id, cb.billing_period, c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code=$1 LIMIT 1`,
+      [codigoSolicitacao],
+    );
+    if (!billing[0]) return; // boleto avulso, não é de contrato - nada a lançar
+    await manager.query(
+      `INSERT INTO financial_movements (type, category, description, value, date, payment_method, is_forecast, idempotency_key, reference_id, reference_type, paid_at)
+       VALUES ('receita', 'contrato', $1, $2, $3, 'boleto', false, $4, $5, 'contract_billing', $6)`,
+      [`Contrato ${billing[0].title} - competência ${billing[0].billing_period}`, value, paidAt.toISOString().split('T')[0], idempotencyKey, billing[0].id, paidAt],
+    );
+  }
+
   private async resolveInstallmentIdForPayment(saleId: string, paymentId: string, manager: EntityManager = this.saleRepo.manager): Promise<string | null> {
     const siblings = await manager.query(
       `SELECT id, due_date FROM payments WHERE sale_id=$1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
@@ -794,14 +819,18 @@ export class InterService implements OnModuleInit {
         await manager.query(`UPDATE sales SET billing_status=$2::varchar, status=CASE WHEN status IN ('pendente','nf_emitida') AND $2::varchar='emitido' THEN 'boleto_emitido' ELSE status END, updated_at=NOW() WHERE id=$1::uuid`, [saleId, billingStatus]);
       }
       if (saleId && localStatus !== 'cancelado') await manager.query(`UPDATE financial_tasks SET status='concluido', completed_at=COALESCE(completed_at,NOW()), observations=COALESCE(observations,'Cobrança emitida via Banco Inter') WHERE sale_id=$1 AND type='emissao_boleto' AND status='pendente'`, [saleId]);
-      if (localStatus === 'pago' && saleId) {
+      if (localStatus === 'pago') {
         const rawPaidAt = cobranca?.dataPagamento || cobranca?.dataHoraPagamento || interData?.dataPagamento;
         const parsedPaidAt = rawPaidAt ? new Date(rawPaidAt) : new Date();
         const paidAt = Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt;
-        if (isSplitInstallment) {
-          await this.financialService.payInstallment(installmentId, Number(paymentValue), type || 'boleto', null as any, { paidAt: paidAt.toISOString(), idempotencyKey: `inter:${codigoSolicitacao}` }, manager);
+        if (saleId) {
+          if (isSplitInstallment) {
+            await this.financialService.payInstallment(installmentId, Number(paymentValue), type || 'boleto', null as any, { paidAt: paidAt.toISOString(), idempotencyKey: `inter:${codigoSolicitacao}` }, manager);
+          } else {
+            await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, paidAt, undefined, manager);
+          }
         } else {
-          await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, paidAt, undefined, manager);
+          await this.recordContractPaymentMovement(manager, codigoSolicitacao, Number(paymentValue), paidAt);
         }
       }
       return { saleId, type, oldStatus: previous[0].status, newStatus: localStatus, changed: previous[0].status !== localStatus, situacao };

@@ -110,10 +110,12 @@ export class CashFlowReportPdfService {
       debit: Number(b.paidValue),
     }));
 
-    // Lado "boletos de contratos pagos" - contract_billings não tem entidade TypeORM (tabela
-    // criada via SQL puro em contract-billing.service.ts) e o pagamento em si nunca atualiza
-    // financial_movements nem contract_billings.status: ele fica só na tabela genérica `payments`
-    // (mesma usada pelos boletos de venda via Inter), com sale_id NULL e ligada por boleto_code.
+    // Lado "boletos de contratos pagos" - desde a correção em inter.service.ts
+    // (recordContractPaymentMovement), todo pagamento novo de contrato já gera uma linha em
+    // financial_movements (categoria 'contrato') e aparece via movementRows acima. Esta query
+    // aqui é só o fallback pra pagamentos ANTIGOS que já estavam 'pago' em `payments` antes
+    // dessa correção existir e por isso nunca ganharam o lançamento correspondente - o
+    // NOT EXISTS evita contar esses pagamentos em dobro quando o lançamento já existe.
     const contractPayments = await this.movementRepo.manager.query(
       `SELECT p.value AS value, p.paid_at AS paid_at, cb.billing_period AS billing_period,
               c.title AS contract_title, inv.number AS invoice_number
@@ -121,8 +123,9 @@ export class CashFlowReportPdfService {
        JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
        JOIN contracts c ON c.id = cb.contract_id
        LEFT JOIN invoices inv ON inv.id = cb.invoice_id
-       WHERE p.type = 'boleto' AND p.status = 'pago' AND p.sale_id IS NULL
+       WHERE p.status = 'pago' AND p.sale_id IS NULL
          AND p.paid_at >= $1 AND p.paid_at <= $2
+         AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.idempotency_key = 'contract:' || p.codigo_solicitacao)
        ORDER BY p.paid_at ASC`,
       [startDate, endDate + ' 23:59:59'],
     );
