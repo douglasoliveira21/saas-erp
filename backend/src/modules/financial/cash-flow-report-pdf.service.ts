@@ -135,8 +135,8 @@ export class CashFlowReportPdfService {
       const d = new Date(v);
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
-    const ensureSpace = (needed: number) => {
-      if (doc.y + needed > PAGE_BOTTOM) { doc.addPage(); drawTableHeader(); }
+    const ensureSpace = (needed: number, withHeader = true) => {
+      if (doc.y + needed > PAGE_BOTTOM) { doc.addPage(); if (withHeader) drawTableHeader(); }
     };
 
     // ---- Cabeçalho: logo + dados da empresa (esquerda = logo, direita = dados) ----
@@ -166,8 +166,10 @@ export class CashFlowReportPdfService {
     doc.moveDown(0.8);
 
     // ---- Título ----
-    doc.font('Helvetica-Bold').fontSize(15).fillColor('#111827').text('LANÇAMENTOS FINANCEIROS - FLUXO DE CAIXA');
-    doc.font('Helvetica').fontSize(9.5).fillColor('#6b7280').text(`Período: ${dateFmt(startDate)} a ${dateFmt(endDate)}`);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#111827')
+      .text('LANÇAMENTOS FINANCEIROS - FLUXO DE CAIXA', MARGIN, doc.y, { width: CONTENT_WIDTH, align: 'center' });
+    doc.font('Helvetica').fontSize(9).fillColor('#6b7280')
+      .text(`Período: ${dateFmt(startDate)} a ${dateFmt(endDate)}`, MARGIN, doc.y, { width: CONTENT_WIDTH, align: 'center' });
     doc.moveDown(0.8);
 
     // ---- Tabela ----
@@ -215,7 +217,7 @@ export class CashFlowReportPdfService {
       doc.text(dateFmt(row.date), colX.date + 3, y + 4, { width: COLS.date - 4 });
       doc.text(row.documentNumber, colX.doc + 3, y + 4, { width: COLS.doc - 4 });
       doc.text(row.saleNumber, colX.sale + 3, y + 4, { width: COLS.sale - 4 });
-      doc.text(row.description, colX.description + 3, y + 4, { width: COLS.description - 6, ellipsis: true });
+      doc.text(row.description, colX.description + 3, y + 4, { width: COLS.description - 6, height: 11, ellipsis: true, lineBreak: false });
       doc.text(row.installmentLabel, colX.installment + 3, y + 4, { width: COLS.installment - 4 });
       doc.fillColor('#15803d').text(row.credit ? money(row.credit) : '-', colX.credit + 3, y + 4, { width: COLS.credit - 4, align: 'right' });
       doc.fillColor('#b91c1c').text(row.debit ? money(row.debit) : '-', colX.debit + 3, y + 4, { width: COLS.debit - 4, align: 'right' });
@@ -228,14 +230,30 @@ export class CashFlowReportPdfService {
       doc.font('Helvetica').fontSize(9.5).fillColor('#6b7280').text('Nenhum lançamento encontrado no período selecionado.', MARGIN, doc.y + 6);
     }
 
-    // ---- Totais ----
-    ensureSpace(40);
-    doc.moveDown(0.6);
-    doc.moveTo(MARGIN, doc.y).lineTo(MARGIN + CONTENT_WIDTH, doc.y).lineWidth(0.8).strokeColor('#111827').stroke();
-    doc.moveDown(0.4);
-    doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#15803d').text(`Total de créditos: ${money(totalCredit)}`, { continued: false });
-    doc.fillColor('#b91c1c').text(`Total de débitos: ${money(totalDebit)}`);
-    doc.fillColor('#111827').fontSize(11).text(`Saldo do período: ${money(totalCredit - totalDebit)}`);
+    // ---- Totais (cards) ----
+    const finalBalance = totalCredit - totalDebit;
+    ensureSpace(70, false);
+    doc.moveDown(0.8);
+
+    const gap = 12;
+    const boxWidth = (CONTENT_WIDTH - gap * 2) / 3;
+    const boxHeight = 48;
+    const boxY = doc.y;
+    const cards = [
+      { label: 'TOTAL DE CRÉDITOS', value: money(totalCredit), bg: '#f0fdf4', color: '#15803d' },
+      { label: 'TOTAL DE DÉBITOS', value: money(totalDebit), bg: '#fef2f2', color: '#b91c1c' },
+      { label: 'SALDO DO PERÍODO', value: money(finalBalance), bg: '#eff6ff', color: finalBalance >= 0 ? '#1d4ed8' : '#b91c1c' },
+    ];
+    cards.forEach((card, i) => {
+      const x = MARGIN + i * (boxWidth + gap);
+      doc.roundedRect(x, boxY, boxWidth, boxHeight, 4).fill(card.bg);
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#6b7280')
+        .text(card.label, x + 10, boxY + 10, { width: boxWidth - 20 });
+      doc.font('Helvetica-Bold').fontSize(13).fillColor(card.color)
+        .text(card.value, x + 10, boxY + 24, { width: boxWidth - 20 });
+    });
+    doc.y = boxY + boxHeight;
+    doc.fillColor('#111827');
 
     doc.end();
     return done;
