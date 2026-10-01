@@ -1087,7 +1087,7 @@ export function Payments() {
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-500 capitalize">{monthLabel(month)}</span>
               <button onClick={downloadCashFlowReport} className="btn btn-secondary flex items-center gap-2 text-sm" title="Gerar PDF com todos os lançamentos do período">
-                <FileDown className="w-4 h-4" /> Lançamentos Financeiros - Fluxo de Caixa
+                <FileDown className="w-4 h-4" /> Gerar Relatório Completo
               </button>
             </div>
           </div>
