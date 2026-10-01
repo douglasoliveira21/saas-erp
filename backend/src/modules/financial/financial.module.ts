@@ -17,6 +17,7 @@ import { AccountPayable } from './entities/account-payable.entity';
 import { PlatformModule } from '../platform/platform.module';
 import { Bill } from '../suppliers/entities/bill.entity';
 import { Invoice } from '../fiscal/entities/invoice.entity';
+import { SaleItem } from '../sales/entities/sale-item.entity';
 import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
 import { CashFlowReportPdfService } from './cash-flow-report-pdf.service';
 
@@ -36,6 +37,7 @@ import { CashFlowReportPdfService } from './cash-flow-report-pdf.service';
       AccountPayable,
       Bill,
       Invoice,
+      SaleItem,
       CompanyProfile,
     ]),
     AuditModule,

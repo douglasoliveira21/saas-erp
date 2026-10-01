@@ -7,6 +7,7 @@ import { Installment } from './entities/installment.entity';
 import { AccountReceivable } from './entities/account-receivable.entity';
 import { Bill } from '../suppliers/entities/bill.entity';
 import { Invoice } from '../fiscal/entities/invoice.entity';
+import { SaleItem } from '../sales/entities/sale-item.entity';
 import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
 
 const PAGE_WIDTH = 595.28; // A4 pt
@@ -44,6 +45,7 @@ export class CashFlowReportPdfService {
     @InjectRepository(AccountReceivable) private accountRepo: Repository<AccountReceivable>,
     @InjectRepository(Bill) private billRepo: Repository<Bill>,
     @InjectRepository(Invoice) private invoiceRepo: Repository<Invoice>,
+    @InjectRepository(SaleItem) private saleItemRepo: Repository<SaleItem>,
     @InjectRepository(CompanyProfile) private companyProfileRepo: Repository<CompanyProfile>,
   ) {}
 
@@ -65,25 +67,39 @@ export class CashFlowReportPdfService {
     const installmentIds = [...new Set(movements.map((m) => m.installmentId).filter(Boolean))];
     const accountIds = [...new Set(movements.map((m) => m.accountId).filter(Boolean))];
 
-    const [invoices, installments, accounts] = await Promise.all([
+    const [invoices, installments, accounts, saleItems] = await Promise.all([
       saleIds.length ? this.invoiceRepo.find({ where: { saleId: In(saleIds) } }) : Promise.resolve([]),
       installmentIds.length ? this.installmentRepo.find({ where: { id: In(installmentIds) } }) : Promise.resolve([]),
       accountIds.length ? this.accountRepo.find({ where: { id: In(accountIds) } }) : Promise.resolve([]),
+      saleIds.length ? this.saleItemRepo.find({ where: { saleId: In(saleIds) } }) : Promise.resolve([]),
     ]);
     const invoiceBySale = new Map(invoices.map((inv) => [inv.saleId, inv]));
     const installmentById = new Map(installments.map((i) => [i.id, i]));
     const accountById = new Map(accounts.map((a) => [a.id, a]));
+    // "Recebimento venda {uuid}"/"Pagamento parcela N"/"Venda #xxx (previsão)" são textos
+    // genéricos de controle interno, não a descrição do que foi vendido - troca pelos nomes dos
+    // itens da própria venda, que é o que o usuário espera ver no relatório.
+    const itemNamesBySale = new Map<string, string>();
+    for (const item of saleItems) {
+      const current = itemNamesBySale.get(item.saleId);
+      itemNamesBySale.set(item.saleId, current ? `${current}, ${item.name}` : item.name);
+    }
 
     const movementRows: LedgerRow[] = movements.map((m) => {
       const installment = m.installmentId ? installmentById.get(m.installmentId) : null;
       const account = m.accountId ? accountById.get(m.accountId) : null;
       const invoice = m.saleId ? invoiceBySale.get(m.saleId) : null;
       const isCredit = m.type === 'receita';
+      const isReversal = m.type === 'estorno';
+      const saleDescription = m.saleId ? itemNamesBySale.get(m.saleId) : null;
+      const description = (isCredit || isReversal) && saleDescription
+        ? (isReversal ? `Estorno - ${saleDescription}` : saleDescription)
+        : (m.description || '-');
       return {
         date: m.date,
         documentNumber: invoice ? String(invoice.number) : '-',
         saleNumber: m.saleId ? m.saleId.substring(0, 8).toUpperCase() : '-',
-        description: m.description || '-',
+        description,
         installmentLabel: installment && account ? `${installment.number}/${account.installments}` : '-',
         credit: isCredit ? Number(m.value) : 0,
         debit: !isCredit ? Number(m.value) : 0,
