@@ -1,13 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
+import { json, urlencoded } from 'express';
 import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { env, validateProductionSecrets } from './config/env.config';
 
 async function bootstrap() {
   validateProductionSecrets();
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // bodyParser: false porque o limite padrão do Express (100kb) rejeitava com 413 qualquer
+  // upload de logo em base64 (empresa, fiscal) - esses payloads passam de 100kb com imagens de
+  // poucas dezenas de KB já convertidas pra base64 (~33% maior que o arquivo original).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.use(json({ limit: '5mb' }));
+  app.use(urlencoded({ extended: true, limit: '5mb' }));
   // O backend roda atrás do nginx (ver frontend/nginx.conf.template, que já seta X-Forwarded-For
   // e X-Real-IP) - sem "trust proxy", o Express ignora esses headers e req.ip sempre retorna o IP
   // interno do container nginx, não o IP real de quem fez a requisição. Isso quebrava silenciosamente
