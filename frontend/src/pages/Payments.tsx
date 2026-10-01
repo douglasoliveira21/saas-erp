@@ -615,11 +615,11 @@ export function Payments() {
     + billsReceber.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
   const totalPago = billsPagar.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
   const totalAPagar = billsPagar.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
-  // Total de créditos/débitos do mês: soma de todos os lançamentos não cancelados, recebidos ou
-  // não - diferente do "Recebido"/"Pago" abaixo, que só contam o que já entrou/saiu de fato.
-  const totalCreditos = payments.filter(p => p.status !== 'cancelado').reduce((s, p) => s + Number(p.value), 0)
-    + billsReceber.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
-  const totalDebitos = billsPagar.filter(b => b.status !== 'cancelado').reduce((s, b) => s + Number(b.value), 0)
+  // Total de créditos/débitos do mês = só o que já foi efetivamente recebido/pago, igual ao
+  // "Recebido"/"Pago" da linha de baixo - antes somava também o que ainda estava pendente/a
+  // vencer, o que fazia o card de cima mostrar um valor maior que o que realmente entrou/saiu.
+  const totalCreditos = totalRecebido
+  const totalDebitos = totalPago
   // Caixa líquido = só o que já entrou e já saiu de fato (recebido - pago), não projeção do que falta.
   const saldo = totalRecebido - totalPago
 
