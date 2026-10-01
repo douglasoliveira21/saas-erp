@@ -71,6 +71,7 @@ export const navigationSections: NavSection[] = [
     { name: 'Portal do cliente', href: '/customer-portal', icon: ShieldCheck, roles: ['admin'], module: 'customer_portal' },
     { name: 'Configuração de e-mail', href: '/email-settings', icon: Mail, roles: ['admin'], module: 'email_settings' },
     { name: 'WhatsApp', href: '/whatsapp-settings', icon: MessageCircle, roles: ['admin'], module: 'whatsapp_settings' },
+    { name: 'Empresa', href: '/empresa', icon: Building2, roles: ['admin'] },
     { name: 'Tutorial e guias', href: '/tutorial', icon: BookOpen, roles: all },
   ]},
 ]

@@ -36,6 +36,7 @@ const Cashback = lazy(() => import('./pages/Cashback').then(module => ({ default
 const Fidelidade = lazy(() => import('./pages/Fidelidade').then(module => ({ default: module.Fidelidade })))
 const Assinaturas = lazy(() => import('./pages/Assinaturas').then(module => ({ default: module.Assinaturas })))
 const EmailSettings = lazy(() => import('./pages/EmailSettings').then(module => ({ default: module.EmailSettings })))
+const Empresa = lazy(() => import('./pages/Empresa').then(module => ({ default: module.Empresa })))
 const Dre = lazy(() => import('./pages/Dre').then(module => ({ default: module.Dre })))
 const FinancialAdvanced = lazy(() => import('./pages/FinancialAdvanced').then(module => ({ default: module.FinancialAdvanced })))
 const StockAdvanced = lazy(() => import('./pages/StockAdvanced').then(module => ({ default: module.StockAdvanced })))
@@ -134,6 +135,7 @@ function App() {
               <Route path="/assinaturas" element={<Assinaturas />} />
               <Route path="/email-settings" element={<EmailSettings />} />
               <Route path="/whatsapp-settings" element={<WhatsappSettings />} />
+              <Route path="/empresa" element={<Empresa />} />
               <Route path="/contas-pagar" element={<Payments />} />
               <Route path="/dre" element={<Dre />} />
               <Route path="/financeiro-avancado" element={<FinancialAdvanced />} />

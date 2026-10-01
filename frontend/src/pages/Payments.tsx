@@ -271,6 +271,14 @@ export function Payments() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  async function downloadCashFlowReport() {
+    try {
+      const { start, end } = monthBounds(month)
+      const res = await api.get('/financial/cash-flow-report/pdf', { params: { startDate: start, endDate: end }, responseType: 'blob' })
+      saveBlob(res.data, `fluxo-de-caixa-${start}-a-${end}.pdf`)
+    } catch (e: any) { setError(e.response?.data?.message || 'Erro ao gerar o relatório de fluxo de caixa') }
+  }
+
   async function downloadInvoicePdf(p: Payment) {
     if (!p.invoiceId) return
     try {
@@ -1076,7 +1084,12 @@ export function Payments() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 dark:text-white">Relatório por Fornecedor</h3>
-            <span className="text-sm text-gray-500 capitalize">{monthLabel(month)}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-500 capitalize">{monthLabel(month)}</span>
+              <button onClick={downloadCashFlowReport} className="btn btn-secondary flex items-center gap-2 text-sm" title="Gerar PDF com todos os lançamentos do período">
+                <FileDown className="w-4 h-4" /> Lançamentos Financeiros - Fluxo de Caixa
+              </button>
+            </div>
           </div>
           {report.length === 0 ? (
             <p className="text-gray-500 text-center py-4">Nenhum dado disponível.</p>

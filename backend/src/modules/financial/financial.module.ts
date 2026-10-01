@@ -15,6 +15,10 @@ import { MonthlyClosing } from './entities/monthly-closing.entity';
 import { InstallmentPayment } from './entities/installment-payment.entity';
 import { AccountPayable } from './entities/account-payable.entity';
 import { PlatformModule } from '../platform/platform.module';
+import { Bill } from '../suppliers/entities/bill.entity';
+import { Invoice } from '../fiscal/entities/invoice.entity';
+import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
+import { CashFlowReportPdfService } from './cash-flow-report-pdf.service';
 
 @Module({
   imports: [
@@ -30,12 +34,15 @@ import { PlatformModule } from '../platform/platform.module';
       MonthlyClosing,
       InstallmentPayment,
       AccountPayable,
+      Bill,
+      Invoice,
+      CompanyProfile,
     ]),
     AuditModule,
     PlatformModule,
   ],
   controllers: [FinancialController],
-  providers: [FinancialService],
+  providers: [FinancialService, CashFlowReportPdfService],
   exports: [FinancialService],
 })
 export class FinancialModule {}

@@ -1,0 +1,30 @@
+import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { CompanyProfileService } from './company-profile.service';
+import { UpdateCompanyProfileDto } from './dto/update-company-profile.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+
+@Controller('company-profile')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class CompanyProfileController {
+  constructor(
+    private readonly service: CompanyProfileService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  @Get()
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async get() {
+    const profile = await this.service.getForTenant(this.tenantContext.requireTenantId());
+    return profile || {};
+  }
+
+  @Patch()
+  @Roles(UserRole.ADMIN)
+  update(@Body() dto: UpdateCompanyProfileDto) {
+    return this.service.upsert(this.tenantContext.requireTenantId(), dto);
+  }
+}

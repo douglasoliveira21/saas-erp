@@ -10,20 +10,29 @@ import {
   UseGuards,
   Request,
   Headers,
+  Res,
+  BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FinancialService } from './financial.service';
+import { CashFlowReportPdfService } from './cash-flow-report-pdf.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Permissions, Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
 import { PlanGuard } from '../platform/guards/plan.guard';
 import { RequireModule } from '../platform/decorators/require-module.decorator';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 @Controller('financial')
 @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
 @RequireModule('financeiro')
 export class FinancialController {
-  constructor(private readonly financialService: FinancialService) {}
+  constructor(
+    private readonly financialService: FinancialService,
+    private readonly cashFlowReportPdfService: CashFlowReportPdfService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   // ==================== Accounts ====================
 
@@ -160,6 +169,20 @@ export class FinancialController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   getOverdue() {
     return this.financialService.getOverdue();
+  }
+
+  @Get('cash-flow-report/pdf')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  async getCashFlowReportPdf(
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Res() res: Response,
+  ) {
+    if (!startDate || !endDate) throw new BadRequestException('Informe o período (startDate e endDate).');
+    const buffer = await this.cashFlowReportPdfService.generate(this.tenantContext.requireTenantId(), startDate, endDate);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="fluxo-de-caixa-${startDate}-a-${endDate}.pdf"`);
+    res.send(buffer);
   }
 
   // ==================== Card Fees ====================

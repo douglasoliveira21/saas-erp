@@ -32,6 +32,7 @@ import { CustomerPortalModule } from './modules/customer-portal/customer-portal.
 import { ServiceOrdersModule } from './modules/service-orders/service-orders.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { CompanyProfileModule } from './modules/company-profile/company-profile.module';
 import { DatabaseConfig } from './config/database.config';
 import { HealthController } from './health.controller';
 import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
@@ -66,6 +67,7 @@ import { TenantContextInterceptor } from './common/tenant/tenant-context.interce
     MailModule,
     FiscalModule,
     FinancialModule,
+    CompanyProfileModule,
     InterModule,
     VehiclesModule,
     PurchasesModule,
