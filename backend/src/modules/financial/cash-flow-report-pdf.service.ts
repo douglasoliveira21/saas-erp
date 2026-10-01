@@ -110,7 +110,34 @@ export class CashFlowReportPdfService {
       debit: Number(b.paidValue),
     }));
 
-    return [...movementRows, ...billRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    // Lado "boletos de contratos pagos" - contract_billings não tem entidade TypeORM (tabela
+    // criada via SQL puro em contract-billing.service.ts) e o pagamento em si nunca atualiza
+    // financial_movements nem contract_billings.status: ele fica só na tabela genérica `payments`
+    // (mesma usada pelos boletos de venda via Inter), com sale_id NULL e ligada por boleto_code.
+    const contractPayments = await this.movementRepo.manager.query(
+      `SELECT p.value AS value, p.paid_at AS paid_at, cb.billing_period AS billing_period,
+              c.title AS contract_title, inv.number AS invoice_number
+       FROM payments p
+       JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
+       JOIN contracts c ON c.id = cb.contract_id
+       LEFT JOIN invoices inv ON inv.id = cb.invoice_id
+       WHERE p.type = 'boleto' AND p.status = 'pago' AND p.sale_id IS NULL
+         AND p.paid_at >= $1 AND p.paid_at <= $2
+       ORDER BY p.paid_at ASC`,
+      [startDate, endDate + ' 23:59:59'],
+    );
+
+    const contractRows: LedgerRow[] = contractPayments.map((cp: any) => ({
+      date: new Date(cp.paid_at).toISOString().split('T')[0],
+      documentNumber: cp.invoice_number ? String(cp.invoice_number) : '-',
+      saleNumber: '-',
+      description: `Contrato ${cp.contract_title} - competência ${cp.billing_period}`,
+      installmentLabel: '-',
+      credit: Number(cp.value),
+      debit: 0,
+    }));
+
+    return [...movementRows, ...billRows, ...contractRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   }
 
   private logoBuffer(value?: string): Buffer | null {
