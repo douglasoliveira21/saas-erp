@@ -57,11 +57,14 @@ export class CashFlowReportPdfService {
 
   private async buildRows(startDate: string, endDate: string): Promise<LedgerRow[]> {
     // Lado "crédito/débito de vendas" - movimentos financeiros realizados (recebimentos, taxas
-    // de cartão, estornos). Vem de financial_movements, que já é o "livro-razão" das vendas.
-    const movements = await this.movementRepo.find({
+    // de cartão). Vem de financial_movements, que já é o "livro-razão" das vendas.
+    // Estornos (cancelamento de venda, reversão manual de lançamento, reversão de pagamento de
+    // conta) ficam de fora a pedido do usuário - o relatório mostra só o fluxo normal de
+    // créditos/débitos, sem as linhas de reversão que confundiam a leitura.
+    const movements = (await this.movementRepo.find({
       where: { date: Between(startDate, endDate), isForecast: false },
       order: { date: 'ASC' },
-    });
+    })).filter((m) => m.type !== 'estorno');
 
     const saleIds = [...new Set(movements.map((m) => m.saleId).filter(Boolean))];
     const installmentIds = [...new Set(movements.map((m) => m.installmentId).filter(Boolean))];
@@ -94,11 +97,8 @@ export class CashFlowReportPdfService {
       const invoice = m.saleId ? invoiceBySale.get(m.saleId) : null;
       const bill = m.billId ? billById.get(m.billId) : null;
       const isCredit = m.type === 'receita';
-      const isReversal = m.type === 'estorno';
       const saleDescription = m.saleId ? itemNamesBySale.get(m.saleId) : null;
-      const description = (isCredit || isReversal) && saleDescription
-        ? (isReversal ? `Estorno - ${saleDescription}` : saleDescription)
-        : (m.description || '-');
+      const description = isCredit && saleDescription ? saleDescription : (m.description || '-');
       return {
         date: m.date,
         documentNumber: invoice ? String(invoice.number) : (bill?.documentNumber || '-'),
