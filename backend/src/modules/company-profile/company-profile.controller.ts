@@ -19,7 +19,11 @@ export class CompanyProfileController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async get() {
     const profile = await this.service.getForTenant(this.tenantContext.requireTenantId());
-    return profile || {};
+    if (!profile) return {};
+    // Só os campos editáveis - o frontend guarda essa resposta e reenvia tudo no PATCH, então
+    // id/tenantId/createdAt/updatedAt não podem vir aqui (forbidNonWhitelisted rejeitaria com 400).
+    const { razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, cep, endereco, telefone, logo } = profile;
+    return { razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, cep, endereco, telefone, logo };
   }
 
   @Patch()
