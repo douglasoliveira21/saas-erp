@@ -98,34 +98,75 @@ export class ReportsService {
       const endDate = new Date(year, m, 0).toISOString().split('T')[0];
       const nextMonthStart = new Date(year, m, 1).toISOString();
 
-      // Receita Bruta (vendas realizadas)
-      const salesResult = await this.dataSource.query(`
-        SELECT COALESCE(SUM(total_amount), 0) as receita_bruta
-        FROM sales WHERE created_at >= $1 AND created_at < $2 AND status != 'cancelado'
+      // Receita Bruta = só o que já foi efetivamente recebido (créditos pagos), no mesmo critério
+      // do relatório de fluxo de caixa. Antes somava toda venda criada no mês (paga ou não) e não
+      // enxergava contratos, que só entram como crédito depois de pagos.
+      //  1) lançamentos de receita realizados (vendas recebidas, contratos pagos, contas a receber
+      //     avulsas baixadas - todos gravam financial_movements ao serem pagos);
+      //  2) fallbacks para pagamentos antigos que ficaram só em `payments`/`bills` e nunca ganharam
+      //     o lançamento (NOT EXISTS evita contar em dobro o que já tem lançamento).
+      const receitaMov = await this.dataSource.query(`
+        SELECT COALESCE(SUM(value), 0) AS total FROM financial_movements
+        WHERE type = 'receita' AND date >= $1 AND date <= $2 AND is_forecast = false
+      `, [startDate, endDate]);
+      const receitaContratosLegado = await this.dataSource.query(`
+        SELECT COALESCE(SUM(p.value), 0) AS total
+        FROM payments p
+        JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
+        WHERE p.status = 'pago' AND p.sale_id IS NULL AND p.paid_at >= $1 AND p.paid_at < $2
+          AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.idempotency_key = 'contract:' || p.codigo_solicitacao)
       `, [startDate + 'T00:00:00', nextMonthStart]);
+      const receitaBillsLegado = await this.dataSource.query(`
+        SELECT COALESCE(SUM(b.paid_value), 0) AS total FROM bills b
+        WHERE b.type = 'receber' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.bill_id = b.id)
+      `, [startDate + 'T00:00:00', nextMonthStart]);
+      // Estornos: cada um reduz o lado de onde veio (cancelamento de venda/estorno de receita
+      // reduz a receita; devolução de compra e reversão de pagamento de conta reduzem despesa).
+      const estornos = await this.dataSource.query(`
+        SELECT
+          COALESCE(SUM(e.value) FILTER (WHERE e.reference_type = 'account_receivable_cancellation' OR o.type = 'receita'), 0) AS receita,
+          COALESCE(SUM(e.value) FILTER (WHERE e.category IN ('impostos', 'imposto') AND o.type = 'despesa'), 0) AS impostos,
+          COALESCE(SUM(e.value) FILTER (WHERE e.category IN ('depreciacao', 'amortizacao') AND o.type = 'despesa'), 0) AS depreciacao,
+          COALESCE(SUM(e.value) FILTER (WHERE COALESCE(e.reference_type, '') <> 'account_receivable_cancellation'
+            AND COALESCE(o.type, 'despesa') = 'despesa'
+            AND e.category NOT IN ('impostos', 'imposto', 'depreciacao', 'amortizacao', 'compra_mercadoria')), 0) AS despesas
+        FROM financial_movements e
+        LEFT JOIN financial_movements o ON o.id = e.reference_id AND e.reference_type IN ('financial_movement_reversal', 'bill_payment_reversal')
+        WHERE e.type = 'estorno' AND e.date >= $1 AND e.date <= $2 AND e.is_forecast = false
+      `, [startDate, endDate]);
 
-      const receitaBruta = Number(salesResult[0]?.receita_bruta || 0);
+      const receitaBruta = Math.max(0,
+        Number(receitaMov[0]?.total || 0) + Number(receitaContratosLegado[0]?.total || 0) + Number(receitaBillsLegado[0]?.total || 0)
+        - Number(estornos[0]?.receita || 0));
 
-      // CMV - Custo das Mercadorias Vendidas
+      // CMV - custo das vendas cuja receita foi recebida: reconhece o custo uma única vez, no
+      // primeiro mês em que a venda teve recebimento realizado (receita e custo no mesmo critério).
       const cmvResult = await this.dataSource.query(`
         SELECT COALESCE(SUM(si.cost_price * si.quantity), 0) as cmv
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
-        WHERE s.created_at >= $1 AND s.created_at < $2 AND s.status != 'cancelado'
-      `, [startDate + 'T00:00:00', nextMonthStart]);
+        WHERE s.status != 'cancelado'
+          AND EXISTS (SELECT 1 FROM financial_movements r WHERE r.sale_id = s.id AND r.type = 'receita' AND r.is_forecast = false AND r.date >= $1 AND r.date <= $2)
+          AND NOT EXISTS (SELECT 1 FROM financial_movements r2 WHERE r2.sale_id = s.id AND r2.type = 'receita' AND r2.is_forecast = false AND r2.date < $1)
+      `, [startDate, endDate]);
       const cmv = Number(cmvResult[0]?.cmv || 0);
 
       // Lucro Bruto
       const lucroBruto = receitaBruta - cmv;
 
       // Despesas Operacionais (from financial_movements type=despesa, excluding CMV categories)
+      // Separa o que veio de baixa de conta (bill_id setado - payBill grava um despesa em
+      // financial_movements) do resto (taxas de cartão, despesas recorrentes/manuais etc.).
       const despesasResult = await this.dataSource.query(`
-        SELECT COALESCE(SUM(value), 0) as total
+        SELECT
+          COALESCE(SUM(value) FILTER (WHERE bill_id IS NULL), 0) AS outras,
+          COALESCE(SUM(value) FILTER (WHERE bill_id IS NOT NULL), 0) AS contas
         FROM financial_movements
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
           AND category NOT IN ('compra_mercadoria', 'depreciacao', 'amortizacao', 'impostos', 'imposto')
       `, [startDate, endDate]);
-      const despesasFixas = Number(despesasResult[0]?.total || 0);
+      const despesasFixas = Number(despesasResult[0]?.outras || 0) - Number(estornos[0]?.despesas || 0);
 
       // Comissões pagas no mês
       const comissoesResult = await this.dataSource.query(`
@@ -135,13 +176,16 @@ export class ReportsService {
       `, [startDate + 'T00:00:00', nextMonthStart]);
       const comissoes = Number(comissoesResult[0]?.total || 0);
 
-      // Contas pagas a fornecedores
+      // Contas pagas a fornecedores: as que já têm lançamento (acima) + as pagas antes desse
+      // lançamento existir. Antes somava `bills` por cima de financial_movements, contando cada
+      // conta paga duas vezes (e incluía contas a receber e ignorava pagamento parcial).
       const billsResult = await this.dataSource.query(`
-        SELECT COALESCE(SUM(value), 0) as total
-        FROM bills
-        WHERE status = 'pago' AND paid_at >= $1 AND paid_at < $2
+        SELECT COALESCE(SUM(b.paid_value), 0) as total
+        FROM bills b
+        WHERE b.type = 'pagar' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.bill_id = b.id)
       `, [startDate + 'T00:00:00', nextMonthStart]);
-      const contasPagas = Number(billsResult[0]?.total || 0);
+      const contasPagas = Number(despesasResult[0]?.contas || 0) + Number(billsResult[0]?.total || 0);
 
       const totalDespesas = despesasFixas + comissoes + contasPagas;
 
@@ -155,7 +199,7 @@ export class ReportsService {
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
           AND category IN ('depreciacao', 'amortizacao')
       `, [startDate, endDate]);
-      const depreciacao = Number(depreciacaoResult[0]?.total || 0);
+      const depreciacao = Number(depreciacaoResult[0]?.total || 0) - Number(estornos[0]?.depreciacao || 0);
 
       // Lucro Operacional
       const lucroOperacional = ebitda - depreciacao;
@@ -167,7 +211,7 @@ export class ReportsService {
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
           AND category IN ('impostos', 'imposto')
       `, [startDate, endDate]);
-      const impostos = Number(impostosResult[0]?.total || 0);
+      const impostos = Number(impostosResult[0]?.total || 0) - Number(estornos[0]?.impostos || 0);
 
       // Lucro Líquido
       const lucroLiquido = lucroOperacional - impostos;
