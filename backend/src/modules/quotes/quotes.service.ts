@@ -2,12 +2,16 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Quote } from './entities/quote.entity';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+
+const DEFAULT_LOGO_URL = 'https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png';
 
 @Injectable()
 export class QuotesService {
   constructor(
     @InjectRepository(Quote) private quoteRepo: Repository<Quote>,
     private dataSource: DataSource,
+    private tenantContext: TenantContextService,
   ) {}
 
   async create(dto: any, userId: string): Promise<Quote> {
@@ -150,7 +154,14 @@ export class QuotesService {
     const config = configResult?.[0] || {};
     const companyName = config.company_name || 'VGON Soluções em Informática';
     const companyCnpj = config.cnpj || '';
-    const companyLogo = config.company_logo || '';
+    // Logo cadastrado em Administração > Empresa (por tenant) tem prioridade; depois o logo da
+    // configuração fiscal (legado) e, por último, o logo padrão da VGON.
+    const tenantId = this.tenantContext.getTenantId();
+    const profileRows = tenantId
+      ? await this.dataSource.query(`SELECT logo FROM company_profiles WHERE tenant_id = $1 LIMIT 1`, [tenantId])
+      : [];
+    const rawLogo: string = profileRows?.[0]?.logo || config.company_logo || '';
+    const companyLogo = /^data:image\/(?:png|jpe?g);base64,[A-Za-z0-9+/=\r\n]+$/i.test(rawLogo) ? rawLogo : DEFAULT_LOGO_URL;
     const companyAddress = [config.emit_address, config.emit_number, config.emit_neighborhood].filter(Boolean).join(', ');
     const companyPhone = config.emit_phone || '';
     const quoteNumber = String(q.number).padStart(4, '0');
@@ -254,7 +265,7 @@ tbody tr:nth-child(even){background:#F7F9FC}
   <div class="header">
     <div class="header-left">
       <div class="logo">
-        <img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" style="height:70px" />
+        <img src="${companyLogo}" style="max-height:70px;max-width:100%;object-fit:contain" />
       </div>
     </div>
     <div class="header-right">
