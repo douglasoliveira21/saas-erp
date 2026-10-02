@@ -152,18 +152,24 @@ export class QuotesService {
     // Get company config (logo)
     const configResult = await this.dataSource.query(`SELECT company_name, cnpj, company_logo, emit_address, emit_number, emit_neighborhood, emit_cep, emit_phone, city_registration FROM fiscal_config LIMIT 1`);
     const config = configResult?.[0] || {};
-    const companyName = config.company_name || 'VGON Soluções em Informática';
-    const companyCnpj = config.cnpj || '';
-    // Logo cadastrado em Administração > Empresa (por tenant) tem prioridade; depois o logo da
-    // configuração fiscal (legado) e, por último, o logo padrão da VGON.
+    // Dados cadastrados em Administração > Empresa (por tenant) têm prioridade; a configuração
+    // fiscal (legado) e, no logo, o padrão da VGON só entram quando o campo não foi preenchido.
     const tenantId = this.tenantContext.getTenantId();
     const profileRows = tenantId
-      ? await this.dataSource.query(`SELECT logo FROM company_profiles WHERE tenant_id = $1 LIMIT 1`, [tenantId])
+      ? await this.dataSource.query(`SELECT razao_social, cnpj, inscricao_estadual, inscricao_municipal, cep, endereco, telefone, logo FROM company_profiles WHERE tenant_id = $1 LIMIT 1`, [tenantId])
       : [];
-    const rawLogo: string = profileRows?.[0]?.logo || config.company_logo || '';
+    const profile = profileRows?.[0] || {};
+    const esc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const companyName = profile.razao_social || config.company_name || 'VGON Soluções em Informática';
+    const companyCnpj = profile.cnpj || config.cnpj || '';
+    const companyIe = profile.inscricao_estadual || '';
+    const companyIm = profile.inscricao_municipal || config.city_registration || '';
+    const rawLogo: string = profile.logo || config.company_logo || '';
     const companyLogo = /^data:image\/(?:png|jpe?g);base64,[A-Za-z0-9+/=\r\n]+$/i.test(rawLogo) ? rawLogo : DEFAULT_LOGO_URL;
-    const companyAddress = [config.emit_address, config.emit_number, config.emit_neighborhood].filter(Boolean).join(', ');
-    const companyPhone = config.emit_phone || '';
+    const fiscalAddress = [config.emit_address, config.emit_number, config.emit_neighborhood].filter(Boolean).join(', ');
+    const companyAddress = [profile.endereco || fiscalAddress, (profile.cep || config.emit_cep) ? `CEP ${profile.cep || config.emit_cep}` : ''].filter(Boolean).join(' - ');
+    const companyPhone = profile.telefone || config.emit_phone || '';
+    const companyDocs = [companyCnpj && `CNPJ: ${companyCnpj}`, companyIe && `IE: ${companyIe}`, companyIm && `IM: ${companyIm}`].filter(Boolean).join('  |  ');
     const quoteNumber = String(q.number).padStart(4, '0');
     const dataEmissao = new Date(q.createdAt).toLocaleDateString('pt-BR');
     const validadeDate = new Date(q.validUntil + 'T12:00:00');
@@ -251,9 +257,10 @@ tbody tr:nth-child(even){background:#F7F9FC}
 
 /* FOOTER */
 .footer{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(90deg,#03172B,#062440);padding:14px 30px;display:flex;align-items:center;justify-content:space-between}
+.footer-col{display:flex;flex-direction:column;gap:3px;min-width:0}
+.footer-right{text-align:right;align-items:flex-end;max-width:60%}
 .footer-logo{font-size:11px;font-weight:700;color:#fff}
-.footer-info{display:flex;gap:20px;font-size:9px;color:rgba(255,255,255,0.7)}
-.footer-info span{display:flex;align-items:center;gap:4px}
+.footer-line{font-size:9px;color:rgba(255,255,255,0.7)}
 
 @media print{
   body{margin:0}
@@ -347,13 +354,13 @@ tbody tr:nth-child(even){background:#F7F9FC}
 
   <!-- FOOTER -->
   <div class="footer">
-    <div>
-      <div class="footer-logo">${companyName || 'VGON'}</div>
+    <div class="footer-col">
+      <div class="footer-logo">${esc(companyName)}</div>
+      ${companyDocs ? `<div class="footer-line">${esc(companyDocs)}</div>` : ''}
     </div>
-    <div class="footer-info">
-      ${companyPhone ? `<span>${companyPhone}</span>` : ''}
-      <span>${createdBy?.email || 'contato@vgon.com.br'}</span>
-      ${companyAddress ? `<span>${companyAddress}</span>` : '<span>Contagem/MG</span>'}
+    <div class="footer-col footer-right">
+      ${companyAddress ? `<div class="footer-line">${esc(companyAddress)}</div>` : '<div class="footer-line">Contagem/MG</div>'}
+      <div class="footer-line">${[companyPhone, createdBy?.email || 'contato@vgon.com.br'].filter(Boolean).map(esc).join('  |  ')}</div>
     </div>
   </div>
 </div>
