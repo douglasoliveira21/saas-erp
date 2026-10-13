@@ -19,9 +19,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // compartilhados. Entram aqui até esses fluxos serem tornados cientes de tenant.
 const TENANT_UNSCOPED_TABLES = new Set([
   'auth_sessions', 'password_resets', 'inter_webhook_events',
-  'glpi_config', 'glpi_tickets', 'sla_monthly_snapshots',
-  'whatsapp_message_logs', 'service_order_statuses',
-  'email_delivery_logs',
+  'service_order_statuses',
 ]);
 
 const enabled = () => String(process.env.TENANT_SCOPING || 'on').toLowerCase() !== 'off';

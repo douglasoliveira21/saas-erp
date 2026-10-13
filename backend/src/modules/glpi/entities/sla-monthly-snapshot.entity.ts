@@ -3,6 +3,7 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateCol
 @Entity('sla_monthly_snapshots')
 export class SlaMonthlySnapshot {
   @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true }) tenantId: string;
   @Column({ length: 7 }) month: string;
   @Column({ name: 'customer_id', type: 'uuid' }) customerId: string;
   @Column({ name: 'contract_id', type: 'uuid', nullable: true }) contractId: string;

@@ -3,6 +3,7 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeor
 @Entity('email_delivery_logs')
 export class EmailDeliveryLog {
   @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true }) tenantId: string;
   @Column({ length: 500 }) recipient: string;
   @Column({ length: 500 }) subject: string;
   @Column({ length: 30, default: 'smtp' }) provider: string;
