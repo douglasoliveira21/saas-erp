@@ -18,6 +18,10 @@ type ClientInfo = { ip?: string; userAgent?: string; deviceName?: string };
 
 const IP_FAILURE_LIMIT = Number(process.env.AUTH_IP_BLOCK_ATTEMPTS || 5);
 
+// Duração da sessão: 12 h por padrão; 30 dias quando o usuário marca "Lembrar-me" no login.
+const DEFAULT_SESSION_MS = 12 * 3600000;
+const REMEMBER_SESSION_MS = 30 * 86400000;
+
 @Injectable()
 export class AuthService {
   private readonly attempts = new Map<string, { count: number; resetAt: number }>();
@@ -133,7 +137,9 @@ export class AuthService {
       throw new UnauthorizedException('Usuario inativo');
     }
     await this.registerIpSuccess(client.ip);
-    const expiresAt = new Date(Date.now() + 7 * 86400000);
+    const rememberMe = loginDto.rememberMe === true;
+    const sessionMs = rememberMe ? REMEMBER_SESSION_MS : DEFAULT_SESSION_MS;
+    const expiresAt = new Date(Date.now() + sessionMs);
     const session = await this.sessionRepository.save(this.sessionRepository.create({ userId: user.id, deviceName: client.deviceName || this.describeDevice(client.userAgent), userAgent: client.userAgent, ipAddress: client.ip, lastSeenAt: new Date(), expiresAt }));
     await this.usersService.update(user.id, { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } as any);
     await this.auditService.safeCreate({ userId: user.id, tenantId: (user as any).tenantId, action: 'auth.login_success', entity: 'user', entityId: user.id, ipAddress: client.ip, userAgent: client.userAgent });
@@ -142,7 +148,7 @@ export class AuthService {
     // sem isso, a resposta do login (usada para popular o AuthContext na hora) ficaria
     // inconsistente com a sessão restaurada depois de um F5 (/auth/session), que já passa por lá.
     const planModules = user.tenantId ? await this.tenantsService.getEnabledModules(user.tenantId) : [];
-    return { access_token: this.jwtService.sign(payload), user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId, planModules, permissions: user.permissions || [] } };
+    return { rememberMe, sessionMs, access_token: this.jwtService.sign(payload, { expiresIn: Math.floor(sessionMs / 1000) }), user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId, planModules, permissions: user.permissions || [] } };
   }
 
   private describeDevice(agent = '') {

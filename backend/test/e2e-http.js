@@ -72,6 +72,33 @@ const call = async (method, path, token, body, headers = {}) => {
   }
   await db.query("INSERT INTO financial_movements (tenant_id, type, category, description, value, date, is_forecast) VALUES ($1,'despesa','outros','desp',300,$2,false)", [A, day]);
 
+  console.log('Login: Lembrar-me');
+  const rawLogin = async (rememberMe) => {
+    const res = await fetch(API + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-a@e2e.test', password: 'Senha@12345', ...(rememberMe === undefined ? {} : { rememberMe }) }) });
+    const json = await res.json();
+    const payload = JSON.parse(Buffer.from(json.access_token.split('.')[1], 'base64url').toString());
+    return { status: res.status, cookie: res.headers.get('set-cookie') || '', ttlSeconds: payload.exp - payload.iat };
+  };
+  await check('sem "Lembrar-me": sessao de 12 h e cookie de sessao (sem Max-Age/Expires)', async () => {
+    for (const r of [await rawLogin(false), await rawLogin(undefined)]) {
+      assert.ok([200, 201].includes(r.status)); assert.equal(r.ttlSeconds, 12 * 3600);
+      assert.ok(r.cookie.includes('access_token='), r.cookie); assert.ok(!/max-age|expires/i.test(r.cookie), 'cookie nao pode ser persistente: ' + r.cookie);
+    }
+  });
+  await check('com "Lembrar-me": sessao de 30 dias e cookie persistente de 30 dias', async () => {
+    const r = await rawLogin(true);
+    assert.ok([200, 201].includes(r.status)); assert.equal(r.ttlSeconds, 30 * 86400);
+    const maxAge = Number((r.cookie.match(/max-age=(\d+)/i) || [])[1]); assert.equal(maxAge, 30 * 86400, r.cookie);
+  });
+  await check('a sessao "lembrada" continua valida no servidor (expira em ~30 dias)', async () => {
+    const row = await one("SELECT expires_at FROM auth_sessions WHERE expires_at > now() + interval '29 days' ORDER BY created_at DESC LIMIT 1");
+    assert.ok(row, 'deveria existir uma sessao de 30 dias');
+  });
+  await check('rememberMe com tipo invalido e recusado (400)', async () => {
+    const res = await fetch(API + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin-a@e2e.test', password: 'Senha@12345', rememberMe: 'sim' }) });
+    assert.equal(res.status, 400);
+  });
+
   console.log('Produtos');
   await check('A lista so os proprios produtos', async () => {
     const r = await call('GET', '/products', tokenA);

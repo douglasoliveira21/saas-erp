@@ -12,7 +12,9 @@ export class AuthController {
   @Post('login')
   async login(@Body() loginDto: LoginDto, @Response({ passthrough: true }) response: ExpressResponse, @Request() req) {
     const result = await this.authService.login(loginDto, { ip: req?.ip, userAgent: req?.headers?.['user-agent'], deviceName: req?.headers?.['x-device-name'] });
-    response.cookie('access_token', result.access_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000, path: '/' });
+    // Sem "Lembrar-me" o cookie é de sessão (some ao fechar o navegador); com ele, dura o mesmo
+    // que a sessão no servidor.
+    response.cookie('access_token', result.access_token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', ...(result.rememberMe ? { maxAge: result.sessionMs } : {}), path: '/' });
     return { access_token: result.access_token, user: result.user };
   }
 

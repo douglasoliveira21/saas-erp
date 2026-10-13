@@ -5,12 +5,21 @@ import { Turnstile } from '../components/Turnstile'
 import { Eye, EyeOff, User, Lock, Building2, Mail, Headphones } from 'lucide-react'
 
 const CAPTCHA_REQUIRED = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY)
+const REMEMBERED_EMAIL_KEY = 'erp_remembered_email'
+
+// localStorage pode lançar (modo privado, dados bloqueados): o login nunca pode depender dele.
+function readRememberedEmail(): string {
+  try { return localStorage.getItem(REMEMBERED_EMAIL_KEY) || '' } catch { return '' }
+}
+function writeRememberedEmail(email: string | null) {
+  try { if (email) localStorage.setItem(REMEMBERED_EMAIL_KEY, email); else localStorage.removeItem(REMEMBERED_EMAIL_KEY) } catch { /* sem armazenamento: segue sem lembrar */ }
+}
 
 export function Login() {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(readRememberedEmail)
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [rememberMe, setRememberMe] = useState(false)
+  const [rememberMe, setRememberMe] = useState(() => Boolean(readRememberedEmail()))
   const [captchaToken, setCaptchaToken] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,7 +37,9 @@ export function Login() {
 
     setLoading(true)
     try {
-      await login(email, password, captchaToken || undefined)
+      await login(email, password, captchaToken || undefined, rememberMe)
+      // Só guarda o e-mail depois de um login que deu certo; desmarcar o campo esquece o e-mail.
+      writeRememberedEmail(rememberMe ? email.trim() : null)
       navigate('/dashboard')
     } catch (err: any) {
       setError(err.response?.data?.message || 'Credenciais inválidas. Verifique seu email e senha.')

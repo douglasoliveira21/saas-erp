@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsEmail({}, { message: 'Email inválido' })
@@ -16,4 +16,10 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   captchaToken?: string;
+
+  // "Lembrar-me": sessão de 30 dias (cookie persistente). Sem isso a sessão dura 12 h e o cookie
+  // vale só até fechar o navegador.
+  @IsOptional()
+  @IsBoolean()
+  rememberMe?: boolean;
 }
