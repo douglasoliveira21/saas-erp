@@ -345,7 +345,7 @@ export function Payments() {
     if (note === null) return
     const receivedInput = window.prompt(`Valor efetivamente recebido (R$)? Deixe em branco se foi o valor original de R$ ${Number(payment.value).toFixed(2)}; preencha se o cliente pagou com multa e juros.`)
     if (receivedInput === null) return
-    const receivedValue = receivedInput.trim() ? Number(receivedInput.replace(/./g, '').replace(',', '.')) : undefined
+    const receivedValue = receivedInput.trim() ? Number(receivedInput.replace(/\./g, '').replace(',', '.')) : undefined
     if (receivedValue !== undefined && (!Number.isFinite(receivedValue) || receivedValue <= 0)) { setError('Valor recebido inválido.'); return }
     if (!await confirmAction({ title: 'Marcar como recebido', message: `Confirma que o pagamento de ${payment.customerName} (R$ ${Number(payment.value).toFixed(2)}) foi recebido por fora do Inter?`, confirmLabel: 'Marcar como recebido' })) return
     try {
