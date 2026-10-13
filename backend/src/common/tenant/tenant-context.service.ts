@@ -10,6 +10,11 @@ interface TenantStore {
 // tenantId por parâmetro em cada método de cada service.
 const storage = new AsyncLocalStorage<TenantStore>();
 
+// Leitura direta (fora de DI) para o escopo automático do TypeORM em tenant-scope.ts.
+export function currentTenantId(): string | null {
+  return storage.getStore()?.tenantId ?? null;
+}
+
 @Injectable()
 export class TenantContextService {
   run<T>(tenantId: string | null, fn: () => T): T {

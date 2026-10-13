@@ -8,7 +8,11 @@ export class Quote {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'int', unique: true })
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
+  @Column({ type: 'int' })
   number: number;
 
   @Column({ name: 'customer_id' })

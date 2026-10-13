@@ -5,6 +5,7 @@ import { BankStatement } from './entities/bank-statement.entity';
 import { InterService } from '../inter/inter.service';
 import { FinancialService } from '../financial/financial.service';
 import { createHash } from 'crypto';
+import { stampTenantRow } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class ReconciliationService {
@@ -239,6 +240,7 @@ export class ReconciliationService {
       RETURNING id
     `, [movType, category, stmt.description || 'Importado do extrato', stmt.amount, stmt.date, 'transferencia', userId]);
 
+    await stampTenantRow(this.dataSource.manager, 'financial_movements', result[0]?.id);
     if (result[0]?.id) {
       stmt.status = 'conciliado_manual';
       stmt.matchedMovementId = result[0].id;

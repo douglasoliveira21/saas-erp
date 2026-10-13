@@ -5,7 +5,11 @@ export class MonthlyClosing {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 7, unique: true })
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
+  @Column({ length: 7 })
   period: string; // YYYY-MM
 
   @Column({ name: 'closed_by', type: 'uuid', nullable: true })

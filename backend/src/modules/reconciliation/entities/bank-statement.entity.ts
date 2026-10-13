@@ -5,6 +5,10 @@ export class BankStatement {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ name: 'transaction_id', length: 100, nullable: true })
   transactionId: string;
 

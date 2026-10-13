@@ -10,6 +10,10 @@ export class CustomerCredit {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ name: 'customer_id' })
   customerId: string;
 
