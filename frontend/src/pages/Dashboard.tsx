@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, X } from 'lucide-react'
 import { MarketTicker } from '../components/MarketTicker'
+import { TechnicianDashboard } from './TechnicianDashboard'
 
 interface DashboardData {
   totalSales: number
@@ -64,7 +65,7 @@ const financialTaskLabels: Record<string, string> = {
   emissao_boleto: 'Boleto',
 }
 
-export function Dashboard() {
+function ManagementDashboard() {
   const { user, isAdmin, isFinanceiro, isTecnico } = useAuth()
   const [data, setData] = useState<DashboardData | null>(null)
   const [techSummary, setTechSummary] = useState<TechSummary[]>([])
@@ -647,4 +648,10 @@ export function Dashboard() {
       </div>
     </div>
   )
+}
+
+// Técnico tem um painel próprio (só o que é dele); admin e financeiro ficam com o painel de gestão.
+export function Dashboard() {
+  const { isTecnico } = useAuth()
+  return isTecnico ? <TechnicianDashboard /> : <ManagementDashboard />
 }

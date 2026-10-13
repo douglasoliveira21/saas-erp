@@ -38,7 +38,7 @@ const call = async (method, path, token, body, headers = {}) => {
     // O banco proibe UPDATE/DELETE em lancamento realizado; neste banco descartavel, desliga os gatilhos.
     await db.query('SET session_replication_role = replica');
     await db.query('DELETE FROM contract_billings WHERE contract_id IN (SELECT id FROM contracts WHERE tenant_id = ANY($1))', [old]);
-    for (const t of ['financial_movements', 'installment_payments', 'installments', 'accounts_receivable', 'payments', 'sale_items', 'sales', 'contracts', 'customers', 'suppliers', 'products', 'bills', 'fiscal_config', 'company_profiles', 'users', 'chart_accounts', 'cost_centers']) {
+    for (const t of ['service_orders', 'routes', 'commissions', 'financial_movements', 'installment_payments', 'installments', 'accounts_receivable', 'payments', 'sale_items', 'sales', 'contracts', 'customers', 'suppliers', 'products', 'bills', 'fiscal_config', 'company_profiles', 'users', 'chart_accounts', 'cost_centers']) {
       await db.query(`DELETE FROM ${t} WHERE tenant_id = ANY($1)`, [old]);
     }
     await db.query('DELETE FROM tenants WHERE id = ANY($1)', [old]);
@@ -202,6 +202,57 @@ const call = async (method, path, token, body, headers = {}) => {
   await check('recuperacao de senha continua respondendo mesmo sem e-mail configurado no tenant', async () => {
     const r = await call('POST', '/auth/forgot-password', null, { email: 'admin-b@e2e.test' });
     assert.ok([200, 201].includes(r.status), String(r.status));
+  });
+
+  console.log('Painel do tecnico');
+  const mkTech = async (t, email) => (await one("INSERT INTO users (tenant_id, name, email, password, role) VALUES ($1,'Tecnico Teste',$2,$3,'tecnico') RETURNING id", [t, email, hash])).id;
+  const techA = await mkTech(A, 'tec-a@e2e.test');
+  const techB = await mkTech(B, 'tec-b@e2e.test');
+  const adminA = (await one("SELECT id FROM users WHERE tenant_id=$1 AND role='admin'", [A])).id;
+  const custB = (await one("INSERT INTO customers (tenant_id, name) VALUES ($1,'Cliente B') RETURNING id", [B])).id;
+  const os = (t, tech, customer, status, openedDaysAgo, extra = '') =>
+    db.query("INSERT INTO service_orders (tenant_id, customer_id, technician_id, service_type, customer_report, status_key, opened_at" + (extra ? ', started_at, completed_at' : '') + ") VALUES ($1,$2,$3,'Manutencao','relato',$4, now() - ($5 || ' days')::interval" + (extra ? ", now() - interval '3 hours', now() - interval '1 hour'" : '') + ')', [t, customer, tech, status, String(openedDaysAgo)]);
+  await os(A, techA, cust, 'em_manutencao', 2);
+  await os(A, techA, cust, 'aguardando_cliente', 10);
+  await os(A, techA, cust, 'concluida', 1, 'done');
+  await os(A, adminA, cust, 'iniciando', 1);
+  await os(B, techB, custB, 'iniciando', 1);
+  for (const [km, value, st] of [[10, 13, 'pendente'], [20, 26, 'paga']]) {
+    await db.query("INSERT INTO routes (tenant_id, technician_id, description, km, total_value, route_date, status) VALUES ($1,$2,'Visita cliente',$3,$4,$5,$6)", [A, techA, km, value, day, st]);
+  }
+  await db.query("INSERT INTO commissions (tenant_id, technician_id, type, base_value, percentage, amount, status) VALUES ($1,$2,'venda',1000,5,50,'pendente')", [A, techA]);
+  await db.query("INSERT INTO commissions (tenant_id, technician_id, type, base_value, percentage, amount, status) VALUES ($1,$2,'venda',1000,5,999,'pendente')", [A, adminA]);
+  await db.query("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status) VALUES ($1,$2,$3,'pix',300,300,1,'pago')", [A, techA, cust]);
+  const tokenTecA = await login('tec-a@e2e.test');
+  const tokenTecB = await login('tec-b@e2e.test');
+  await check('painel do tecnico A mostra so os numeros dele', async () => {
+    const r = await call('GET', '/dashboard/technician', tokenTecA);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const d = r.json;
+    assert.equal(d.serviceOrders.open, 2); assert.equal(d.serviceOrders.stale, 1); assert.equal(d.serviceOrders.completedMonth, 1);
+    assert.ok(Math.abs(d.serviceOrders.avgHoursToComplete - 2) < 0.2, 'media de horas ' + d.serviceOrders.avgHoursToComplete);
+    assert.deepEqual(d.serviceOrders.active.map((o) => o.statusKey), ['aguardando_cliente', 'em_manutencao'], 'mais antigas primeiro');
+    assert.equal(d.serviceOrders.active[0].customerName, 'Cliente A'); assert.ok(d.serviceOrders.active[0].daysOpen >= 10);
+    assert.equal(d.routes.count, 2); assert.equal(d.routes.km, 30); assert.equal(d.routes.totalValue, 39);
+    assert.equal(d.routes.byStatus.pendente.count, 1); assert.equal(d.routes.byStatus.paga.value, 26);
+    assert.equal(d.commissions.pending, 50);
+    assert.equal(d.sales.count, 1); assert.equal(d.sales.total, 300); assert.equal(d.sales.paid, 300);
+  });
+  await check('tecnico de outro tenant nao ve nada do A', async () => {
+    const d = (await call('GET', '/dashboard/technician', tokenTecB)).json;
+    assert.equal(d.serviceOrders.open, 1); assert.equal(d.serviceOrders.active[0].customerName, 'Cliente B');
+    assert.equal(d.routes.count, 0); assert.equal(d.commissions.pending, 0); assert.equal(d.sales.count, 0);
+  });
+  await check('mes anterior vem zerado e mes invalido cai no mes atual', async () => {
+    const prev = new Date(); prev.setMonth(prev.getMonth() - 1, 1);
+    const m = prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2, '0');
+    const d = (await call('GET', '/dashboard/technician?month=' + m, tokenTecA)).json;
+    assert.equal(d.month, m); assert.equal(d.routes.count, 0); assert.equal(d.serviceOrders.completedMonth, 0);
+    assert.equal((await call('GET', '/dashboard/technician?month=lixo', tokenTecA)).json.month, month);
+  });
+  await check('admin e financeiro nao acessam o painel do tecnico (403) e sem login (401)', async () => {
+    assert.equal((await call('GET', '/dashboard/technician', tokenA)).status, 403);
+    assert.equal((await call('GET', '/dashboard/technician')).status, 401);
   });
 
   console.log('Relatorio PDF');

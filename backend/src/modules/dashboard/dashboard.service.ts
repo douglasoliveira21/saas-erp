@@ -6,6 +6,7 @@ import { Sale } from '../sales/entities/sale.entity';
 import { Commission } from '../commissions/entities/commission.entity';
 import { Product } from '../products/entities/product.entity';
 import { Route } from '../routes/entities/route.entity';
+import { buildTechnicianDashboard } from './technician-dashboard';
 
 @Injectable()
 export class DashboardService {
@@ -19,6 +20,15 @@ export class DashboardService {
     @InjectRepository(Route)
     private routesRepository: Repository<Route>,
   ) {}
+
+  /** Painel pessoal do técnico: filtrado pelo técnico logado (e, automaticamente, pelo tenant). */
+  getTechnicianDashboard(technicianId: string, month?: string) {
+    return buildTechnicianDashboard(technicianId, month, {
+      sales: this.salesRepository,
+      commissions: this.commissionsRepository,
+      routes: this.routesRepository,
+    });
+  }
 
   async getDashboardData() {
     const totalSales = await this.salesRepository.count();

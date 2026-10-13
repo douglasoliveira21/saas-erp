@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Request, UseGuards } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -13,6 +13,13 @@ export class DashboardController {
   @Get()
   getDashboardData() {
     return this.dashboardService.getDashboardData();
+  }
+
+  // Painel pessoal do técnico: só os números dele (ordens de serviço, rotas, comissões e vendas).
+  @Get('technician')
+  @Roles(UserRole.TECNICO)
+  getTechnicianDashboard(@Request() req: any, @Query('month') month?: string) {
+    return this.dashboardService.getTechnicianDashboard(req.user.id, month);
   }
 
   @Get('technicians-summary')
