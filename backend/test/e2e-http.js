@@ -45,7 +45,7 @@ const call = async (method, path, token, body, headers = {}) => {
     await db.query('SET session_replication_role = DEFAULT');
   }
   await db.query("DELETE FROM plans WHERE name = 'e2e'");
-  const modules = ['products', 'sales', 'pagamentos', 'financeiro', 'dre', 'reports', 'fiscal', 'contracts', 'compras', 'stock', 'services', 'orcamentos', 'contas_pagar', 'company'];
+  const modules = ['products', 'sales', 'pagamentos', 'financeiro', 'dre', 'reports', 'fiscal', 'contracts', 'compras', 'stock', 'services', 'orcamentos', 'contas_pagar', 'company', 'email_settings'];
   const plan = await one('INSERT INTO plans (name, modules) VALUES ($1, $2::jsonb) RETURNING id', ['e2e', JSON.stringify(modules)]);
   const mkTenant = async (name, slug) => (await one("INSERT INTO tenants (name, slug, status, plan_id) VALUES ($1,$2,'ativo',$3) RETURNING id", [name, slug, plan.id])).id;
   const A = await mkTenant('Empresa A', 'a-e2e');
@@ -173,6 +173,35 @@ const call = async (method, path, token, body, headers = {}) => {
     const m = new Date().getMonth() + 1;
     const r = await call('GET', `/reports/dre?year=${y}&month=${m}`, tokenB);
     assert.equal(Number(r.json.totals.receitaBruta), 7777);
+  });
+
+  console.log('E-mail por tenant (cada empresa configura o proprio)');
+  await check('tenant sem e-mail configurado: config indica configured=false e o teste de envio e recusado', async () => {
+    const cfg = await call('GET', '/mail/config', tokenB);
+    assert.equal(cfg.status, 200); assert.equal(cfg.json.configured, false);
+    assert.equal(cfg.json.host, '', 'o tenant novo nao pode herdar o servidor da plataforma');
+    const r = await call('POST', '/mail/test', tokenB, { email: 'destino@exemplo.com' });
+    assert.equal(r.status, 400); assert.match(String(r.json.message), /não configurado|nao configurado/i);
+  });
+  await check('tenant configura a propria conta SMTP e passa a constar como configurado', async () => {
+    const save = await call('PATCH', '/mail/config', tokenA, { host: '127.0.0.1', port: 1, authUser: 'u@a.test', authPass: 'segredo', fromEmail: 'u@a.test', fromName: 'Empresa A', provider: 'smtp' });
+    assert.ok([200, 201].includes(save.status), save.status + JSON.stringify(save.json));
+    assert.equal((await call('GET', '/mail/config', tokenA)).json.configured, true);
+    const r = await call('POST', '/mail/test', tokenA, { email: 'destino@exemplo.com' });
+    assert.equal(r.status, 400); assert.doesNotMatch(String(r.json.message), /não configurado|nao configurado/i, 'deve tentar enviar e falhar na conexao, nao na configuracao');
+  });
+  await check('a configuracao de um tenant nao aparece no outro', async () => {
+    assert.equal((await call('GET', '/mail/config', tokenB)).json.configured, false);
+    assert.equal((await call('GET', '/mail/config', tokenA)).json.fromName, 'Empresa A');
+  });
+  await check('historico de envios e por tenant', async () => {
+    const a = await call('GET', '/mail/logs', tokenA); const b = await call('GET', '/mail/logs', tokenB);
+    assert.ok((a.json.items || []).length >= 1); assert.ok((a.json.items || []).every((l) => l.tenantId === A));
+    assert.ok((b.json.items || []).every((l) => l.tenantId === B));
+  });
+  await check('recuperacao de senha continua respondendo mesmo sem e-mail configurado no tenant', async () => {
+    const r = await call('POST', '/auth/forgot-password', null, { email: 'admin-b@e2e.test' });
+    assert.ok([200, 201].includes(r.status), String(r.status));
   });
 
   console.log('Relatorio PDF');

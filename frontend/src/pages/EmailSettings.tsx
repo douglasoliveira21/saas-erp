@@ -111,6 +111,11 @@ export function EmailSettings() {
         </div>
       </div>
 
+      {cfg.configured === false && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm">
+          <strong>E-mail ainda não configurado.</strong> Enquanto a conta de e-mail da sua empresa não for cadastrada, os envios de boletos, notas fiscais e demais e-mails ficam bloqueados. Preencha os dados abaixo, salve e use &quot;Enviar teste&quot; para confirmar.
+        </div>
+      )}
       {message && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{message}</div>}
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 

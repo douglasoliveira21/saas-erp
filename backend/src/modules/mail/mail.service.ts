@@ -11,6 +11,8 @@ import { currentTenantId } from '../../common/tenant/tenant-context.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
+const MAIL_NOT_CONFIGURED_MESSAGE = 'E-mail não configurado: cadastre a conta de e-mail da sua empresa em Administração > Configuração de e-mail.';
+
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
@@ -92,12 +94,12 @@ export class MailService implements OnModuleInit {
   private getEnvConfig(): EmailConfig {
     return this.configRepository.create({
       id: randomUUID(),
-      host: process.env.MAIL_HOST || 'mail.vgonhost.com.br',
+      host: process.env.MAIL_HOST || '',
       port: parseInt(process.env.MAIL_PORT || '587', 10),
       secure: parseInt(process.env.MAIL_PORT || '587', 10) === 465,
-      authUser: process.env.MAIL_USER || 'info@vgonhost.com.br',
-      authPass: process.env.MAIL_PASS || 'Vgon2018',
-      fromEmail: process.env.MAIL_FROM || process.env.MAIL_USER || 'info@vgonhost.com.br',
+      authUser: process.env.MAIL_USER || '',
+      authPass: process.env.MAIL_PASS || '',
+      fromEmail: process.env.MAIL_FROM || process.env.MAIL_USER || '',
       fromName: process.env.MAIL_FROM_NAME || 'VGON',
       copyEnabled: process.env.MAIL_COPY_ENABLED === 'true',
       copyEmail: process.env.MAIL_COPY_EMAIL || '',
@@ -107,6 +109,25 @@ export class MailService implements OnModuleInit {
       microsoftClientSecret: process.env.MICROSOFT_CLIENT_SECRET || '',
       microsoftRedirectUri: process.env.MICROSOFT_REDIRECT_URI || '',
     });
+  }
+
+  // Config nova para um tenant: em branco. Cada tenant precisa configurar a PRÓPRIA conta de e-mail
+  // (SMTP ou Microsoft 365) - nunca herda a conta do servidor, senão os e-mails dele sairiam
+  // com a identidade e a caixa de outra empresa. Sem tenant no contexto (inicialização, e-mails de
+  // sistema) usa a conta da plataforma, vinda das variáveis MAIL_*.
+  private newConfigForContext(): EmailConfig {
+    const base = this.getEnvConfig();
+    if (!currentTenantId()) return base;
+    return Object.assign(base, {
+      host: '', port: 587, secure: false, authUser: '', authPass: '', fromEmail: '', fromName: '',
+      copyEnabled: false, copyEmail: '', provider: 'smtp', microsoftTenantId: 'common',
+      microsoftClientId: '', microsoftClientSecret: '', microsoftRedirectUri: '',
+    });
+  }
+
+  private isConfigured(config: EmailConfig): boolean {
+    if ((config.provider || 'smtp') === 'microsoft365') return Boolean(config.microsoftRefreshToken);
+    return Boolean(config.host && config.authUser && config.authPass);
   }
 
   private createTransporter(config: EmailConfig): nodemailer.Transporter {
@@ -132,7 +153,7 @@ export class MailService implements OnModuleInit {
     await this.ensureConfigTable();
     let config = await this.configRepository.findOne({ where: {} });
     if (!config) {
-      config = await this.configRepository.save(this.getEnvConfig());
+      config = await this.configRepository.save(this.newConfigForContext());
     }
     this.configCache = config;
     // Primeira leitura deste tenant: monta a conexão dele (a do construtor é a global/env).
@@ -160,13 +181,14 @@ export class MailService implements OnModuleInit {
       microsoftConnected: Boolean(config.microsoftRefreshToken),
       hasMicrosoftClientSecret: Boolean(config.microsoftClientSecret),
       hasPassword: Boolean(config.authPass),
+      configured: this.isConfigured(config),
     };
   }
 
   async updateConfig(body: any, userId?: string): Promise<any> {
     await this.ensureConfigTable();
     let config = await this.configRepository.findOne({ where: {} });
-    if (!config) config = this.configRepository.create(this.getEnvConfig());
+    if (!config) config = this.configRepository.create(this.newConfigForContext());
     const oldData = this.sanitizeConfig(config);
 
     config.host = body.host || '';
@@ -207,6 +229,9 @@ export class MailService implements OnModuleInit {
     try {
       const config = await this.getConfig();
       provider = config.provider || 'smtp';
+      // Dentro de um tenant só se envia pela conta DELE; sem configuração o envio é recusado e fica
+      // registrado no histórico de envios com o motivo.
+      if (currentTenantId() && !this.isConfigured(config)) throw new Error(MAIL_NOT_CONFIGURED_MESSAGE);
       if (provider === 'microsoft365') {
         await this.sendMicrosoftMail(config, to, subject, html, attachments);
       } else {
@@ -230,6 +255,7 @@ export class MailService implements OnModuleInit {
     const recipient = String(email || '').trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) throw new BadRequestException('Informe um e-mail de destino válido.');
     const config = await this.getConfig();
+    if (currentTenantId() && !this.isConfigured(config)) throw new BadRequestException(MAIL_NOT_CONFIGURED_MESSAGE);
     if ((config.provider || 'smtp') === 'smtp') {
       try { await this.transporter.verify(); } catch (error) {
         const message = this.formatMailError(error);

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -56,7 +57,7 @@ export class CustomerPortalService {
       verificationCodeHash: codeHash, verificationExpiresAt: new Date(Date.now() + 15 * 60000),
     };
     const user = existing ? await this.users.save(Object.assign(existing, data)) : await this.users.save(this.users.create(data));
-    const sent = await this.mail.sendMail(email, 'Código de confirmação - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para confirmar o cadastro no Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos.</p>`);
+    const sent = await runInTenant((user as any).tenantId || null, () => this.mail.sendMail(email, 'Código de confirmação - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para confirmar o cadastro no Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos.</p>`));
     if (!sent) throw new BadRequestException('Não foi possível enviar o código. Confira o e-mail ou tente novamente.');
     return { message: 'Enviamos um código de confirmação para o seu e-mail.', verificationRequired: true, email };
   }
@@ -84,7 +85,7 @@ export class CustomerPortalService {
     user.verificationCodeHash = crypto.createHash('sha256').update(code).digest('hex');
     user.verificationExpiresAt = new Date(Date.now() + 15 * 60000);
     await this.users.save(user);
-    await this.mail.sendMail(email, 'Recuperação de senha - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para redefinir a senha do Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos. Se você não solicitou isso, ignore este e-mail.</p>`);
+    await runInTenant((user as any).tenantId || null, () => this.mail.sendMail(email, 'Recuperação de senha - Portal VGON', `<p>Olá, ${user.name}.</p><p>Seu código para redefinir a senha do Portal VGON é:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>O código expira em 15 minutos. Se você não solicitou isso, ignore este e-mail.</p>`));
     return { message: 'Se o e-mail existir, enviamos um código de recuperação.' };
   }
 
