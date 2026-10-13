@@ -4,6 +4,7 @@ import { User } from '../../users/entities/user.entity';
 @Entity('crm_opportunities')
 export class Opportunity {
  @PrimaryGeneratedColumn('uuid') id:string;
+ @Column({name:'tenant_id',type:'uuid',nullable:true}) tenantId:string;
  @Column({name:'customer_id',type:'uuid',nullable:true}) customerId:string;
  @Column({length:255}) title:string;
  @Column({name:'contact_name',length:255,nullable:true}) contactName:string;

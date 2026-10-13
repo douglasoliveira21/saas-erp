@@ -4,6 +4,7 @@ import { In, LessThanOrEqual, Repository } from 'typeorm';
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalEvent } from '../entities/fiscal-event.entity';
 import { FiscalIntegrationService } from './fiscal-integration.service';
+import { runInTenant } from '../../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class FiscalJobsService implements OnModuleInit {
@@ -40,6 +41,9 @@ export class FiscalJobsService implements OnModuleInit {
 
       let errors = 0;
       for (const invoice of invoices) {
+        // O job agendado não tem tenant: cada nota é processada no tenant dono dela (certificado,
+        // configuração fiscal e credenciais passam a ser os dele).
+        await runInTenant(invoice.tenantId || null, async () => {
         // Cada nota e isolada num try/catch proprio: uma nota travada (ex.: falhou antes de
         // sequer obter protocolo/chave de acesso, entao nunca vai ter o que consultar) nao pode
         // derrubar o lote inteiro e impedir as outras 24 notas de serem sincronizadas neste ciclo.
@@ -83,6 +87,7 @@ export class FiscalJobsService implements OnModuleInit {
           invoice.nextRetryAt = new Date(Date.now() + Math.min(invoice.retryCount, 24) * 60 * 60 * 1000);
           await this.invoiceRepo.save(invoice).catch(() => {});
         }
+        });
       }
       return { processed, errors, skipped: false };
     } catch (error) {

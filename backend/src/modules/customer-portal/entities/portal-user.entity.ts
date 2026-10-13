@@ -4,6 +4,7 @@ import { Customer } from '../../customers/entities/customer.entity';
 @Entity('portal_users')
 export class PortalUser {
   @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true }) tenantId: string;
   @Column({ name: 'customer_id', type: 'uuid' }) customerId: string;
   @Column({ length: 180 }) name: string;
   @Column({ length: 255, unique: true }) email: string;

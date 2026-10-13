@@ -3,6 +3,7 @@ import { TypeOrmModuleOptions, TypeOrmOptionsFactory } from '@nestjs/typeorm';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { env } from './env.config';
 import { SnakeNamingStrategy } from './snake-naming.strategy';
+import { TenantStampSubscriber } from '../common/tenant/tenant-scope';
 
 @Injectable()
 export class DatabaseConfig implements TypeOrmOptionsFactory {
@@ -19,6 +20,7 @@ export class DatabaseConfig implements TypeOrmOptionsFactory {
       password: env.database.password,
       database: env.database.database,
       entities: [__dirname + '/../**/*.entity{.ts,.js}'],
+      subscribers: [TenantStampSubscriber],
       synchronize: shouldSync,
       logging: env.server.nodeEnv === 'development',
       ssl: useSSL ? { rejectUnauthorized: false } : false,

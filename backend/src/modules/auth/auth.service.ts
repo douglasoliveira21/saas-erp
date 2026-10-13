@@ -111,7 +111,7 @@ export class AuthService {
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       await this.registerIpFailure(client.ip, email);
-      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'conta_bloqueada' }, ipAddress: client.ip, userAgent: client.userAgent });
+      await this.auditService.safeCreate({ userId: user.id, tenantId: (user as any).tenantId, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'conta_bloqueada' }, ipAddress: client.ip, userAgent: client.userAgent });
       throw new HttpException('Conta temporariamente bloqueada. Tente novamente mais tarde.', HttpStatus.TOO_MANY_REQUESTS);
     }
     const valid = await bcrypt.compare(loginDto.password, user.password);
@@ -124,19 +124,19 @@ export class AuthService {
       // conta (que já acabou de acontecer acima) - as duas travas rodam em paralelo, cada uma
       // com seu próprio limite e sua própria tela de desbloqueio no painel do super admin.
       await this.registerIpFailure(client.ip, email);
-      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'senha_invalida', accountLocked: failures >= this.maxAttempts }, ipAddress: client.ip, userAgent: client.userAgent });
+      await this.auditService.safeCreate({ userId: user.id, tenantId: (user as any).tenantId, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'senha_invalida', accountLocked: failures >= this.maxAttempts }, ipAddress: client.ip, userAgent: client.userAgent });
       throw new UnauthorizedException('Credenciais invalidas');
     }
     if (!user.active) {
       await this.registerIpFailure(client.ip, email);
-      await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'usuario_inativo' }, ipAddress: client.ip, userAgent: client.userAgent });
+      await this.auditService.safeCreate({ userId: user.id, tenantId: (user as any).tenantId, action: 'auth.login_failed', entity: 'user', entityId: user.id, newData: { email, reason: 'usuario_inativo' }, ipAddress: client.ip, userAgent: client.userAgent });
       throw new UnauthorizedException('Usuario inativo');
     }
     await this.registerIpSuccess(client.ip);
     const expiresAt = new Date(Date.now() + 7 * 86400000);
     const session = await this.sessionRepository.save(this.sessionRepository.create({ userId: user.id, deviceName: client.deviceName || this.describeDevice(client.userAgent), userAgent: client.userAgent, ipAddress: client.ip, lastSeenAt: new Date(), expiresAt }));
     await this.usersService.update(user.id, { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() } as any);
-    await this.auditService.safeCreate({ userId: user.id, action: 'auth.login_success', entity: 'user', entityId: user.id, ipAddress: client.ip, userAgent: client.userAgent });
+    await this.auditService.safeCreate({ userId: user.id, tenantId: (user as any).tenantId, action: 'auth.login_success', entity: 'user', entityId: user.id, ipAddress: client.ip, userAgent: client.userAgent });
     const payload = { sub: user.id, sid: session.id, email: user.email, role: user.role, tenantId: user.tenantId, permissions: user.permissions || [] };
     // Mesma resolução de módulos do plano que o JwtStrategy faz em requisições subsequentes —
     // sem isso, a resposta do login (usada para popular o AuthContext na hora) ficaria

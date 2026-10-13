@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, DataSource } from 'typeorm';
 import { Sale } from '../sales/entities/sale.entity';
 import { Commission } from '../commissions/entities/commission.entity';
+import { tenantSql } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class ReportsService {
@@ -107,18 +108,18 @@ export class ReportsService {
       //     o lançamento (NOT EXISTS evita contar em dobro o que já tem lançamento).
       const receitaMov = await this.dataSource.query(`
         SELECT COALESCE(SUM(value), 0) AS total FROM financial_movements
-        WHERE type = 'receita' AND date >= $1 AND date <= $2 AND is_forecast = false
+        WHERE type = 'receita' AND date >= $1 AND date <= $2 AND is_forecast = false${tenantSql()}
       `, [startDate, endDate]);
       const receitaContratosLegado = await this.dataSource.query(`
         SELECT COALESCE(SUM(COALESCE(p.received_value, p.value)), 0) AS total
         FROM payments p
         JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
-        WHERE p.status = 'pago' AND p.sale_id IS NULL AND p.paid_at >= $1 AND p.paid_at < $2
+        WHERE p.status = 'pago' AND p.sale_id IS NULL AND p.paid_at >= $1 AND p.paid_at < $2${tenantSql('p')}
           AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.idempotency_key = 'contract:' || p.codigo_solicitacao)
       `, [startDate + 'T00:00:00', nextMonthStart]);
       const receitaBillsLegado = await this.dataSource.query(`
         SELECT COALESCE(SUM(b.paid_value), 0) AS total FROM bills b
-        WHERE b.type = 'receber' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL
+        WHERE b.type = 'receber' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL${tenantSql('b')}
           AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.bill_id = b.id)
       `, [startDate + 'T00:00:00', nextMonthStart]);
       // Estornos: cada um reduz o lado de onde veio (cancelamento de venda/estorno de receita
@@ -133,7 +134,7 @@ export class ReportsService {
             AND e.category NOT IN ('impostos', 'imposto', 'depreciacao', 'amortizacao', 'compra_mercadoria')), 0) AS despesas
         FROM financial_movements e
         LEFT JOIN financial_movements o ON o.id = e.reference_id AND e.reference_type IN ('financial_movement_reversal', 'bill_payment_reversal')
-        WHERE e.type = 'estorno' AND e.date >= $1 AND e.date <= $2 AND e.is_forecast = false
+        WHERE e.type = 'estorno' AND e.date >= $1 AND e.date <= $2 AND e.is_forecast = false${tenantSql('e')}
       `, [startDate, endDate]);
 
       const receitaBruta = Math.max(0,
@@ -146,7 +147,7 @@ export class ReportsService {
         SELECT COALESCE(SUM(si.cost_price * si.quantity), 0) as cmv
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
-        WHERE s.status != 'cancelado'
+        WHERE s.status != 'cancelado'${tenantSql('s')}
           AND EXISTS (SELECT 1 FROM financial_movements r WHERE r.sale_id = s.id AND r.type = 'receita' AND r.is_forecast = false AND r.date >= $1 AND r.date <= $2)
           AND NOT EXISTS (SELECT 1 FROM financial_movements r2 WHERE r2.sale_id = s.id AND r2.type = 'receita' AND r2.is_forecast = false AND r2.date < $1)
       `, [startDate, endDate]);
@@ -164,7 +165,7 @@ export class ReportsService {
           COALESCE(SUM(value) FILTER (WHERE bill_id IS NOT NULL), 0) AS contas
         FROM financial_movements
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
-          AND category NOT IN ('compra_mercadoria', 'depreciacao', 'amortizacao', 'impostos', 'imposto')
+          AND category NOT IN ('compra_mercadoria', 'depreciacao', 'amortizacao', 'impostos', 'imposto')${tenantSql()}
       `, [startDate, endDate]);
       const despesasFixas = Number(despesasResult[0]?.outras || 0) - Number(estornos[0]?.despesas || 0);
 
@@ -172,7 +173,7 @@ export class ReportsService {
       const comissoesResult = await this.dataSource.query(`
         SELECT COALESCE(SUM(amount), 0) as total
         FROM commissions
-        WHERE status = 'paga' AND paid_at >= $1 AND paid_at < $2
+        WHERE status = 'paga' AND paid_at >= $1 AND paid_at < $2${tenantSql()}
       `, [startDate + 'T00:00:00', nextMonthStart]);
       const comissoes = Number(comissoesResult[0]?.total || 0);
 
@@ -182,7 +183,7 @@ export class ReportsService {
       const billsResult = await this.dataSource.query(`
         SELECT COALESCE(SUM(b.paid_value), 0) as total
         FROM bills b
-        WHERE b.type = 'pagar' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL
+        WHERE b.type = 'pagar' AND b.paid_value > 0 AND b.paid_at >= $1 AND b.paid_at < $2 AND b.archived_at IS NULL${tenantSql('b')}
           AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.bill_id = b.id)
       `, [startDate + 'T00:00:00', nextMonthStart]);
       const contasPagas = Number(despesasResult[0]?.contas || 0) + Number(billsResult[0]?.total || 0);
@@ -197,7 +198,7 @@ export class ReportsService {
         SELECT COALESCE(SUM(value), 0) as total
         FROM financial_movements
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
-          AND category IN ('depreciacao', 'amortizacao')
+          AND category IN ('depreciacao', 'amortizacao')${tenantSql()}
       `, [startDate, endDate]);
       const depreciacao = Number(depreciacaoResult[0]?.total || 0) - Number(estornos[0]?.depreciacao || 0);
 
@@ -209,7 +210,7 @@ export class ReportsService {
         SELECT COALESCE(SUM(value), 0) as total
         FROM financial_movements
         WHERE type = 'despesa' AND date >= $1 AND date <= $2 AND is_forecast = false
-          AND category IN ('impostos', 'imposto')
+          AND category IN ('impostos', 'imposto')${tenantSql()}
       `, [startDate, endDate]);
       const impostos = Number(impostosResult[0]?.total || 0) - Number(estornos[0]?.impostos || 0);
 

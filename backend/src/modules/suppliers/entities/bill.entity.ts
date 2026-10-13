@@ -7,6 +7,10 @@ export class Bill {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ type: 'varchar', length: 10, default: 'pagar' })
   type: string; // pagar (fornecedor) | receber (cliente, avulso)
 

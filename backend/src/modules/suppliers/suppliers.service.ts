@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, In, DataSource } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { Bill } from './entities/bill.entity';
+import { stampTenantRow } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class SuppliersService {
@@ -170,9 +171,9 @@ export class SuppliersService {
       if (!existingMov[0]) {
         const today = new Date().toISOString().split('T')[0];
         const isReceivable = bill.type === 'receber';
-        await manager.query(
+        const insertedMovement = await manager.query(
           `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, idempotency_key, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'bill_payment', $8, false, $9, $10)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'bill_payment', $8, false, $9, $10) RETURNING id`,
           [
             isReceivable ? 'receita' : 'despesa',
             bill.category || 'outros',
@@ -186,6 +187,7 @@ export class SuppliersService {
             null,
           ]
         );
+        await stampTenantRow(manager, 'financial_movements', insertedMovement[0]?.id);
       }
 
       // Update purchase financial_status if linked
@@ -234,9 +236,9 @@ export class SuppliersService {
       );
       if (movement[0]) {
         const isReceivable = bill.type === 'receber';
-        await manager.query(
+        const insertedReversal = await manager.query(
           `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, created_by)
-           VALUES ('estorno', $1, $2, $3, $4, $5, $6, 'bill_payment_reversal', $7, false, $8)`,
+           VALUES ('estorno', $1, $2, $3, $4, $5, $6, 'bill_payment_reversal', $7, false, $8) RETURNING id`,
           [
             movement[0].category || 'outros',
             `Reversão de pagamento: ${bill.description || 'Conta'} - ${reason.trim()}`,
@@ -248,6 +250,7 @@ export class SuppliersService {
             userId || null,
           ],
         );
+        await stampTenantRow(manager, 'financial_movements', insertedReversal[0]?.id);
       }
 
       if (bill.purchaseId) {

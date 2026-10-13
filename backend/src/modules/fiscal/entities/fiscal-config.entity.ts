@@ -5,6 +5,10 @@ export class FiscalConfig {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ length: 40, unique: true })
   cnpj: string;
 

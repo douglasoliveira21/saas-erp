@@ -11,6 +11,7 @@ import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { StockMovementType } from '../../common/enums/stock-movement-type.enum';
 import { FinancialService } from '../financial/financial.service';
 import { AuditService } from '../audit/audit.service';
+import { stampTenantRow } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class PurchasesService {
@@ -479,6 +480,7 @@ export class PurchasesService {
           ]
         );
         const billId = billResult[0]?.id;
+        await stampTenantRow(manager, 'bills', billId);
         bills.push({ id: billId, number: inst.number, value: inst.value, dueDate: inst.dueDate });
 
         // Create forecast financial_movement for this bill
@@ -499,6 +501,7 @@ export class PurchasesService {
             userId,
           ]
         );
+        await stampTenantRow(manager, 'financial_movements', movResult[0]?.id);
         movements.push({ id: movResult[0]?.id, billId, value: inst.value });
 
         // Create allocations for this bill

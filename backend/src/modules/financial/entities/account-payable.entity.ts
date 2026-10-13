@@ -5,6 +5,10 @@ export class AccountPayable {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  // Preenchido/filtrado automaticamente por common/tenant/tenant-scope.ts
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId: string;
+
   @Column({ name: 'purchase_id', type: 'uuid', nullable: true })
   purchaseId: string;
 

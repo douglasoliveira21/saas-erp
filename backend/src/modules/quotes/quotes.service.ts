@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Quote } from './entities/quote.entity';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { tenantSql } from '../../common/tenant/tenant-scope';
 
 const DEFAULT_LOGO_URL = 'https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png';
 
@@ -150,7 +151,7 @@ export class QuotesService {
     const createdBy = q.createdBy;
 
     // Get company config (logo)
-    const configResult = await this.dataSource.query(`SELECT company_name, cnpj, company_logo, emit_address, emit_number, emit_neighborhood, emit_cep, emit_phone, city_registration FROM fiscal_config LIMIT 1`);
+    const configResult = await this.dataSource.query(`SELECT company_name, cnpj, company_logo, emit_address, emit_number, emit_neighborhood, emit_cep, emit_phone, city_registration FROM fiscal_config WHERE true${tenantSql()} LIMIT 1`);
     const config = configResult?.[0] || {};
     // Dados cadastrados em Administração > Empresa (por tenant) têm prioridade; a configuração
     // fiscal (legado) e, no logo, o padrão da VGON só entram quando o campo não foi preenchido.
