@@ -12,7 +12,7 @@ export class TenantContextInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
-    const tenantId = request.user?.tenantId || null;
+    const tenantId = request.user?.tenantId || request.portalUser?.tenantId || null;
     // `next.handle()` retorna um Observable "frio" — nada executa ate alguem dar subscribe, e
     // com AuditInterceptor/OperationTrackingInterceptor tambem registrados como APP_INTERCEPTOR
     // globais, esse subscribe acontece dentro da cadeia de composicao interna do Nest, FORA da

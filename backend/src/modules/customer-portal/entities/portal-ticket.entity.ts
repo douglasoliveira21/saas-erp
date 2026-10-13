@@ -4,6 +4,7 @@ import { PortalUser } from './portal-user.entity';
 @Entity('portal_tickets')
 export class PortalTicket {
   @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true }) tenantId: string;
   @Column({ name: 'customer_id', type: 'uuid' }) customerId: string;
   @Column({ name: 'portal_user_id', type: 'uuid' }) portalUserId: string;
   @Column({ name: 'glpi_ticket_id', type: 'int', unique: true }) glpiTicketId: number;

@@ -51,7 +51,7 @@ export class CustomerPortalService {
     const code = String(crypto.randomInt(100000, 1000000));
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const data: Partial<PortalUser> = {
-      customerId: company.id, name: String(body.name).trim(), email, phone: body.phone,
+      customerId: company.id, tenantId: (company as any).tenantId || undefined, name: String(body.name).trim(), email, phone: body.phone,
       department: body.department, password: await bcrypt.hash(body.password, 12), role: 'user', status: 'pending',
       verificationCodeHash: codeHash, verificationExpiresAt: new Date(Date.now() + 15 * 60000),
     };

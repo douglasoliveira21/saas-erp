@@ -1,4 +1,5 @@
-import { EntitySubscriberInterface, EventSubscriber, InsertEvent, SelectQueryBuilder } from 'typeorm';
+import { DeleteQueryBuilder, EntitySubscriberInterface, EventSubscriber, InsertEvent, SelectQueryBuilder, UpdateQueryBuilder } from 'typeorm';
+import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import { currentTenantId } from './tenant-context.service';
 
 // Escopo automático por tenant, aplicado a TODA entidade que mapeia a propriedade `tenantId`
@@ -18,7 +19,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // compartilhados. Entram aqui até esses fluxos serem tornados cientes de tenant.
 const TENANT_UNSCOPED_TABLES = new Set([
   'auth_sessions', 'password_resets', 'inter_webhook_events',
-  'portal_users', 'portal_tickets', 'portal_ticket_forms',
   'glpi_config', 'glpi_tickets', 'sla_monthly_snapshots',
   'whatsapp_message_logs', 'service_order_statuses',
   'email_delivery_logs',
@@ -35,23 +35,37 @@ function scopedTenantId(metadata: any): string | null {
 }
 
 let installed = false;
+
+// Acrescenta a condição de tenant ao WHERE do builder (select/update/delete/soft-delete). Para
+// update/delete isso impede alterar ou apagar, por id adivinhado, registro de outro tenant.
+function applyTenantCondition(qb: any, queryTypes: string[]): void {
+  const map: any = qb.expressionMap;
+  if (!queryTypes.includes(map.queryType) || !map.mainAlias?.hasMetadata) return;
+  const tenantId = scopedTenantId(map.mainAlias.metadata);
+  if (!tenantId) return;
+  // select usa alias.propriedade (o TypeORM traduz); update/delete/soft-delete não têm alias na
+  // consulta, então precisam da coluna real - `Entidade.tenantId` viraria SQL inválido ali.
+  const column = map.mainAlias.metadata.findColumnWithPropertyName('tenantId').databaseName;
+  const condition = map.queryType === 'select' ? `${map.mainAlias.name}.tenantId = '${tenantId}'` : `"${column}" = '${tenantId}'`;
+  const current: string | undefined = map.extraAppendedAndWhereCondition;
+  if (!current) map.extraAppendedAndWhereCondition = condition;
+  else if (!current.includes(condition)) map.extraAppendedAndWhereCondition = `(${current}) AND ${condition}`;
+}
+
 export function installTenantScope(): void {
   if (installed) return;
   installed = true;
-  const originalGetQuery = SelectQueryBuilder.prototype.getQuery;
-  SelectQueryBuilder.prototype.getQuery = function (this: SelectQueryBuilder<any>) {
-    const map: any = this.expressionMap;
-    if (map.queryType === 'select' && map.mainAlias?.hasMetadata) {
-      const tenantId = scopedTenantId(map.mainAlias.metadata);
-      if (tenantId) {
-        const condition = `${map.mainAlias.name}.tenantId = '${tenantId}'`;
-        const current: string | undefined = map.extraAppendedAndWhereCondition;
-        if (!current) map.extraAppendedAndWhereCondition = condition;
-        else if (!current.includes(condition)) map.extraAppendedAndWhereCondition = `(${current}) AND ${condition}`;
-      }
-    }
-    return originalGetQuery.call(this);
+  const patch = (proto: any, queryTypes: string[]) => {
+    const original = proto.getQuery;
+    proto.getQuery = function (this: any) {
+      applyTenantCondition(this, queryTypes);
+      return original.call(this);
+    };
   };
+  patch(SelectQueryBuilder.prototype, ['select']);
+  patch(UpdateQueryBuilder.prototype, ['update']);
+  patch(DeleteQueryBuilder.prototype, ['delete']);
+  patch(SoftDeleteQueryBuilder.prototype, ['soft-delete', 'restore']);
 }
 
 // Fragmento ` AND [alias.]tenant_id = '<tenant>'` para SQL cru (relatórios/DRE) - vazio quando não
@@ -65,7 +79,7 @@ export function tenantSql(alias?: string): string {
 
 // INSERT em SQL cru não passa pelo subscriber abaixo: sem tenant_id a linha cai no DEFAULT do
 // banco (tenant legado). Chame depois do INSERT (com RETURNING id) pra carimbar o tenant atual.
-const STAMPABLE_TABLES = new Set(['financial_movements', 'bills']);
+const STAMPABLE_TABLES = new Set(['financial_movements', 'bills', 'invoices', 'payments']);
 export async function stampTenantRow(manager: { query: (sql: string, params?: any[]) => Promise<any> }, table: string, id?: string | null): Promise<void> {
   const tenantId = currentTenantId();
   if (!id || !enabled() || !tenantId || !UUID_RE.test(tenantId) || !STAMPABLE_TABLES.has(table)) return;

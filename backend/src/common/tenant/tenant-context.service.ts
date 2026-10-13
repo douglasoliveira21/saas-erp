@@ -11,6 +11,11 @@ interface TenantStore {
 const storage = new AsyncLocalStorage<TenantStore>();
 
 // Leitura direta (fora de DI) para o escopo automático do TypeORM em tenant-scope.ts.
+// Executa fn com o tenant dado no contexto (jobs agendados e processamento linha a linha).
+export function runInTenant<T>(tenantId: string | null, fn: () => T): T {
+  return storage.run({ tenantId }, fn);
+}
+
 export function currentTenantId(): string | null {
   return storage.getStore()?.tenantId ?? null;
 }

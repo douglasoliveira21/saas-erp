@@ -14,6 +14,8 @@ import { BankAccount } from './entities/bank-account.entity';
 import { MonthlyClosing } from './entities/monthly-closing.entity';
 import { InstallmentPayment } from './entities/installment-payment.entity';
 import { AccountPayable } from './entities/account-payable.entity';
+import { tenantSql } from '../../common/tenant/tenant-scope';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class FinancialService implements OnModuleInit {
@@ -407,12 +409,12 @@ export class FinancialService implements OnModuleInit {
 
   async repairPaidPaymentIntegrity(source = 'manual'): Promise<{ checked: number; repaired: number; failed: number; details: any[] }> {
     const rows = await this.dataSource.query(`
-      SELECT p.id, p.sale_id, p.type, p.codigo_solicitacao, p.paid_at, p.installment_id, p.value,
+      SELECT p.id, p.sale_id, p.tenant_id, p.type, p.codigo_solicitacao, p.paid_at, p.installment_id, p.value,
              s.payment_status, s.billing_status, a.status AS account_status
       FROM payments p
       JOIN sales s ON s.id=p.sale_id
       LEFT JOIN accounts_receivable a ON a.sale_id=p.sale_id
-      WHERE p.status='pago'
+      WHERE p.status='pago'${tenantSql('p')}
         AND (
           -- Pagamento de parcela isolada: só reparar se a própria parcela ainda não reflete o pagamento
           (p.installment_id IS NOT NULL AND EXISTS (SELECT 1 FROM installments i WHERE i.id=p.installment_id AND (i.status<>'pago' OR i.paid_value<i.value)))
@@ -429,11 +431,14 @@ export class FinancialService implements OnModuleInit {
       try {
         const paidAt=row.paid_at ? new Date(row.paid_at) : new Date();
         const resolvedPaidAt = Number.isNaN(paidAt.getTime()) ? new Date() : paidAt;
-        if (row.installment_id) {
-          await this.payInstallment(row.installment_id, Number(row.value), row.type||'boleto', null as any, { paidAt: resolvedPaidAt.toISOString(), idempotencyKey: `repair:${row.id}` });
-        } else {
-          await this.settleSale(row.sale_id,row.type||'boleto',null as any,`repair:${row.id}`,resolvedPaidAt);
-        }
+        // Cada reparo roda no tenant dono do pagamento, pra os lançamentos gerados nascerem nele.
+        await runInTenant(row.tenant_id || null, async () => {
+          if (row.installment_id) {
+            await this.payInstallment(row.installment_id, Number(row.value), row.type||'boleto', null as any, { paidAt: resolvedPaidAt.toISOString(), idempotencyKey: `repair:${row.id}` });
+          } else {
+            await this.settleSale(row.sale_id,row.type||'boleto',null as any,`repair:${row.id}`,resolvedPaidAt);
+          }
+        });
         repaired++; details.push({saleId:row.sale_id,paymentId:row.id,status:'reparado'});
       } catch (error) { failed++; details.push({saleId:row.sale_id,paymentId:row.id,status:'erro',error:error instanceof Error?error.message:String(error)}); }
     }
@@ -444,16 +449,23 @@ export class FinancialService implements OnModuleInit {
   async runFinancialJobs(source = 'manual') {
     const paidIntegrity = await this.repairPaidPaymentIntegrity(source);
     const overdue = await this.getOverdue();
-    if (overdue.length > 0) {
+    // Um registro por tenant (o job roda sem tenant e enxerga todas as parcelas em atraso).
+    const overdueByTenant = new Map<string | null, typeof overdue>();
+    for (const item of overdue) {
+      const key = (item as any).tenantId || null;
+      overdueByTenant.set(key, [...(overdueByTenant.get(key) || []), item]);
+    }
+    for (const [tenantId, items] of overdueByTenant) {
       await this.auditService.safeCreate({
         userId: null,
+        tenantId: tenantId || undefined,
         action: 'financial.overdue_detected',
         entity: 'installment',
         entityId: null,
         newData: {
           source,
-          count: overdue.length,
-          total: overdue.reduce((sum, item) => sum + (Number(item.value) - Number(item.paidValue)), 0),
+          count: items.length,
+          total: items.reduce((sum, item) => sum + (Number(item.value) - Number(item.paidValue)), 0),
         },
       });
     }
@@ -959,7 +971,7 @@ export class FinancialService implements OnModuleInit {
              EXISTS(SELECT 1 FROM invoices n WHERE n.sale_id=s.id AND n.status='autorizada') AS invoice_authorized
       FROM sales s LEFT JOIN accounts_receivable a ON a.sale_id=s.id
       LEFT JOIN LATERAL (SELECT SUM(value) total, SUM(paid_value) paid FROM installments WHERE sale_id=s.id) i ON true
-      WHERE s.archived_at IS NULL AND (
+      WHERE s.archived_at IS NULL${tenantSql('s')} AND (
         (a.id IS NULL) OR ABS(COALESCE(a.total_value,0)-COALESCE(i.total,0)) > 0.01 OR ABS(COALESCE(a.paid_value,0)-COALESCE(i.paid,0)) > 0.01 OR
         (s.payment_status='pago') <> (a.status='pago') OR
         (EXISTS(SELECT 1 FROM payments p WHERE p.sale_id=s.id AND p.status='pago') AND a.status<>'pago') OR
@@ -990,7 +1002,7 @@ export class FinancialService implements OnModuleInit {
   async getProjectedCashFlow(startDate: string, endDate: string, granularity: 'day' | 'week' | 'month' = 'day') {
     if (!startDate || !endDate) throw new BadRequestException('Informe startDate e endDate');
     const trunc = granularity === 'month' ? 'month' : granularity === 'week' ? 'week' : 'day';
-    const sql = `WITH projected_in AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_receivable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido') GROUP BY 1), projected_out AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_payable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido') GROUP BY 1), realized AS (SELECT date_trunc($3, date::timestamp) bucket, SUM(CASE WHEN type='receita' AND is_forecast=false THEN value ELSE 0 END)::numeric income, SUM(CASE WHEN type IN ('despesa','estorno') AND is_forecast=false THEN value ELSE 0 END)::numeric expense FROM financial_movements WHERE date BETWEEN $1 AND $2 GROUP BY 1), buckets AS (SELECT generate_series(date_trunc($3,$1::timestamp),date_trunc($3,$2::timestamp),CASE WHEN $3='month' THEN interval '1 month' WHEN $3='week' THEN interval '1 week' ELSE interval '1 day' END) bucket) SELECT b.bucket::date date, COALESCE(i.value,0)::numeric projected_income, COALESCE(o.value,0)::numeric projected_expense, COALESCE(r.income,0)::numeric realized_income, COALESCE(r.expense,0)::numeric realized_expense FROM buckets b LEFT JOIN projected_in i ON i.bucket=b.bucket LEFT JOIN projected_out o ON o.bucket=b.bucket LEFT JOIN realized r ON r.bucket=b.bucket ORDER BY b.bucket`;
+    const sql = `WITH projected_in AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_receivable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido')${tenantSql()} GROUP BY 1), projected_out AS (SELECT date_trunc($3, due_date::timestamp) bucket, SUM(pending_value)::numeric value FROM accounts_payable WHERE due_date BETWEEN $1 AND $2 AND status IN ('pendente','parcial','vencido')${tenantSql()} GROUP BY 1), realized AS (SELECT date_trunc($3, date::timestamp) bucket, SUM(CASE WHEN type='receita' AND is_forecast=false THEN value ELSE 0 END)::numeric income, SUM(CASE WHEN type IN ('despesa','estorno') AND is_forecast=false THEN value ELSE 0 END)::numeric expense FROM financial_movements WHERE date BETWEEN $1 AND $2${tenantSql()} GROUP BY 1), buckets AS (SELECT generate_series(date_trunc($3,$1::timestamp),date_trunc($3,$2::timestamp),CASE WHEN $3='month' THEN interval '1 month' WHEN $3='week' THEN interval '1 week' ELSE interval '1 day' END) bucket) SELECT b.bucket::date date, COALESCE(i.value,0)::numeric projected_income, COALESCE(o.value,0)::numeric projected_expense, COALESCE(r.income,0)::numeric realized_income, COALESCE(r.expense,0)::numeric realized_expense FROM buckets b LEFT JOIN projected_in i ON i.bucket=b.bucket LEFT JOIN projected_out o ON o.bucket=b.bucket LEFT JOIN realized r ON r.bucket=b.bucket ORDER BY b.bucket`;
     const rows = await this.dataSource.query(sql, [startDate, endDate, trunc]);
     let accumulated = 0;
     const series = rows.map((r: any) => {
@@ -998,7 +1010,7 @@ export class FinancialService implements OnModuleInit {
       accumulated += realizedIncome-realizedExpense;
       return { date:r.date, projectedIncome, projectedExpense, realizedIncome, realizedExpense, projectedBalance:projectedIncome-projectedExpense, realizedBalance:realizedIncome-realizedExpense, accumulatedRealized:accumulated, scenarios:{ optimistic:Number((projectedIncome-projectedExpense*0.95).toFixed(2)), realistic:Number((projectedIncome*0.85-projectedExpense).toFixed(2)), pessimistic:Number((projectedIncome*0.6-projectedExpense*1.1).toFixed(2)) } };
     });
-    const overdue = await this.dataSource.query("SELECT COUNT(*)::int count, COALESCE(SUM(pending_value),0)::numeric total FROM accounts_receivable WHERE due_date < CURRENT_DATE AND status IN ('pendente','parcial','vencido')");
+    const overdue = await this.dataSource.query("SELECT COUNT(*)::int count, COALESCE(SUM(pending_value),0)::numeric total FROM accounts_receivable WHERE due_date < CURRENT_DATE AND status IN ('pendente','parcial','vencido')" + tenantSql());
     const totals = series.reduce((a: any,x: any)=>{ for(const k of ['projectedIncome','projectedExpense','realizedIncome','realizedExpense','projectedBalance','realizedBalance']) a[k]+=x[k]; return a; },{projectedIncome:0,projectedExpense:0,realizedIncome:0,realizedExpense:0,projectedBalance:0,realizedBalance:0});
     return { period:{startDate,endDate,granularity}, totals, overdue:{count:Number(overdue[0]?.count||0),total:Number(overdue[0]?.total||0)}, series };
   }
@@ -1223,7 +1235,7 @@ export class FinancialService implements OnModuleInit {
     const sales = await this.accountRepo.manager.query(`
       SELECT s.* FROM sales s 
       LEFT JOIN accounts_receivable ar ON ar.sale_id = s.id 
-      WHERE ar.id IS NULL AND s.status != 'cancelado'
+      WHERE ar.id IS NULL AND s.status != 'cancelado'${tenantSql('s')}
       ORDER BY s.created_at ASC
     `);
 

@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { stampTenantRow, tenantSql } from '../../common/tenant/tenant-scope';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 import { Contract } from './entities/contract.entity';
 import { InterService } from '../inter/inter.service';
 import { NfseService } from '../fiscal/services/nfse.service';
@@ -108,6 +110,9 @@ export class ContractBillingService implements OnModuleInit {
 
       for (const contract of contracts) {
         processed++;
+        // O job agendado não tem tenant: cada contrato é faturado no tenant dono dele (certificado,
+        // credenciais do banco e registros gerados passam a ser os dele).
+        await runInTenant(contract.tenantId || null, async () => {
         try {
           const chargeDay = contract.chargeDay || 10;
 
@@ -120,7 +125,7 @@ export class ContractBillingService implements OnModuleInit {
 
           // Check if today is the issue day for this contract
           const issueDay = contract.issueDay || 3;
-          if (currentDay !== issueDay) continue; // Not the issue day
+          if (currentDay !== issueDay) return; // Not the issue day
 
           // Check if already billed for this period — precisa checar o status real da nota/boleto,
           // não apenas se já existe uma linha em contract_billings, senão uma tentativa que falhou
@@ -130,7 +135,7 @@ export class ContractBillingService implements OnModuleInit {
 
           if (existingStatus.hasNf && existingStatus.hasBoleto) {
             this.logger.log(`Contrato ${contract.title} já faturado para ${billingPeriod}`);
-            continue;
+            return;
           }
 
           // Generate billing
@@ -140,6 +145,7 @@ export class ContractBillingService implements OnModuleInit {
           errors++;
           this.logger.error(`Erro ao faturar contrato ${contract.title}: ${error.message}`);
         }
+        });
       }
     } catch (error) {
       this.logger.error('Erro na verificação de cobrança: ' + error.message);
@@ -191,7 +197,7 @@ export class ContractBillingService implements OnModuleInit {
     try {
       // Get active certificate
       const certResult = await this.dataSource.query(
-        `SELECT id FROM certificates WHERE is_active = true LIMIT 1`
+        `SELECT id FROM certificates WHERE is_active = true${tenantSql()} LIMIT 1`
       );
 
       if (certResult.length > 0) {
@@ -205,6 +211,7 @@ export class ContractBillingService implements OnModuleInit {
           [certId, (customer.cpfCnpj || '').replace(/\D/g, ''), customer.name, monthlyValue]
         );
 
+        await stampTenantRow(this.dataSource, 'invoices', invoiceResult[0]?.id);
         if (invoiceResult[0]?.id) {
           invoiceId = invoiceResult[0].id;
 
@@ -276,11 +283,12 @@ export class ContractBillingService implements OnModuleInit {
 
       // Save payment record
       if (boletoCode) {
-        await this.dataSource.query(
+        const insertedPayment = await this.dataSource.query(
           `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date)
-           VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6)`,
+           VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6) RETURNING id`,
           [customer.id, boletoCode, boletoValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
         );
+        await stampTenantRow(this.dataSource, 'payments', insertedPayment[0]?.id);
 
         // Try to get PDF - Inter processa o boleto de forma assíncrona, então tenta
         // algumas vezes com espera entre cada uma antes de desistir.
@@ -613,7 +621,7 @@ export class ContractBillingService implements OnModuleInit {
       throw new Error(`Já existe uma NFS-e emitida para o período ${billingPeriod}. Não é possível emitir novamente.`);
     }
 
-    const certResult = await this.dataSource.query(`SELECT id FROM certificates WHERE is_active = true LIMIT 1`);
+    const certResult = await this.dataSource.query(`SELECT id FROM certificates WHERE is_active = true${tenantSql()} LIMIT 1`);
     if (certResult.length === 0) throw new Error('Nenhum certificado digital ativo. Configure em Módulo Fiscal > Certificados.');
 
     const certId = certResult[0].id;
@@ -626,6 +634,7 @@ export class ContractBillingService implements OnModuleInit {
     );
 
     const invoiceId = invoiceResult[0]?.id;
+    await stampTenantRow(this.dataSource, 'invoices', invoiceId);
     const nfseResult = await this.nfseService.emit(invoiceId, {
       recipientCnpj: (customer.cpfCnpj || '').replace(/\D/g, ''),
       recipientName: customer.name,
@@ -767,11 +776,12 @@ export class ContractBillingService implements OnModuleInit {
     if (boletoCode) {
       const existing = await this.dataSource.query(`SELECT id FROM payments WHERE codigo_solicitacao = $1`, [boletoCode]);
       if (existing.length === 0) {
-        await this.dataSource.query(
+        const insertedPayment = await this.dataSource.query(
           `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date)
-           VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6)`,
+           VALUES (NULL, $1, 'boleto', $2, 'a_receber', $3, $4, $5, $6) RETURNING id`,
           [customer.id, boletoCode, boletoValue, customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dueDateStr]
         );
+        await stampTenantRow(this.dataSource, 'payments', insertedPayment[0]?.id);
       }
     }
 

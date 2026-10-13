@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { tenantSql } from '../../common/tenant/tenant-scope';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 import { Commission } from './entities/commission.entity';
 import { AuditService } from '../audit/audit.service';
 import { UserRole } from '../../common/enums/user-role.enum';
@@ -124,12 +126,15 @@ export class CommissionsService implements OnModuleInit {
 
     for (const { template, earliestMonth } of Object.values(bySeries)) {
       const months = this.monthsBetween(earliestMonth || template.referenceMonth, targetMonth);
+      // A série pertence ao tenant do template: a checagem de existência e a comissão criada
+      // precisam rodar nesse tenant (o job agendado não tem tenant próprio no contexto).
+      await runInTenant(template.tenantId || null, async () => {
       for (const refMonth of months) {
         // Verificar se ja existe esta serie (tecnico + descricao normalizada) neste mes.
         const existing = await this.commissionsRepository.query(
           `SELECT id FROM commissions
            WHERE technician_id = $1 AND type = 'fixa' AND reference_month = $2
-             AND regexp_replace(lower(trim(description)), '\\s+', ' ', 'g') = regexp_replace(lower(trim($3)), '\\s+', ' ', 'g')
+             AND regexp_replace(lower(trim(description)), '\\s+', ' ', 'g') = regexp_replace(lower(trim($3)), '\\s+', ' ', 'g')${tenantSql()}
            LIMIT 1`,
           [template.technicianId, refMonth, template.description || ''],
         );
@@ -151,6 +156,7 @@ export class CommissionsService implements OnModuleInit {
           total += Number(template.amount);
         }
       }
+      });
     }
 
     return { created, total };

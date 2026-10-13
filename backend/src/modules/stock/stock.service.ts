@@ -29,16 +29,24 @@ export class StockService implements OnModuleInit {
 
   async runStockJobs(source = 'manual') {
     const lowStock = await this.getLowStock();
-    if (lowStock.length > 0) {
+    // Um registro de auditoria por tenant: o job roda sem tenant e vê todos os produtos, mas o
+    // alerta de cada tenant só pode listar os produtos dele.
+    const byTenant = new Map<string | null, typeof lowStock>();
+    for (const product of lowStock) {
+      const key = (product as any).tenantId || null;
+      byTenant.set(key, [...(byTenant.get(key) || []), product]);
+    }
+    for (const [tenantId, items] of byTenant) {
       await this.auditService.safeCreate({
         userId: null,
+        tenantId: tenantId || undefined,
         action: 'stock.low_stock_detected',
         entity: 'product',
         entityId: null,
         newData: {
           source,
-          count: lowStock.length,
-          products: lowStock.map((product) => ({
+          count: items.length,
+          products: items.map((product) => ({
             id: product.id,
             code: product.code,
             name: product.name,

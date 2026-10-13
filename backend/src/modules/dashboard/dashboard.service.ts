@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { tenantSql } from '../../common/tenant/tenant-scope';
 import { Sale } from '../sales/entities/sale.entity';
 import { Commission } from '../commissions/entities/commission.entity';
 import { Product } from '../products/entities/product.entity';
@@ -186,7 +187,7 @@ export class DashboardService {
       JOIN customers c ON c.id = a.customer_id
       WHERE i.status IN ('pendente', 'vencido')
         AND i.due_date < CURRENT_DATE
-        AND a.status NOT IN ('cancelado')
+        AND a.status NOT IN ('cancelado')${tenantSql('a')}
       GROUP BY c.id, c.name, c.phone
       ORDER BY "overdueAmount" DESC
     `);

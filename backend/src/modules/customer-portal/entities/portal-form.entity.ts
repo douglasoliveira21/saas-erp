@@ -3,6 +3,7 @@ import { Column, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeor
 @Entity('portal_ticket_forms')
 export class PortalTicketForm {
   @PrimaryGeneratedColumn('uuid') id: string;
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true }) tenantId: string;
   @Column({ length: 100, default: 'Formulário padrão' }) name: string;
   @Column({ default: true }) active: boolean;
   @Column({ name: 'customer_id', type: 'uuid', nullable: true }) customerId: string | null;

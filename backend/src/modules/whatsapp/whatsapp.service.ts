@@ -5,6 +5,7 @@ import { WhatsappConfig } from './entities/whatsapp-config.entity';
 import { WhatsappMessageLog } from './entities/whatsapp-message-log.entity';
 import { decryptField, encryptField, isEncryptedField, maskSecret, requireEncryptionSecret } from '../../common/security/field-encryption';
 import { env } from '../../config/env.config';
+import { currentTenantId } from '../../common/tenant/tenant-context.service';
 
 const isMasked = (value: unknown) => typeof value === 'string' && /^\*+$/.test(value);
 
@@ -16,7 +17,10 @@ export class WhatsappService {
   // Quantas checagens seguidas leram "não conectado" vindo de um estado anterior "conectado" -
   // usado por checkConnectionStatus pra não acreditar em leituras ruins/instáveis isoladas da
   // Evolution (precisa de 3 seguidas, ver comentário lá).
-  private disconnectStreak = 0;
+  // Uma contagem por tenant: cada tenant tem a própria instância/conexão do WhatsApp.
+  private streaks = new Map<string, number>();
+  private get disconnectStreak(): number { return this.streaks.get(currentTenantId() || 'global') || 0; }
+  private set disconnectStreak(value: number) { this.streaks.set(currentTenantId() || 'global', value); }
 
   constructor(
     @InjectRepository(WhatsappConfig) private configRepository: Repository<WhatsappConfig>,

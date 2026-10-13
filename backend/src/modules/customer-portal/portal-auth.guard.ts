@@ -17,7 +17,9 @@ export class PortalAuthGuard implements CanActivate {
       if (payload.aud !== 'customer-portal') throw new Error();
       const user = await this.users.findOne({ where: { id: payload.sub, status: 'active' } });
       if (!user || user.customerId !== payload.customerId) throw new Error();
-      request.portalUser = { ...payload, role: user.role, customerId: user.customerId };
+      // tenantId vem do cadastro do usuário (não do token): o TenantContextInterceptor usa isso
+      // pra escopar as consultas da requisição do portal ao tenant dono da empresa.
+      request.portalUser = { ...payload, role: user.role, customerId: user.customerId, tenantId: (user as any).tenantId || null };
       return true;
     } catch {
       throw new UnauthorizedException('Sessão do portal inválida, expirada ou bloqueada');
