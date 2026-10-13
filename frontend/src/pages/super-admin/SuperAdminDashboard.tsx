@@ -16,8 +16,9 @@ interface Dashboard {
 const statusLabels: Record<string, string> = { ativo: 'Ativos', suspenso: 'Suspensos', cancelado: 'Cancelados' }
 const statusColors: Record<string, string> = { ativo: 'bg-green-500/20 text-green-300', suspenso: 'bg-yellow-500/20 text-yellow-300', cancelado: 'bg-red-500/20 text-red-300' }
 
-function money(value: number) {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+function money(value: unknown) {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
 function monthLabel(ym: string) {

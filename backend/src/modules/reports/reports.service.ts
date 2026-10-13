@@ -239,6 +239,13 @@ export class ReportsService {
       });
     }
 
+    // Número inválido (NaN) viraria null no JSON e derrubava a tela do DRE: zera antes de responder.
+    for (const monthRow of dreMonths) {
+      for (const key of Object.keys(monthRow)) {
+        if (typeof monthRow[key] === 'number' && !Number.isFinite(monthRow[key])) monthRow[key] = 0;
+      }
+    }
+
     // Totals
     const totals = {
       receitaBruta: dreMonths.reduce((s, m) => s + m.receitaBruta, 0),

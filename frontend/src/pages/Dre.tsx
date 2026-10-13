@@ -49,8 +49,10 @@ interface DreData {
 
 const MONTHS_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-function formatCurrency(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+// Valor do servidor pode vir null/NaN (NaN vira null no JSON): trata como 0 em vez de derrubar a tela.
+function formatCurrency(value: unknown): string {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
 function formatPercent(value: number): string {
@@ -458,7 +460,8 @@ function DreRow({
   const labelWeight = isTotal ? 'font-bold text-gray-900' : isSubtotal ? 'font-semibold text-gray-800' : isDetail ? 'text-gray-500' : 'text-gray-700'
   const labelSize = isDetail ? 'text-xs' : 'text-sm'
 
-  function cellValue(val: number) {
+  function cellValue(raw: number) {
+    const val = Number.isFinite(Number(raw)) ? Number(raw) : 0
     const displayVal = negate ? -val : val
     if (isPercent) {
       return <span className={`${displayVal >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatPercent(val)}</span>
