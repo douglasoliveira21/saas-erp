@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
@@ -8,6 +8,36 @@ import { Bank } from './entities/bank.entity';
 import { Municipality } from './entities/municipality.entity';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { ChartAccount } from '../financial/entities/chart-account.entity';
+import { CostCenter } from '../financial/entities/cost-center.entity';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
+
+// Plano de contas e centros de custo que todo tenant novo recebe. Códigos hierárquicos simples;
+// o cliente edita, desativa e acrescenta depois pela tela de Configurações financeiras.
+const DEFAULT_CHART_ACCOUNTS: Array<{ code: string; name: string; type: string; parent?: string }> = [
+  { code: '1', name: 'Receitas', type: 'receita' },
+  { code: '1.01', name: 'Vendas de produtos', type: 'receita', parent: '1' },
+  { code: '1.02', name: 'Prestação de serviços', type: 'receita', parent: '1' },
+  { code: '1.03', name: 'Contratos recorrentes', type: 'receita', parent: '1' },
+  { code: '1.04', name: 'Multas e juros recebidos', type: 'receita', parent: '1' },
+  { code: '2', name: 'Despesas', type: 'despesa' },
+  { code: '2.01', name: 'Compras e fornecedores', type: 'despesa', parent: '2' },
+  { code: '2.02', name: 'Folha de pagamento e encargos', type: 'despesa', parent: '2' },
+  { code: '2.03', name: 'Aluguel e condomínio', type: 'despesa', parent: '2' },
+  { code: '2.04', name: 'Energia, água e telefonia', type: 'despesa', parent: '2' },
+  { code: '2.05', name: 'Impostos e taxas', type: 'despesa', parent: '2' },
+  { code: '2.06', name: 'Comissões', type: 'despesa', parent: '2' },
+  { code: '2.07', name: 'Tarifas bancárias e de cartão', type: 'despesa', parent: '2' },
+  { code: '2.08', name: 'Marketing e publicidade', type: 'despesa', parent: '2' },
+  { code: '2.09', name: 'Outras despesas', type: 'despesa', parent: '2' },
+];
+
+const DEFAULT_COST_CENTERS = [
+  { code: 'ADM', name: 'Administrativo' },
+  { code: 'COM', name: 'Comercial' },
+  { code: 'OPE', name: 'Operacional' },
+  { code: 'FIN', name: 'Financeiro' },
+];
 
 // Mesma lista de MultiTenantFoundation (1793000000000) + "payments" (adicionada depois, em
 // 1793400000000). "tenant_bank_configs" fica de fora de propósito: sua FK já é ON DELETE CASCADE,
@@ -46,6 +76,8 @@ function slugify(value: string): string {
 
 @Injectable()
 export class TenantsService {
+  private readonly logger = new Logger(TenantsService.name);
+
   constructor(
     @InjectRepository(Tenant) private tenantsRepository: Repository<Tenant>,
     @InjectRepository(Plan) private plansRepository: Repository<Plan>,
@@ -137,7 +169,42 @@ export class TenantsService {
       tenant.id,
     );
 
+    // Cadastros-base para o tenant já nascer utilizável. Falha aqui não pode impedir a criação.
+    await this.seedDefaults(tenant.id).catch((error) => this.logger.warn(`Padrões do tenant ${tenant.id} não foram criados: ${error.message}`));
+
     return { tenant: await this.findOne(tenant.id), adminEmail: dto.adminEmail.trim().toLowerCase(), tempPassword };
+  }
+
+  /**
+   * Cria, se ainda não existirem, o plano de contas e os centros de custo padrão do tenant.
+   * Idempotente (confere por código) - pode ser chamado de novo sem duplicar. Não cria nada que
+   * dependa de dado real do cliente (taxas de cartão, contas bancárias, configuração fiscal).
+   */
+  async seedDefaults(tenantId: string): Promise<{ chartAccounts: number; costCenters: number }> {
+    const tenant = await this.tenantsRepository.findOne({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundException('Tenant não encontrado');
+    return runInTenant(tenantId, async () => {
+      const manager = this.tenantsRepository.manager;
+      const chartRepo = manager.getRepository(ChartAccount);
+      const costRepo = manager.getRepository(CostCenter);
+      let chartAccounts = 0;
+      let costCenters = 0;
+      const idByCode = new Map<string, string>();
+      for (const account of DEFAULT_CHART_ACCOUNTS) {
+        let row = await chartRepo.findOne({ where: { code: account.code } });
+        if (!row) {
+          row = await chartRepo.save(chartRepo.create({ code: account.code, name: account.name, type: account.type, parentId: account.parent ? idByCode.get(account.parent) : undefined, active: true }));
+          chartAccounts++;
+        }
+        idByCode.set(account.code, row.id);
+      }
+      for (const center of DEFAULT_COST_CENTERS) {
+        if (await costRepo.findOne({ where: { code: center.code } })) continue;
+        await costRepo.save(costRepo.create({ code: center.code, name: center.name, active: true }));
+        costCenters++;
+      }
+      return { chartAccounts, costCenters };
+    });
   }
 
   // Resumo para o dashboard do painel do super admin: contagem de tenants por status, usuários

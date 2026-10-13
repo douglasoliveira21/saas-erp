@@ -32,6 +32,13 @@ export class TenantsController {
     return this.service.create(body);
   }
 
+  // Cria o plano de contas e os centros de custo padrão que faltarem (idempotente) - para
+  // tenants criados antes dessa rotina existir ou que apagaram os cadastros-base.
+  @Post(':id/seed-defaults')
+  seedDefaults(@Param('id') id: string) {
+    return this.service.seedDefaults(id);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any) {
     return this.service.update(id, body);
