@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import * as webpush from 'web-push';
 import { MailService } from '../mail/mail.service';
 import { GlpiService } from '../glpi/glpi.service';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class PortalNotificationsService implements OnModuleInit, OnModuleDestroy {
@@ -44,8 +45,11 @@ export class PortalNotificationsService implements OnModuleInit, OnModuleDestroy
   private async scan() {
     if (this.running) return; this.running = true;
     try {
-      const tickets = await this.db.query(`SELECT pt.glpi_ticket_id,pt.customer_id,pt.portal_user_id,pt.glpi_entity_id,pt.title FROM portal_tickets pt JOIN portal_users pu ON pu.id=pt.portal_user_id WHERE pu.status='active'`);
+      const tickets = await this.db.query(`SELECT pt.tenant_id,pt.glpi_ticket_id,pt.customer_id,pt.portal_user_id,pt.glpi_entity_id,pt.title FROM portal_tickets pt JOIN portal_users pu ON pu.id=pt.portal_user_id WHERE pu.status='active'`);
       for (const ticket of tickets) {
+        // O job não tem tenant: o chamado é consultado no GLPI do tenant dono dele e o aviso sai
+        // pela conta de e-mail desse tenant.
+        await runInTenant(ticket.tenant_id || null, async () => {
         try {
           const details = await this.glpi.getPortalTicketDetails(Number(ticket.glpi_ticket_id), Number(ticket.glpi_entity_id));
           const lastFollowup = Math.max(0,...(details.followups || []).map((x:any)=>Number(x.id)||0));
@@ -57,9 +61,10 @@ export class PortalNotificationsService implements OnModuleInit, OnModuleDestroy
           }
           await this.db.query(`INSERT INTO portal_ticket_notification_state(glpi_ticket_id,status,last_followup_id,checked_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(glpi_ticket_id) DO UPDATE SET status=$2,last_followup_id=$3,checked_at=NOW()`,[ticket.glpi_ticket_id,details.status,lastFollowup]);
         } catch (error:any) { this.logger.warn(`Falha ao verificar chamado ${ticket.glpi_ticket_id}: ${error.message}`); }
+        });
       }
-      const docs = await this.db.query(`SELECT 'invoice' type,i.id,i.created_at,c.id customer_id,COALESCE(i.number::text,'') reference FROM invoices i JOIN sales s ON s.id=i.sale_id JOIN customers c ON c.id=s.customer_id WHERE i.created_at>NOW()-INTERVAL '3 minutes' AND LOWER(i.status) NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') UNION ALL SELECT 'payment',p.id,p.created_at,p.customer_id,COALESCE(p.codigo_solicitacao,'') FROM payments p WHERE p.created_at>NOW()-INTERVAL '3 minutes' AND LOWER(p.status) NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha')`);
-      for(const doc of docs) await this.notify(doc.customer_id,['admin','finance'],null,doc.type,doc.type==='invoice'?'Nova nota fiscal disponível':'Nova cobrança disponível',doc.type==='invoice'?`A nota fiscal ${doc.reference||''} já está disponível.`:'Um novo boleto ou PIX foi emitido para sua empresa.','/?tab=documents',`${doc.type}:${doc.id}`);
+      const docs = await this.db.query(`SELECT 'invoice' type,i.tenant_id,i.id,i.created_at,c.id customer_id,COALESCE(i.number::text,'') reference FROM invoices i JOIN sales s ON s.id=i.sale_id JOIN customers c ON c.id=s.customer_id WHERE i.created_at>NOW()-INTERVAL '3 minutes' AND LOWER(i.status) NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') UNION ALL SELECT 'payment',p.tenant_id,p.id,p.created_at,p.customer_id,COALESCE(p.codigo_solicitacao,'') FROM payments p WHERE p.created_at>NOW()-INTERVAL '3 minutes' AND LOWER(p.status) NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha')`);
+      for(const doc of docs) await runInTenant(doc.tenant_id || null, () => this.notify(doc.customer_id,['admin','finance'],null,doc.type,doc.type==='invoice'?'Nova nota fiscal disponível':'Nova cobrança disponível',doc.type==='invoice'?`A nota fiscal ${doc.reference||''} já está disponível.`:'Um novo boleto ou PIX foi emitido para sua empresa.','/?tab=documents',`${doc.type}:${doc.id}`));
     } finally { this.running=false; }
   }
 }

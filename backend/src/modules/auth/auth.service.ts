@@ -13,6 +13,7 @@ import { MailService } from '../mail/mail.service';
 import { TenantsService } from '../platform/tenants.service';
 import { AuditService } from '../audit/audit.service';
 import { env } from '../../config/env.config';
+import { runInTenant } from '../../common/tenant/tenant-context.service';
 
 type ClientInfo = { ip?: string; userAgent?: string; deviceName?: string };
 
@@ -175,7 +176,8 @@ export class AuthService {
     const token = crypto.randomBytes(32).toString('hex'); const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const expiresAt = new Date(Date.now() + Number(process.env.PASSWORD_RESET_MINUTES || 60) * 60000);
     await this.resetRepository.save(this.resetRepository.create({ userId: user.id, tokenHash, expiresAt }));
-    await this.mailService.sendPasswordReset(user.email, user.name, token, process.env.FRONTEND_URL || 'http://localhost:5001');
+    // O e-mail de recuperação sai pela conta de e-mail do tenant do usuário.
+    await runInTenant((user as any).tenantId || null, () => this.mailService.sendPasswordReset(user.email, user.name, token, process.env.FRONTEND_URL || 'http://localhost:5001'));
     return { message: 'Se o email estiver cadastrado, voce recebera um link de recuperacao.' };
   }
 

@@ -7,14 +7,22 @@ import { ILike, Repository } from 'typeorm';
 import { EmailConfig } from './entities/email-config.entity';
 import { EmailDeliveryLog } from './entities/email-delivery-log.entity';
 import { AuditService } from '../audit/audit.service';
+import { currentTenantId } from '../../common/tenant/tenant-context.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter;
-  private configCache: EmailConfig | null = null;
+  // Configuração e conexão de e-mail são por tenant: cada um envia pela própria conta. Sem tenant
+  // no contexto (inicialização, jobs) usa a chave 'global', que é o comportamento de antes.
+  private readonly transporters = new Map<string, nodemailer.Transporter>();
+  private readonly configCaches = new Map<string, EmailConfig>();
+  private get tenantKey(): string { return currentTenantId() || 'global'; }
+  private get transporter(): nodemailer.Transporter { return this.transporters.get(this.tenantKey) as nodemailer.Transporter; }
+  private set transporter(value: nodemailer.Transporter) { this.transporters.set(this.tenantKey, value); }
+  private get configCache(): EmailConfig | null { return this.configCaches.get(this.tenantKey) || null; }
+  private set configCache(value: EmailConfig | null) { if (value) this.configCaches.set(this.tenantKey, value); else this.configCaches.delete(this.tenantKey); }
 
   constructor(
     @InjectRepository(EmailConfig)
@@ -127,6 +135,8 @@ export class MailService implements OnModuleInit {
       config = await this.configRepository.save(this.getEnvConfig());
     }
     this.configCache = config;
+    // Primeira leitura deste tenant: monta a conexão dele (a do construtor é a global/env).
+    if (!this.transporters.has(this.tenantKey)) this.transporter = this.createTransporter(config);
     return config;
   }
 

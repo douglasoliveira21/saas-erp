@@ -19,9 +19,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // compartilhados. Entram aqui até esses fluxos serem tornados cientes de tenant.
 const TENANT_UNSCOPED_TABLES = new Set([
   'auth_sessions', 'password_resets', 'inter_webhook_events',
-  'glpi_config', 'glpi_tickets', 'sla_monthly_snapshots',
-  'whatsapp_message_logs', 'service_order_statuses',
-  'email_delivery_logs',
+  'service_order_statuses',
 ]);
 
 const enabled = () => String(process.env.TENANT_SCOPING || 'on').toLowerCase() !== 'off';
@@ -77,9 +75,30 @@ export function tenantSql(alias?: string): string {
   return ` AND ${alias ? alias + '.' : ''}tenant_id = '${tenantId}'`;
 }
 
+// INSERT em SQL cru: acrescenta a coluna tenant_id (e o parâmetro) ao próprio INSERT quando há tenant
+// no contexto. Use em financial_movements: o banco tem um gatilho que PROÍBE qualquer UPDATE em
+// lançamento realizado, então carimbar o tenant depois (stampTenantRow) falharia nessa tabela.
+export async function insertWithTenant(manager: { query: (sql: string, params?: any[]) => Promise<any> }, sql: string, params: any[] = []): Promise<any> {
+  const tenantId = currentTenantId();
+  if (!enabled() || !tenantId || !UUID_RE.test(tenantId)) return manager.query(sql, params);
+  const valuesAt = sql.search(/\bVALUES\s*\(/i);
+  const colsEnd = valuesAt < 0 ? -1 : sql.lastIndexOf(')', valuesAt);
+  if (valuesAt < 0 || colsEnd < 0) throw new Error('insertWithTenant: INSERT sem lista de colunas/VALUES');
+  let depth = 0; let valuesEnd = -1;
+  for (let i = sql.indexOf('(', valuesAt); i < sql.length; i++) {
+    if (sql[i] === '(') depth++;
+    else if (sql[i] === ')' && --depth === 0) { valuesEnd = i; break; }
+  }
+  if (valuesEnd < 0) throw new Error('insertWithTenant: VALUES sem fechamento');
+  const placeholder = '$' + (params.length + 1);
+  const rewritten = sql.slice(0, colsEnd) + ', tenant_id' + sql.slice(colsEnd, valuesEnd) + ', ' + placeholder + sql.slice(valuesEnd);
+  return manager.query(rewritten, [...params, tenantId]);
+}
+
 // INSERT em SQL cru não passa pelo subscriber abaixo: sem tenant_id a linha cai no DEFAULT do
 // banco (tenant legado). Chame depois do INSERT (com RETURNING id) pra carimbar o tenant atual.
-const STAMPABLE_TABLES = new Set(['financial_movements', 'bills', 'invoices', 'payments']);
+// NÃO serve para financial_movements (ver insertWithTenant).
+const STAMPABLE_TABLES = new Set(['bills', 'invoices', 'payments']);
 export async function stampTenantRow(manager: { query: (sql: string, params?: any[]) => Promise<any> }, table: string, id?: string | null): Promise<void> {
   const tenantId = currentTenantId();
   if (!id || !enabled() || !tenantId || !UUID_RE.test(tenantId) || !STAMPABLE_TABLES.has(table)) return;
