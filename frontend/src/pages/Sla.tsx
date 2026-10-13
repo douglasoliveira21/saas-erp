@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { RefreshCw, AlertTriangle, Clock, DollarSign, CheckCircle, XCircle, Settings, Save, Eye, EyeOff, FileText, FileSpreadsheet } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { fixed } from '../utils/format'
 
 interface Ticket {
   id: string
@@ -212,10 +213,10 @@ export function Sla() {
         row.Situacao,
         row.Abertura,
         row.Solucao,
-        row.TempoGastoHoras.toFixed(2) + 'h',
-        row.FranquiaMensalHoras.toFixed(2) + 'h',
-        row.HorasExcedentes.toFixed(2) + 'h',
-        'R$ ' + row.ValorAvulso.toFixed(2),
+        fixed(row.TempoGastoHoras, 2) + 'h',
+        fixed(row.FranquiaMensalHoras, 2) + 'h',
+        fixed(row.HorasExcedentes, 2) + 'h',
+        'R$ ' + fixed(row.ValorAvulso, 2),
       ]),
       styles: { fontSize: 7 },
       headStyles: { fillColor: [79, 70, 229] },
@@ -339,7 +340,7 @@ export function Sla() {
           </div>
           <div className="card flex items-center gap-3 py-3">
             <div className="w-9 h-9 bg-yellow-100 rounded-lg flex items-center justify-center"><DollarSign className="w-4 h-4 text-yellow-600" /></div>
-            <div><p className="text-xs text-gray-500">Total a Cobrar</p><p className="text-lg font-bold text-yellow-600">R$ {report.totalCharge.toFixed(2)}</p></div>
+            <div><p className="text-xs text-gray-500">Total a Cobrar</p><p className="text-lg font-bold text-yellow-600">R$ {fixed(report.totalCharge, 2)}</p></div>
           </div>
           <div className="card flex items-center gap-3 py-3">
             <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center"><CheckCircle className="w-4 h-4 text-green-600" /></div>
@@ -368,7 +369,7 @@ export function Sla() {
                   <td className="py-2 text-right">{Number(c.includedHours).toFixed(2)}h</td>
                   <td className="py-2 text-right text-red-600">{Number(c.exceededHours).toFixed(2)}h</td>
                   <td className="py-2 text-right">R$ {Number(c.overageRate).toFixed(2)}</td>
-                  <td className="py-2 text-right font-bold text-yellow-600">R$ {c.charge.toFixed(2)}</td>
+                  <td className="py-2 text-right font-bold text-yellow-600">R$ {fixed(c.charge, 2)}</td>
                 </tr>
               ))}
             </tbody>

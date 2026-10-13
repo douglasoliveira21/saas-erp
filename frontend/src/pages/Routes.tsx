@@ -3,6 +3,7 @@ import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, CheckCircle, XCircle, DollarSign, MapPin, Filter, X, Check, Navigation, Trash2, ChevronDown, ChevronUp, Map, Edit, Calendar, Car } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 interface RouteLeg { id?: string; origin: string; destination: string; km: string | number }
 interface VehicleOption { id: string; plate: string; brand: string; model: string; ratePerKm: number }
@@ -182,19 +183,19 @@ export function Routes() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <div className="card flex items-center gap-3 py-3">
           <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center"><Navigation className="w-4 h-4 text-blue-600" /></div>
-          <div><p className="text-xs text-gray-500">KM no mes</p><p className="text-lg font-bold">{monthStats.totalKm.toFixed(1)} km</p></div>
+          <div><p className="text-xs text-gray-500">KM no mes</p><p className="text-lg font-bold">{fixed(monthStats.totalKm, 1)} km</p></div>
         </div>
         <div className="card flex items-center gap-3 py-3">
           <div className="w-9 h-9 bg-yellow-100 rounded-lg flex items-center justify-center"><DollarSign className="w-4 h-4 text-yellow-600" /></div>
-          <div><p className="text-xs text-gray-500">Pendente</p><p className="text-lg font-bold text-yellow-600">R$ {monthStats.pendente.toFixed(2)}</p></div>
+          <div><p className="text-xs text-gray-500">Pendente</p><p className="text-lg font-bold text-yellow-600">R$ {fixed(monthStats.pendente, 2)}</p></div>
         </div>
         <div className="card flex items-center gap-3 py-3">
           <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center"><CheckCircle className="w-4 h-4 text-blue-600" /></div>
-          <div><p className="text-xs text-gray-500">Aprovado</p><p className="text-lg font-bold text-blue-600">R$ {monthStats.aprovado.toFixed(2)}</p></div>
+          <div><p className="text-xs text-gray-500">Aprovado</p><p className="text-lg font-bold text-blue-600">R$ {fixed(monthStats.aprovado, 2)}</p></div>
         </div>
         <div className="card flex items-center gap-3 py-3">
           <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center"><DollarSign className="w-4 h-4 text-green-600" /></div>
-          <div><p className="text-xs text-gray-500">Pago</p><p className="text-lg font-bold text-green-600">R$ {monthStats.pago.toFixed(2)}</p></div>
+          <div><p className="text-xs text-gray-500">Pago</p><p className="text-lg font-bold text-green-600">R$ {fixed(monthStats.pago, 2)}</p></div>
         </div>
       </div>
 
@@ -203,7 +204,7 @@ export function Routes() {
         <div className="flex gap-3 mb-4">
           {monthStats.pendente > 0 && (
             <button onClick={payMonth} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">
-              <DollarSign className="w-4 h-4" /> Pagar todas do mes (R$ {monthStats.pendente.toFixed(2)})
+              <DollarSign className="w-4 h-4" /> Pagar todas do mes (R$ {fixed(monthStats.pendente, 2)})
             </button>
           )}
         </div>

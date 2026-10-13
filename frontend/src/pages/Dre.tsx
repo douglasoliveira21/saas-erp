@@ -5,6 +5,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, ComposedChart, Area, Line,
 } from 'recharts'
 import { TrendingUp, TrendingDown, Calendar, BarChart3 } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 interface DreMonth {
   month: number
@@ -53,7 +54,7 @@ function formatCurrency(value: number): string {
 }
 
 function formatPercent(value: number): string {
-  return `${value.toFixed(1)}%`
+  return `${fixed(value, 1)}%`
 }
 
 export function Dre() {

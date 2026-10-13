@@ -1,4 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
+import { ErrorBoundary } from './ui'
 import { useAuth } from '../contexts/AuthContext'
 import { LogOut, Menu, X, ChevronRight, Bell, CheckCheck, AlertCircle, Package, Receipt, ShieldCheck, BookOpen } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
@@ -236,7 +237,7 @@ export function Layout() {
 
         {/* Page content */}
         <main id="main-content" tabIndex={-1} className="p-4 sm:p-5 lg:p-8">
-          <div key={location.pathname} className="animate-page-in"><Outlet /></div>
+          <div key={location.pathname} className="animate-page-in"><ErrorBoundary scope="page"><Outlet /></ErrorBoundary></div>
         </main>
       </div>
     </div>

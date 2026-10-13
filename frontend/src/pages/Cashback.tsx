@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { DollarSign, Settings, Users } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 export function Cashback() {
   const [config, setConfig] = useState({ percentage: 5, minPurchase: 50, maxCashback: 100, expirationDays: 90 })
@@ -35,7 +36,7 @@ export function Cashback() {
                 <input className="input" type="number" min="1" value={config.expirationDays} onChange={e => setConfig({ ...config, expirationDays: parseInt(e.target.value) || 90 })} />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-3">Cliente recebe {config.percentage}% de volta em compras acima de R$ {config.minPurchase.toFixed(2)}, válido por {config.expirationDays} dias.</p>
+            <p className="text-xs text-gray-400 mt-3">Cliente recebe {config.percentage}% de volta em compras acima de R$ {fixed(config.minPurchase, 2)}, válido por {config.expirationDays} dias.</p>
           </div>
         </div>
 

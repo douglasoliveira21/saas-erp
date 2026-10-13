@@ -3,6 +3,7 @@ import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye, Edit, RefreshCw } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 interface Commission {
   id: string
@@ -524,7 +525,7 @@ export function Commissions() {
                 )}
               </div>
               <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-sm">
-                Valor da comissao: <strong>R$ {commissionType === 'fixa' ? form.baseValue.toFixed(2) : (form.baseValue * form.percentage / 100).toFixed(2)}</strong>
+                Valor da comissao: <strong>R$ {commissionType === 'fixa' ? fixed(form.baseValue, 2) : (form.baseValue * form.percentage / 100).toFixed(2)}</strong>
                 {commissionType === 'fixa' && <span className="text-orange-600 ml-2">(recorrente todo mes)</span>}
               </div>
               <div>

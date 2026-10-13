@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, Trash2, History } from 'lucide-react'
 import { Button, Card, TableContainer } from '../ui'
 import { api } from '../../services/api'
+import { fixed } from '../../utils/format'
 
 export interface SaleProduct { id: string; name: string; code: string; salePrice: number; taxPercentage: number; purchasePrice: number; quantity: number }
 export interface SaleService { id: string; name: string; salePrice: number; taxPercentage: number; operationalCost: number }
@@ -81,7 +82,7 @@ export function SaleItemsEditor({ itemType, selectedId, quantity, unitPrice, pro
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-sm">
           <History className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <span className="text-amber-800">
-            Último preço praticado: <strong className="text-amber-900">R$ {lastPrice.lastPrice.toFixed(2)}</strong>
+            Último preço praticado: <strong className="text-amber-900">R$ {fixed(lastPrice.lastPrice, 2)}</strong>
             {lastPrice.customerName && <span className="text-amber-600"> — {lastPrice.customerName}</span>}
             {lastPrice.lastDate && <span className="text-amber-500 text-xs ml-1">({new Date(lastPrice.lastDate).toLocaleDateString('pt-BR')})</span>}
           </span>
@@ -112,7 +113,7 @@ export function SaleItemsEditor({ itemType, selectedId, quantity, unitPrice, pro
                 <tr key={`${item.type}-${item.id}-${index}`} className="border-b border-gray-100 last:border-0">
                   <td className="px-4 py-3"><span className={`mr-2 rounded px-1.5 py-0.5 text-xs ${item.type === 'product' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>{item.type === 'product' ? 'Produto' : 'Serviço'}</span>{item.name}</td>
                   <td className="px-4 py-3 text-right">{item.quantity}</td>
-                  <td className="px-4 py-3 text-right">R$ {item.unitPrice.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">R$ {fixed(item.unitPrice, 2)}</td>
                   <td className="px-4 py-3 text-right font-medium">R$ {(item.unitPrice * item.quantity).toFixed(2)}</td>
                   <td className="px-4 py-3 text-right"><Button variant="ghost" size="icon" onClick={() => onRemove(index)} aria-label={`Remover ${item.name}`}><Trash2 className="h-4 w-4 text-red-600" aria-hidden="true" /></Button></td>
                 </tr>

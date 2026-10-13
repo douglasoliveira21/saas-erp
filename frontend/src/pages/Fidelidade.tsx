@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Star, Settings, Gift, Users } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 export function Fidelidade() {
   const [config, setConfig] = useState({ pointsPerReal: 1, redeemMinPoints: 100, redeemValue: 10 })
@@ -31,7 +32,7 @@ export function Fidelidade() {
                 <input className="input" type="number" min="1" value={config.redeemValue} onChange={e => setConfig({ ...config, redeemValue: parseInt(e.target.value) || 10 })} />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-3">A cada R$ 1,00 em compras, o cliente ganha {config.pointsPerReal} ponto(s). Com {config.redeemMinPoints} pontos, pode resgatar R$ {config.redeemValue.toFixed(2)} em desconto.</p>
+            <p className="text-xs text-gray-400 mt-3">A cada R$ 1,00 em compras, o cliente ganha {config.pointsPerReal} ponto(s). Com {config.redeemMinPoints} pontos, pode resgatar R$ {fixed(config.redeemValue, 2)} em desconto.</p>
           </div>
         </div>
 

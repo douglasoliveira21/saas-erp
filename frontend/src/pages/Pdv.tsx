@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { Trash2, Search, ShoppingCart, DollarSign } from 'lucide-react'
+import { fixed } from '../utils/format'
 
 interface Product { id: string; name: string; code: string; salePrice: number; taxPercentage: number; purchasePrice: number; quantity: number }
 interface Service { id: string; name: string; salePrice: number; taxPercentage: number; operationalCost: number }
@@ -151,7 +152,7 @@ export function Pdv() {
             <div key={i} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
-                <p className="text-xs text-gray-500">R$ {item.unitPrice.toFixed(2)} un.</p>
+                <p className="text-xs text-gray-500">R$ {fixed(item.unitPrice, 2)} un.</p>
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={() => updateQty(i, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-xs font-bold">-</button>

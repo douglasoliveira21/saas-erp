@@ -5,6 +5,7 @@ import { api } from '../services/api'
 import { DollarSign, ShoppingCart, TrendingUp, Package, ChevronDown, ChevronUp, Navigation, Award, AlertTriangle, FileText, X } from 'lucide-react'
 import { MarketTicker } from '../components/MarketTicker'
 import { TechnicianDashboard } from './TechnicianDashboard'
+import { fixed } from '../utils/format'
 
 interface DashboardData {
   totalSales: number
@@ -413,18 +414,18 @@ function ManagementDashboard() {
                       {tech.totalCommissions > 0 && (
                         <div className="text-right hidden sm:block">
                           <p className="text-xs text-gray-500">Comissões</p>
-                          <p className="font-semibold text-purple-600">R$ {tech.totalCommissions.toFixed(2)}</p>
+                          <p className="font-semibold text-purple-600">R$ {fixed(tech.totalCommissions, 2)}</p>
                         </div>
                       )}
                       {tech.totalRoutes > 0 && (
                         <div className="text-right hidden sm:block">
                           <p className="text-xs text-gray-500">Rotas</p>
-                          <p className="font-semibold text-blue-600">R$ {tech.totalRoutes.toFixed(2)}</p>
+                          <p className="font-semibold text-blue-600">R$ {fixed(tech.totalRoutes, 2)}</p>
                         </div>
                       )}
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Total</p>
-                        <p className="text-lg font-bold text-red-600">R$ {tech.total.toFixed(2)}</p>
+                        <p className="text-lg font-bold text-red-600">R$ {fixed(tech.total, 2)}</p>
                       </div>
                       {expandedTech === tech.id
                         ? <ChevronUp className="w-5 h-5 text-gray-400 flex-shrink-0" />
@@ -451,7 +452,7 @@ function ManagementDashboard() {
                               </span>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="font-bold text-purple-600">R$ {tech.totalCommissions.toFixed(2)}</span>
+                              <span className="font-bold text-purple-600">R$ {fixed(tech.totalCommissions, 2)}</span>
                               {expandedSection[tech.id] === 'commissions'
                                 ? <ChevronUp className="w-4 h-4 text-gray-400" />
                                 : <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -469,7 +470,7 @@ function ManagementDashboard() {
                                       <p className="text-xs text-gray-400 font-mono">venda #{c.saleId.slice(0, 8)}...</p>
                                     )}
                                   </div>
-                                  <span className="font-semibold text-purple-600 text-sm">R$ {c.amount.toFixed(2)}</span>
+                                  <span className="font-semibold text-purple-600 text-sm">R$ {fixed(c.amount, 2)}</span>
                                 </div>
                               ))}
                             </div>
@@ -491,7 +492,7 @@ function ManagementDashboard() {
                               </span>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="font-bold text-blue-600">R$ {tech.totalRoutes.toFixed(2)}</span>
+                              <span className="font-bold text-blue-600">R$ {fixed(tech.totalRoutes, 2)}</span>
                               {expandedSection[tech.id] === 'routes'
                                 ? <ChevronUp className="w-4 h-4 text-gray-400" />
                                 : <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -520,7 +521,7 @@ function ManagementDashboard() {
                       {/* Rodapé com total */}
                       <div className="flex justify-end items-center gap-2 px-5 py-3 bg-gray-100 dark:bg-gray-700/50">
                         <span className="text-sm text-gray-500">Total a pagar para {tech.name}:</span>
-                        <span className="text-lg font-bold text-red-600">R$ {tech.total.toFixed(2)}</span>
+                        <span className="text-lg font-bold text-red-600">R$ {fixed(tech.total, 2)}</span>
                       </div>
                     </div>
                   )}
