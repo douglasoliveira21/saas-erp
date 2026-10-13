@@ -5,7 +5,7 @@ import { BankStatement } from './entities/bank-statement.entity';
 import { InterService } from '../inter/inter.service';
 import { FinancialService } from '../financial/financial.service';
 import { createHash } from 'crypto';
-import { insertWithTenant } from '../../common/tenant/tenant-scope';
+import { insertWithTenant, tenantSql } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class ReconciliationService {
@@ -123,7 +123,7 @@ export class ReconciliationService {
     const movements = await this.dataSource.query(`
       SELECT id, type, category, description, value, date, payment_method, reference_id, is_forecast, sale_id
       FROM financial_movements
-      WHERE date BETWEEN $1 AND $2
+      WHERE date BETWEEN $1 AND $2${tenantSql()}
         AND id NOT IN (SELECT matched_movement_id FROM bank_statements WHERE matched_movement_id IS NOT NULL)
       ORDER BY date ASC
     `, [toleranceStart.toISOString().split('T')[0], toleranceEnd.toISOString().split('T')[0]]);
@@ -259,16 +259,19 @@ export class ReconciliationService {
 
     const creditos = statements.filter(s => s.type === 'credito');
     const debitos = statements.filter(s => s.type === 'debito');
-    const conciliados = statements.filter(s => s.status.startsWith('conciliado'));
+    // Linha com valor/status inválido (importação de OFX incompleta) não pode derrubar o resumo: NaN
+    // vira null no JSON e quebrava a tela. Valor inválido conta como 0.
+    const amountOf = (value: any) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+    const conciliados = statements.filter(s => String(s.status || '').startsWith('conciliado'));
     const pendentes = statements.filter(s => s.status === 'pendente');
     const divergentes = statements.filter(s => s.status === 'divergente');
 
-    const totalCreditos = creditos.reduce((s, c) => s + Number(c.amount), 0);
-    const totalDebitos = debitos.reduce((s, d) => s + Number(d.amount), 0);
-    const totalConciliadoCredito = conciliados.filter(c => c.type === 'credito').reduce((s, c) => s + Number(c.amount), 0);
-    const totalConciliadoDebito = conciliados.filter(c => c.type === 'debito').reduce((s, c) => s + Number(c.amount), 0);
-    const totalPendenteCredito = pendentes.filter(c => c.type === 'credito').reduce((s, c) => s + Number(c.amount), 0);
-    const totalPendenteDebito = pendentes.filter(c => c.type === 'debito').reduce((s, c) => s + Number(c.amount), 0);
+    const totalCreditos = creditos.reduce((s, c) => s + amountOf(c.amount), 0);
+    const totalDebitos = debitos.reduce((s, d) => s + amountOf(d.amount), 0);
+    const totalConciliadoCredito = conciliados.filter(c => c.type === 'credito').reduce((s, c) => s + amountOf(c.amount), 0);
+    const totalConciliadoDebito = conciliados.filter(c => c.type === 'debito').reduce((s, c) => s + amountOf(c.amount), 0);
+    const totalPendenteCredito = pendentes.filter(c => c.type === 'credito').reduce((s, c) => s + amountOf(c.amount), 0);
+    const totalPendenteDebito = pendentes.filter(c => c.type === 'debito').reduce((s, c) => s + amountOf(c.amount), 0);
 
     // Get system financial movements total
     const systemData = await this.dataSource.query(`
@@ -276,7 +279,7 @@ export class ReconciliationService {
         COALESCE(SUM(CASE WHEN type = 'receita' THEN value ELSE 0 END), 0) as total_receitas,
         COALESCE(SUM(CASE WHEN type = 'despesa' THEN value ELSE 0 END), 0) as total_despesas
       FROM financial_movements
-      WHERE date BETWEEN $1 AND $2 AND is_forecast = false
+      WHERE date BETWEEN $1 AND $2 AND is_forecast = false${tenantSql()}
     `, [startDate, endDate]);
 
     const saldoExtrato = totalCreditos - totalDebitos;
@@ -320,7 +323,7 @@ export class ReconciliationService {
     return this.dataSource.query(`
       SELECT fm.id, fm.type, fm.category, fm.description, fm.value, fm.date, fm.payment_method, fm.sale_id
       FROM financial_movements fm
-      WHERE fm.date BETWEEN $1 AND $2
+      WHERE fm.date BETWEEN $1 AND $2${tenantSql('fm')}
         AND fm.is_forecast = false
         AND fm.id NOT IN (SELECT matched_movement_id FROM bank_statements WHERE matched_movement_id IS NOT NULL)
       ORDER BY fm.date DESC

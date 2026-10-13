@@ -18,6 +18,12 @@ const statusLabels: Record<string, string> = { pendente: 'Pendente', conciliado_
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', conciliado_auto: 'bg-green-100 text-green-700', conciliado_manual: 'bg-blue-100 text-blue-700', divergente: 'bg-red-100 text-red-700', ignorado: 'bg-gray-100 text-gray-500' }
 const catLabels: Record<string, string> = { tarifa: 'Tarifa', rendimento: 'Rendimento', iof: 'IOF', estorno: 'Estorno', ted: 'TED', doc: 'DOC', pix: 'PIX', boleto: 'Boleto', transferencia: 'Transf.', deposito: 'Depósito', saque: 'Saque', outros: 'Outros' }
 
+// Valor vindo da API pode ser null/NaN (extrato com linha incompleta) - nunca pode derrubar a tela.
+function money(value: unknown) {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toFixed(2)
+}
+
 export function Reconciliation() {
   const [statements, setStatements] = useState<Statement[]>([])
   const [movements, setMovements] = useState<Movement[]>([])
@@ -183,7 +189,7 @@ export function Reconciliation() {
               <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center"><TrendingUp className="w-5 h-5 text-blue-600" /></div>
               <div>
                 <p className="text-[10px] text-gray-500 uppercase tracking-wide">Créditos Extrato</p>
-                <p className="text-lg font-bold text-blue-600">R$ {summary.totalCreditos.toFixed(2)}</p>
+                <p className="text-lg font-bold text-blue-600">R$ {money(summary.totalCreditos)}</p>
               </div>
             </div>
           </div>
@@ -192,7 +198,7 @@ export function Reconciliation() {
               <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center"><TrendingDown className="w-5 h-5 text-red-600" /></div>
               <div>
                 <p className="text-[10px] text-gray-500 uppercase tracking-wide">Débitos Extrato</p>
-                <p className="text-lg font-bold text-red-600">R$ {summary.totalDebitos.toFixed(2)}</p>
+                <p className="text-lg font-bold text-red-600">R$ {money(summary.totalDebitos)}</p>
               </div>
             </div>
           </div>
@@ -213,7 +219,7 @@ export function Reconciliation() {
               </div>
               <div>
                 <p className="text-[10px] text-gray-500 uppercase tracking-wide">Diferença</p>
-                <p className={'text-lg font-bold ' + (Math.abs(summary.diferenca) < 0.01 ? 'text-green-600' : 'text-orange-600')}>R$ {Math.abs(summary.diferenca).toFixed(2)}</p>
+                <p className={'text-lg font-bold ' + (Math.abs(summary.diferenca) < 0.01 ? 'text-green-600' : 'text-orange-600')}>R$ {money(Math.abs(Number(summary.diferenca) || 0))}</p>
                 {Math.abs(summary.diferenca) < 0.01 && <p className="text-[10px] text-green-500">✓ Conta conciliada</p>}
               </div>
             </div>
@@ -228,30 +234,30 @@ export function Reconciliation() {
             <div>
               <p className="text-gray-500 text-xs mb-2 font-medium uppercase">Extrato Bancário</p>
               <div className="space-y-1">
-                <div className="flex justify-between"><span className="text-gray-600">(+) Créditos:</span><span className="font-medium text-green-600">R$ {summary.totalCreditos.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-600">(-) Débitos:</span><span className="font-medium text-red-600">R$ {summary.totalDebitos.toFixed(2)}</span></div>
-                <div className="flex justify-between border-t pt-1"><span className="text-gray-700 font-medium">Saldo:</span><span className="font-bold">R$ {summary.saldoExtrato.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">(+) Créditos:</span><span className="font-medium text-green-600">R$ {money(summary.totalCreditos)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">(-) Débitos:</span><span className="font-medium text-red-600">R$ {money(summary.totalDebitos)}</span></div>
+                <div className="flex justify-between border-t pt-1"><span className="text-gray-700 font-medium">Saldo:</span><span className="font-bold">R$ {money(summary.saldoExtrato)}</span></div>
               </div>
             </div>
             <div>
               <p className="text-gray-500 text-xs mb-2 font-medium uppercase">Sistema Financeiro</p>
               <div className="space-y-1">
-                <div className="flex justify-between"><span className="text-gray-600">Saldo período:</span><span className="font-bold">R$ {summary.saldoSistema.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-600">Diferença:</span><span className={'font-bold ' + (Math.abs(summary.diferenca) < 0.01 ? 'text-green-600' : 'text-orange-600')}>R$ {summary.diferenca.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Saldo período:</span><span className="font-bold">R$ {money(summary.saldoSistema)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Diferença:</span><span className={'font-bold ' + (Math.abs(summary.diferenca) < 0.01 ? 'text-green-600' : 'text-orange-600')}>R$ {money(summary.diferenca)}</span></div>
               </div>
             </div>
             <div>
               <p className="text-gray-500 text-xs mb-2 font-medium uppercase">Conciliados</p>
               <div className="space-y-1">
-                <div className="flex justify-between"><span className="text-gray-600">Créditos:</span><span className="text-green-600">R$ {summary.totalConciliadoCredito.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-600">Débitos:</span><span className="text-red-600">R$ {summary.totalConciliadoDebito.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Créditos:</span><span className="text-green-600">R$ {money(summary.totalConciliadoCredito)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Débitos:</span><span className="text-red-600">R$ {money(summary.totalConciliadoDebito)}</span></div>
               </div>
             </div>
             <div>
               <p className="text-gray-500 text-xs mb-2 font-medium uppercase">Pendentes</p>
               <div className="space-y-1">
-                <div className="flex justify-between"><span className="text-gray-600">Créditos:</span><span className="text-yellow-600">R$ {summary.totalPendenteCredito.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-600">Débitos:</span><span className="text-yellow-600">R$ {summary.totalPendenteDebito.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Créditos:</span><span className="text-yellow-600">R$ {money(summary.totalPendenteCredito)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Débitos:</span><span className="text-yellow-600">R$ {money(summary.totalPendenteDebito)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-600">Qtd pendente:</span><span className="font-bold text-yellow-600">{summary.qtdPendentes}</span></div>
               </div>
             </div>
@@ -292,7 +298,7 @@ export function Reconciliation() {
                     </td>
                     <td className="px-4 py-3"><span className="text-xs text-gray-500">{catLabels[s.category] || s.category}</span></td>
                     <td className={'px-4 py-3 text-right font-semibold whitespace-nowrap ' + (s.type === 'credito' ? 'text-green-600' : 'text-red-600')}>
-                      {s.type === 'credito' ? '+' : '-'} R$ {Number(s.amount).toFixed(2)}
+                      {s.type === 'credito' ? '+' : '-'} R$ {money(s.amount)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {s.matchScore ? (
@@ -345,7 +351,7 @@ export function Reconciliation() {
                       <div className="text-xs text-gray-500">{new Date(m.date + 'T12:00:00').toLocaleDateString('pt-BR')} • {m.payment_method} • {m.category}</div>
                     </div>
                     <div className={'text-sm font-bold ' + (m.type === 'receita' ? 'text-green-600' : 'text-red-600')}>
-                      R$ {Number(m.value).toFixed(2)}
+                      R$ {money(m.value)}
                       {valueMatch && <span className="ml-2 text-[10px] bg-green-200 text-green-800 px-1.5 py-0.5 rounded">MATCH</span>}
                     </div>
                   </div>
