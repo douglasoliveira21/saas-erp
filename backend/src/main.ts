@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { env, validateProductionSecrets } from './config/env.config';
 import { installTenantScope } from './common/tenant/tenant-scope';
+import { createRateLimiter } from './common/security/rate-limit';
 
 async function bootstrap() {
   validateProductionSecrets();
@@ -22,6 +23,7 @@ async function bootstrap() {
   // TUDO que depende de IP (bloqueio por tentativas de login, log de auditoria, sessões) - todo
   // mundo aparecia com o mesmo IP. "1" confia só no primeiro proxy da cadeia (o nginx local).
   app.set('trust proxy', 1);
+  app.use(createRateLimiter());
 
   // Run pending schema migrations (add missing columns)
   try {
