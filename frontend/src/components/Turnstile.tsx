@@ -60,7 +60,7 @@ export function Turnstile({ onVerify }: { onVerify: (token: string) => void }) {
       cancelled = true
       if (widgetIdRef.current && window.turnstile) window.turnstile.remove(widgetIdRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [siteKey])
 
   if (!siteKey) return null

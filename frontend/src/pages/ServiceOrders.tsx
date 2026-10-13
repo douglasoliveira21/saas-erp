@@ -76,7 +76,7 @@ export function ServiceOrders() {
   useEffect(() => {
     const timer = window.setTimeout(load, 350)
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [search])
 
   const sortedStatuses = useMemo(() => [...statuses].sort((a, b) => a.sortOrder - b.sortOrder), [statuses])

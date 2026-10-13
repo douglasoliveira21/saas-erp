@@ -56,7 +56,7 @@ export function NewSale() {
         loadSaleForEdit(editId)
       }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   async function loadSaleForEdit(saleId: string) {

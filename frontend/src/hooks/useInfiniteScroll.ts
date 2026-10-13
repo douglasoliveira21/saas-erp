@@ -70,7 +70,7 @@ export function useInfiniteScroll<T>({
     if (!initialData) {
       loadPage(1)
     }
-  }, []) // eslint-disable-line
+  }, [])  
 
   const loadNext = useCallback(() => {
     if (!hasMore || isFetchingRef.current) return

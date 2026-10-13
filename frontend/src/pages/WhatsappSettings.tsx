@@ -53,7 +53,7 @@ export function WhatsappSettings() {
   useEffect(() => {
     const timer = window.setInterval(load, 60000)
     return () => window.clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   async function saveConfig() {
@@ -111,7 +111,7 @@ export function WhatsappSettings() {
     }
     const timer = window.setTimeout(() => setQrCountdown(c => (c === null ? null : c - 1)), 1000)
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [qrCountdown, config?.connectionStatus])
 
   // Assim que conectar, o QR exibido perde sentido — para o contador e limpa a imagem.
