@@ -492,7 +492,7 @@ export class InterService implements OnModuleInit {
    * já faz quando o Inter confirma um pagamento "pago" (venda, parcela, financeiro), só que sem
    * depender de dados vindos da API do Inter.
    */
-  async markAsReceivedManually(id: string, userId?: string, note?: string): Promise<{ saleId?: string }> {
+  async markAsReceivedManually(id: string, userId?: string, note?: string, receivedValueInput?: number): Promise<{ saleId?: string }> {
     const tenantId = this.currentTenantId();
     return this.saleRepo.manager.transaction(async (manager) => {
       const rows = await manager.query(
@@ -505,9 +505,11 @@ export class InterService implements OnModuleInit {
       if (payment.status === 'cancelado') throw new HttpException('Não é possível marcar um pagamento cancelado como recebido', HttpStatus.BAD_REQUEST);
 
       const paidAt = new Date();
+      const parsedReceived = Number(receivedValueInput);
+      const receivedValue = Number.isFinite(parsedReceived) && parsedReceived > 0 ? Math.round(parsedReceived * 100) / 100 : null;
       await manager.query(
-        `UPDATE payments SET status='pago', paid_at=COALESCE(paid_at, $2), settled_manually=true, settled_by=$3, payment_note=$4, updated_at=NOW() WHERE id=$1`,
-        [id, paidAt, userId || null, note || null],
+        `UPDATE payments SET status='pago', paid_at=COALESCE(paid_at, $2), settled_manually=true, settled_by=$3, payment_note=$4, received_value=$5::numeric, updated_at=NOW() WHERE id=$1`,
+        [id, paidAt, userId || null, note || null, receivedValue],
       );
 
       const saleId = payment.sale_id; const installmentId = payment.installment_id; const paymentValue = payment.value;
@@ -522,8 +524,9 @@ export class InterService implements OnModuleInit {
         } else {
           await this.financialService.settleSale(saleId, 'outro', null as any, idempotencyKey, paidAt, undefined, manager);
         }
+        await this.recordLateFeeMovement(manager, { saleId, installmentId, codigoSolicitacao: payment.codigo_solicitacao, nominal: Number(paymentValue), received: receivedValue, paidAt, paymentMethod: 'outro' });
       } else {
-        await this.recordContractPaymentMovement(manager, payment.codigo_solicitacao, Number(paymentValue), paidAt);
+        await this.recordContractPaymentMovement(manager, payment.codigo_solicitacao, receivedValue ?? Number(paymentValue), paidAt);
       }
 
       await this.auditInter('inter.payment_marked_received_manually', id, { userId, note, codigoSolicitacao: payment.codigo_solicitacao, saleId });
@@ -569,6 +572,27 @@ export class InterService implements OnModuleInit {
       `INSERT INTO financial_movements (type, category, description, value, date, payment_method, is_forecast, idempotency_key, reference_id, reference_type, paid_at)
        VALUES ('receita', 'contrato', $1, $2, $3, 'boleto', false, $4, $5, 'contract_billing', $6)`,
       [`Contrato ${billing[0].title} - competência ${billing[0].billing_period}`, value, paidAt.toISOString().split('T')[0], idempotencyKey, billing[0].id, paidAt],
+    );
+  }
+
+  /**
+   * Cliente pagou mais que o nominal (multa e juros por atraso). A parcela/conta a receber tem
+   * constraint paid_value <= value, então o valor nominal continua quitando a parcela normalmente
+   * e a diferença vira um lançamento de receita próprio ('multa_juros') - assim o caixa, o DRE e
+   * o relatório refletem o que realmente entrou. Idempotente por boleto.
+   */
+  private async recordLateFeeMovement(manager: EntityManager, p: { saleId: string; installmentId?: string | null; codigoSolicitacao: string; nominal: number; received: number | null; paidAt: Date; paymentMethod: string }): Promise<void> {
+    if (p.received === null || !Number.isFinite(p.nominal)) return;
+    const extra = Math.round((p.received - p.nominal) * 100) / 100;
+    if (extra <= 0.009) return;
+    const idempotencyKey = `latefee:${p.codigoSolicitacao}`;
+    const existing = await manager.query(`SELECT 1 FROM financial_movements WHERE idempotency_key=$1 LIMIT 1`, [idempotencyKey]);
+    if (existing.length) return;
+    const account = await manager.query(`SELECT id FROM accounts_receivable WHERE sale_id=$1 LIMIT 1`, [p.saleId]);
+    await manager.query(
+      `INSERT INTO financial_movements (type, category, description, value, date, paid_at, sale_id, account_id, installment_id, payment_method, is_forecast, idempotency_key)
+       VALUES ('receita', 'multa_juros', $1, $2, $3, $4, $5, $6, $7, $8, false, $9)`,
+      [`Multa e juros por atraso - venda #${p.saleId.substring(0, 8)}`, extra, p.paidAt.toISOString().split('T')[0], p.paidAt, p.saleId, account[0]?.id || null, p.installmentId || null, p.paymentMethod, idempotencyKey],
     );
   }
 
@@ -787,6 +811,10 @@ export class InterService implements OnModuleInit {
   private async applyPaymentStatus(codigoSolicitacao: string, interData: any): Promise<{ saleId?: string; type?: string; oldStatus?: string; newStatus: string; changed: boolean; situacao?: string }> {
     const cobranca = interData?.cobranca || interData; const boleto = interData?.boleto || {}; const pix = interData?.pix || {};
     const situacao = cobranca?.situacao || interData?.situacao || interData?.status; const localStatus = this.getLocalPaymentStatus(situacao);
+    // Valor que o cliente de fato pagou (nominal + multa + juros, quando paga depois do vencimento).
+    // O Inter devolve em valorTotalRecebido; sem isso o sistema só conhecia o valor nominal emitido.
+    const rawReceived = Number(cobranca?.valorTotalRecebido ?? interData?.valorTotalRecebido ?? boleto?.valorTotalRecebido);
+    const receivedValue = localStatus === 'pago' && Number.isFinite(rawReceived) && rawReceived > 0 ? Math.round(rawReceived * 100) / 100 : null;
     return this.saleRepo.manager.transaction(async (manager) => {
       const previous = await manager.query(`SELECT sale_id, type, status, installment_id, value FROM payments WHERE codigo_solicitacao=$1 FOR UPDATE`, [codigoSolicitacao]);
       if (!previous[0]) throw new HttpException('Cobrança local não encontrada', HttpStatus.NOT_FOUND);
@@ -797,10 +825,11 @@ export class InterService implements OnModuleInit {
              pix_copia_e_cola = COALESCE($3::text, pix_copia_e_cola),
              nosso_numero = COALESCE($4::varchar, nosso_numero),
              paid_at = CASE WHEN $1::varchar = 'pago' THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
+             received_value = CASE WHEN $1::varchar = 'pago' AND $6::numeric IS NOT NULL THEN $6::numeric ELSE received_value END,
              updated_at = NOW()
          WHERE codigo_solicitacao = $5::varchar
          RETURNING id, sale_id, type, installment_id, value`,
-        [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao],
+        [localStatus, boleto?.linhaDigitavel || interData?.linhaDigitavel || null, pix?.pixCopiaECola || interData?.pixCopiaECola || null, boleto?.nossoNumero || interData?.nossoNumero || null, codigoSolicitacao, receivedValue],
       );
       const paymentId = updated[0]?.id; const saleId = updated[0]?.sale_id; const type = updated[0]?.type; const paymentValue = updated[0]?.value;
       let installmentId = updated[0]?.installment_id;
@@ -829,8 +858,9 @@ export class InterService implements OnModuleInit {
           } else {
             await this.financialService.settleSale(saleId, type || 'boleto', null as any, `inter:${codigoSolicitacao}`, paidAt, undefined, manager);
           }
+          await this.recordLateFeeMovement(manager, { saleId, installmentId, codigoSolicitacao, nominal: Number(paymentValue), received: receivedValue, paidAt, paymentMethod: type || 'boleto' });
         } else {
-          await this.recordContractPaymentMovement(manager, codigoSolicitacao, Number(paymentValue), paidAt);
+          await this.recordContractPaymentMovement(manager, codigoSolicitacao, receivedValue ?? Number(paymentValue), paidAt);
         }
       }
       return { saleId, type, oldStatus: previous[0].status, newStatus: localStatus, changed: previous[0].status !== localStatus, situacao };

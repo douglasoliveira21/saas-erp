@@ -18,6 +18,7 @@ interface Payment {
   codigoSolicitacao: string
   status: string
   value: number
+  receivedValue?: number | string | null
   customerName: string
   customerDoc: string
   dueDate: string
@@ -342,10 +343,14 @@ export function Payments() {
   async function markAsReceived(payment: Payment) {
     const note = window.prompt('Como foi recebido esse pagamento? (ex: dinheiro, transferência, outro banco) - opcional')
     if (note === null) return
+    const receivedInput = window.prompt(`Valor efetivamente recebido (R$)? Deixe em branco se foi o valor original de R$ ${Number(payment.value).toFixed(2)}; preencha se o cliente pagou com multa e juros.`)
+    if (receivedInput === null) return
+    const receivedValue = receivedInput.trim() ? Number(receivedInput.replace(/./g, '').replace(',', '.')) : undefined
+    if (receivedValue !== undefined && (!Number.isFinite(receivedValue) || receivedValue <= 0)) { setError('Valor recebido inválido.'); return }
     if (!await confirmAction({ title: 'Marcar como recebido', message: `Confirma que o pagamento de ${payment.customerName} (R$ ${Number(payment.value).toFixed(2)}) foi recebido por fora do Inter?`, confirmLabel: 'Marcar como recebido' })) return
     try {
       await runOperation(
-        () => api.post(`/inter/payments/${payment.id}/mark-received`, { note: note.trim() || undefined }),
+        () => api.post(`/inter/payments/${payment.id}/mark-received`, { note: note.trim() || undefined, receivedValue }),
         { title: 'Marcando como recebido', processingMessage: 'Atualizando venda/parcela e financeiro.', successMessage: 'Pagamento marcado como recebido.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao marcar como recebido' },
       )
       await load()
@@ -609,7 +614,8 @@ export function Payments() {
 
   const visibleRows = filteredRows.slice(0, visibleCount)
 
-  const totalRecebido = payments.filter(p => p.status === 'pago').reduce((s, p) => s + Number(p.value), 0)
+  const paymentAmount = (p: Payment) => (p.status === 'pago' && p.receivedValue ? Number(p.receivedValue) : Number(p.value))
+  const totalRecebido = payments.filter(p => p.status === 'pago').reduce((s, p) => s + paymentAmount(p), 0)
     + billsReceber.filter(b => ['pago', 'parcial'].includes(b.status)).reduce((s, b) => s + Number(b.paidValue || (b.status === 'pago' ? b.value : 0)), 0)
   const totalAReceber = payments.filter(p => ['pendente', 'a_receber', 'vencido'].includes(p.status)).reduce((s, p) => s + Number(p.value), 0)
     + billsReceber.filter(b => ['pendente', 'vencido', 'parcial'].includes(b.status)).reduce((s, b) => s + (Number(b.value) - Number(b.paidValue || 0)), 0)
@@ -839,7 +845,7 @@ export function Payments() {
                         <p className="text-[10px] text-gray-400 mt-0.5">{row.data.type === 'pix' ? 'PIX' : 'Boleto'} · {row.data.origem === 'contrato' ? 'Contrato' : row.data.origem === 'venda' ? 'Venda' : 'Outro'}</p>
                       </td>
                       <td className="table-cell text-sm font-medium">{row.data.customerName}</td>
-                      <td className="table-cell font-semibold text-green-600">+ {formatCurrency(row.data.value)}</td>
+                      <td className="table-cell font-semibold text-green-600">+ {formatCurrency(paymentAmount(row.data))}{row.data.status === 'pago' && row.data.receivedValue && Math.abs(Number(row.data.receivedValue) - Number(row.data.value)) > 0.009 && <p className="text-[10px] font-normal text-gray-500">Original {formatCurrency(Number(row.data.value))} + multa/juros {formatCurrency(Number(row.data.receivedValue) - Number(row.data.value))}</p>}</td>
                       <td className="table-cell text-sm">{row.data.dueDate ? new Date(row.data.dueDate).toLocaleDateString('pt-BR') : '-'}</td>
                       <td className="table-cell">
                         <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (receivableStatusColors[row.data.status] || 'bg-blue-100 text-blue-700')}>{receivableStatusLabels[row.data.status] || row.data.status}</span>

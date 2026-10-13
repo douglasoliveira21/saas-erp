@@ -98,7 +98,9 @@ export class CashFlowReportPdfService {
       const bill = m.billId ? billById.get(m.billId) : null;
       const isCredit = m.type === 'receita';
       const saleDescription = m.saleId ? itemNamesBySale.get(m.saleId) : null;
-      const description = isCredit && saleDescription ? saleDescription : (m.description || '-');
+      const description = isCredit && saleDescription
+        ? (m.category === 'multa_juros' ? `Multa e juros - ${saleDescription}` : saleDescription)
+        : (m.description || '-');
       return {
         date: m.date,
         documentNumber: invoice ? String(invoice.number) : (bill?.documentNumber || '-'),
@@ -145,7 +147,7 @@ export class CashFlowReportPdfService {
     // dessa correção existir e por isso nunca ganharam o lançamento correspondente - o
     // NOT EXISTS evita contar esses pagamentos em dobro quando o lançamento já existe.
     const contractPayments = await this.movementRepo.manager.query(
-      `SELECT p.value AS value, p.paid_at AS paid_at, cb.billing_period AS billing_period,
+      `SELECT COALESCE(p.received_value, p.value) AS value, p.paid_at AS paid_at, cb.billing_period AS billing_period,
               c.title AS contract_title, inv.number AS invoice_number
        FROM payments p
        JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao

@@ -110,7 +110,7 @@ export class ReportsService {
         WHERE type = 'receita' AND date >= $1 AND date <= $2 AND is_forecast = false
       `, [startDate, endDate]);
       const receitaContratosLegado = await this.dataSource.query(`
-        SELECT COALESCE(SUM(p.value), 0) AS total
+        SELECT COALESCE(SUM(COALESCE(p.received_value, p.value)), 0) AS total
         FROM payments p
         JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
         WHERE p.status = 'pago' AND p.sale_id IS NULL AND p.paid_at >= $1 AND p.paid_at < $2
