@@ -7,7 +7,7 @@ require('reflect-metadata');
 const { DataSource } = require('typeorm');
 
 const dist = path.resolve(__dirname, '..', 'dist');
-const { installTenantScope, tenantSql, TenantStampSubscriber } = require(path.join(dist, 'common/tenant/tenant-scope'));
+const { installTenantScope, tenantSql, TenantStampSubscriber, insertWithTenant } = require(path.join(dist, 'common/tenant/tenant-scope'));
 const { TenantContextService } = require(path.join(dist, 'common/tenant/tenant-context.service'));
 const { SnakeNamingStrategy } = require(path.join(dist, 'config/snake-naming.strategy'));
 
@@ -74,4 +74,22 @@ test('o tenant do contexto sempre prevalece sobre o enviado no corpo (insert e u
     subscriber.beforeUpdate({ entity: updated, metadata });
     assert.equal(updated.tenantId, TENANT);
   });
+});
+
+test('insertWithTenant acrescenta a coluna e o parametro ao INSERT quando ha tenant', async () => {
+  const calls = [];
+  const manager = { query: async (sql, params) => { calls.push({ sql, params }); return []; } };
+  await ctx.run(TENANT, () => insertWithTenant(manager, "INSERT INTO financial_movements (type, value, paid_at) VALUES ('receita', $1, now()) RETURNING id", [10]));
+  assert.equal(calls[0].sql, "INSERT INTO financial_movements (type, value, paid_at, tenant_id) VALUES ('receita', $1, now(), $2) RETURNING id");
+  assert.deepEqual(calls[0].params, [10, TENANT]);
+});
+
+test('insertWithTenant nao altera o INSERT sem tenant ou com o escopo desligado', async () => {
+  const calls = [];
+  const manager = { query: async (sql, params) => { calls.push({ sql, params }); return []; } };
+  const sql = 'INSERT INTO bills (description) VALUES ($1)';
+  await insertWithTenant(manager, sql, ['x']);
+  process.env.TENANT_SCOPING = 'off';
+  await ctx.run(TENANT, () => insertWithTenant(manager, sql, ['x']));
+  assert.ok(calls.every((c) => c.sql === sql && c.params.length === 1));
 });

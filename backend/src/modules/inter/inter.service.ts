@@ -11,7 +11,7 @@ import { InterWebhookEvent } from './entities/inter-webhook-event.entity';
 import { getCustomerEmailRecipients } from '../../common/customer-emails';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { BankCredentialsService, InterCredentials } from './bank-credentials.service';
-import { stampTenantRow } from '../../common/tenant/tenant-scope';
+import { insertWithTenant } from '../../common/tenant/tenant-scope';
 
 interface TokenCache {
   accessToken: string;
@@ -569,12 +569,10 @@ export class InterService implements OnModuleInit {
       [codigoSolicitacao],
     );
     if (!billing[0]) return; // boleto avulso, não é de contrato - nada a lançar
-    const inserted = await manager.query(
-      `INSERT INTO financial_movements (type, category, description, value, date, payment_method, is_forecast, idempotency_key, reference_id, reference_type, paid_at)
+    const inserted = await insertWithTenant(manager, `INSERT INTO financial_movements (type, category, description, value, date, payment_method, is_forecast, idempotency_key, reference_id, reference_type, paid_at)
        VALUES ('receita', 'contrato', $1, $2, $3, 'boleto', false, $4, $5, 'contract_billing', $6) RETURNING id`,
       [`Contrato ${billing[0].title} - competência ${billing[0].billing_period}`, value, paidAt.toISOString().split('T')[0], idempotencyKey, billing[0].id, paidAt],
     );
-    await stampTenantRow(manager, 'financial_movements', inserted[0]?.id);
   }
 
   /**
@@ -591,12 +589,10 @@ export class InterService implements OnModuleInit {
     const existing = await manager.query(`SELECT 1 FROM financial_movements WHERE idempotency_key=$1 LIMIT 1`, [idempotencyKey]);
     if (existing.length) return;
     const account = await manager.query(`SELECT id FROM accounts_receivable WHERE sale_id=$1 LIMIT 1`, [p.saleId]);
-    const inserted = await manager.query(
-      `INSERT INTO financial_movements (type, category, description, value, date, paid_at, sale_id, account_id, installment_id, payment_method, is_forecast, idempotency_key)
+    const inserted = await insertWithTenant(manager, `INSERT INTO financial_movements (type, category, description, value, date, paid_at, sale_id, account_id, installment_id, payment_method, is_forecast, idempotency_key)
        VALUES ('receita', 'multa_juros', $1, $2, $3, $4, $5, $6, $7, $8, false, $9) RETURNING id`,
       [`Multa e juros por atraso - venda #${p.saleId.substring(0, 8)}`, extra, p.paidAt.toISOString().split('T')[0], p.paidAt, p.saleId, account[0]?.id || null, p.installmentId || null, p.paymentMethod, idempotencyKey],
     );
-    await stampTenantRow(manager, 'financial_movements', inserted[0]?.id);
   }
 
   private async resolveInstallmentIdForPayment(saleId: string, paymentId: string, manager: EntityManager = this.saleRepo.manager): Promise<string | null> {

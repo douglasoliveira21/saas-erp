@@ -78,6 +78,24 @@ async function bootstrap() {
     // the exact same silent-failure pattern found in idx_contract_billings_period below bit us
     // once already; if this ever fails (e.g. pre-existing duplicate bills), we want to know.
     await ds.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_purchase_installment ON bills(purchase_id, installment_number) WHERE purchase_id IS NOT NULL`).catch((e) => console.warn('idx_bills_purchase_installment warning:', e.message));
+    // contract_billings só era criada na primeira cobrança de contrato; DRE, relatório de fluxo de
+    // caixa e a confirmação de pagamento do Inter consultam essa tabela e davam erro 500 numa
+    // instalação nova que ainda não tinha faturado nenhum contrato. Garante a tabela no boot.
+    await ds.query(`
+      CREATE TABLE IF NOT EXISTS contract_billings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        contract_id UUID REFERENCES contracts(id),
+        customer_id UUID REFERENCES customers(id),
+        billing_period VARCHAR(10),
+        due_date DATE,
+        value DECIMAL(10,2),
+        invoice_id UUID,
+        boleto_code VARCHAR(100),
+        status VARCHAR(20) DEFAULT 'emitido',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch((e) => console.warn('contract_billings create warning:', e.message));
     // contract_billings unique constraint + updated_at column
     await ds.query(`ALTER TABLE contract_billings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     // Sem constraint única desde sempre, contract_billings acumulou linhas duplicadas por

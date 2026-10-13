@@ -5,7 +5,7 @@ import { BankStatement } from './entities/bank-statement.entity';
 import { InterService } from '../inter/inter.service';
 import { FinancialService } from '../financial/financial.service';
 import { createHash } from 'crypto';
-import { stampTenantRow } from '../../common/tenant/tenant-scope';
+import { insertWithTenant } from '../../common/tenant/tenant-scope';
 
 @Injectable()
 export class ReconciliationService {
@@ -234,13 +234,11 @@ export class ReconciliationService {
     const movType = stmt.type === 'credito' ? 'receita' : 'despesa';
     const category = stmt.category || 'outros';
 
-    const result = await this.dataSource.query(`
+    const result = await insertWithTenant(this.dataSource, `
       INSERT INTO financial_movements (type, category, description, value, date, payment_method, is_forecast, created_by)
       VALUES ($1, $2, $3, $4, $5, $6, false, $7)
       RETURNING id
     `, [movType, category, stmt.description || 'Importado do extrato', stmt.amount, stmt.date, 'transferencia', userId]);
-
-    await stampTenantRow(this.dataSource.manager, 'financial_movements', result[0]?.id);
     if (result[0]?.id) {
       stmt.status = 'conciliado_manual';
       stmt.matchedMovementId = result[0].id;

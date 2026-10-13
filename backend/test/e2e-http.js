@@ -1,0 +1,220 @@
+// Teste de ponta a ponta HTTP: o backend de verdade sobe contra um Postgres DESCARTAVEL e este
+// script faz login com dois tenants e confere o isolamento pela API.
+//   E2E_DB_URL=postgres://postgres@127.0.0.1:54329/e2e_http  E2E_API=http://127.0.0.1:5099 node test/e2e-http.js
+// O backend precisa estar rodando em NODE_ENV=development (cria o schema sozinho). NUNCA use banco real.
+const assert = require('node:assert/strict');
+const { Client } = require('pg');
+const bcrypt = require('bcrypt');
+
+const API = process.env.E2E_API || 'http://127.0.0.1:5099';
+const dbUrl = process.env.E2E_DB_URL;
+if (!dbUrl || !/127\.0\.0\.1|localhost/.test(dbUrl)) {
+  console.error('Defina E2E_DB_URL apontando para um Postgres LOCAL descartavel.');
+  process.exit(2);
+}
+
+let passed = 0;
+const check = async (name, fn) => {
+  try { await fn(); passed++; console.log('  ok  ', name); } catch (e) { console.error('  FALHOU', name, '\n        ', e.message); process.exitCode = 1; }
+};
+const call = async (method, path, token, body, headers = {}) => {
+  const res = await fetch(API + '/api' + path, {
+    method,
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}), ...headers },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let json = null;
+  try { json = await res.json(); } catch { /* sem corpo */ }
+  return { status: res.status, json, headers: res.headers };
+};
+
+(async () => {
+  const db = new Client({ connectionString: dbUrl });
+  await db.connect();
+  const one = async (sql, p) => (await db.query(sql, p)).rows[0];
+  // Limpa restos de execucoes anteriores (o script pode rodar varias vezes no mesmo banco).
+  const old = (await db.query("SELECT id FROM tenants WHERE slug IN ('a-e2e','b-e2e')")).rows.map((r) => r.id);
+  if (old.length) {
+    // O banco proibe UPDATE/DELETE em lancamento realizado; neste banco descartavel, desliga os gatilhos.
+    await db.query('SET session_replication_role = replica');
+    await db.query('DELETE FROM contract_billings WHERE contract_id IN (SELECT id FROM contracts WHERE tenant_id = ANY($1))', [old]);
+    for (const t of ['financial_movements', 'installment_payments', 'installments', 'accounts_receivable', 'payments', 'sale_items', 'sales', 'contracts', 'customers', 'suppliers', 'products', 'bills', 'fiscal_config', 'company_profiles', 'users', 'chart_accounts', 'cost_centers']) {
+      await db.query(`DELETE FROM ${t} WHERE tenant_id = ANY($1)`, [old]);
+    }
+    await db.query('DELETE FROM tenants WHERE id = ANY($1)', [old]);
+    await db.query('SET session_replication_role = DEFAULT');
+  }
+  await db.query("DELETE FROM plans WHERE name = 'e2e'");
+  const modules = ['products', 'sales', 'pagamentos', 'financeiro', 'dre', 'reports', 'fiscal', 'contracts', 'compras', 'stock', 'services', 'orcamentos', 'contas_pagar', 'company'];
+  const plan = await one('INSERT INTO plans (name, modules) VALUES ($1, $2::jsonb) RETURNING id', ['e2e', JSON.stringify(modules)]);
+  const mkTenant = async (name, slug) => (await one("INSERT INTO tenants (name, slug, status, plan_id) VALUES ($1,$2,'ativo',$3) RETURNING id", [name, slug, plan.id])).id;
+  const A = await mkTenant('Empresa A', 'a-e2e');
+  const B = await mkTenant('Empresa B', 'b-e2e');
+  const hash = await bcrypt.hash('Senha@12345', 10);
+  for (const [t, email] of [[A, 'admin-a@e2e.test'], [B, 'admin-b@e2e.test']]) {
+    await db.query("INSERT INTO users (tenant_id, name, email, password, role) VALUES ($1,'Admin',$2,$3,'admin')", [t, email, hash]);
+  }
+  const login = async (email) => {
+    const r = await call('POST', '/auth/login', null, { email, password: 'Senha@12345' });
+    assert.ok([200, 201].includes(r.status), 'login ' + email + ' -> ' + r.status + ' ' + JSON.stringify(r.json));
+    return r.json.access_token;
+  };
+  const tokenA = await login('admin-a@e2e.test');
+  const tokenB = await login('admin-b@e2e.test');
+
+  const prod = async (t, code) => (await one('INSERT INTO products (tenant_id, name, code, purchase_price, sale_price) VALUES ($1,$2,$3,5,10) RETURNING id', [t, 'Produto ' + code, code])).id;
+  const pA = await prod(A, 'PA');
+  const pB = await prod(B, 'PB');
+  const month = new Date().toISOString().slice(0, 7);
+  const day = month + '-10';
+  for (const [t, v] of [[A, 1000], [B, 7777]]) {
+    await db.query("INSERT INTO financial_movements (tenant_id, type, category, description, value, date, is_forecast) VALUES ($1,'receita','venda','rec',$2,$3,false)", [t, v, day]);
+  }
+  await db.query("INSERT INTO financial_movements (tenant_id, type, category, description, value, date, is_forecast) VALUES ($1,'despesa','outros','desp',300,$2,false)", [A, day]);
+
+  console.log('Produtos');
+  await check('A lista so os proprios produtos', async () => {
+    const r = await call('GET', '/products', tokenA);
+    assert.equal(r.status, 200);
+    const codes = (r.json.data || r.json).map((p) => p.code);
+    assert.deepEqual(codes, ['PA']);
+  });
+  await check('A nao abre produto do B por id (404)', async () => {
+    assert.equal((await call('GET', '/products/' + pB, tokenA)).status, 404);
+  });
+  await check('A nao consegue alterar produto do B e o nome nao muda', async () => {
+    const r = await call('PATCH', '/products/' + pB, tokenA, { name: 'invadido' });
+    assert.ok([403, 404].includes(r.status), 'status ' + r.status);
+    assert.equal((await one('SELECT name FROM products WHERE id=$1', [pB])).name, 'Produto PB');
+  });
+  await check('A nao consegue apagar produto do B', async () => {
+    await call('DELETE', '/products/' + pB, tokenA);
+    assert.ok(await one('SELECT id FROM products WHERE id=$1 AND archived_at IS NULL', [pB]));
+  });
+  await check('A altera o proprio produto', async () => {
+    const r = await call('PATCH', '/products/' + pA, tokenA, { name: 'meu' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+  });
+
+  console.log('Pagamento de conta (fluxo que grava lancamento realizado)');
+  const supplier = (await one("INSERT INTO suppliers (tenant_id, name, cpf_cnpj) VALUES ($1,'Forn A','123') RETURNING id", [A])).id;
+  const bill = (await one("INSERT INTO bills (tenant_id, supplier_id, description, value, due_date, status) VALUES ($1,$2,'Conta A',250,$3,'pendente') RETURNING id", [A, supplier, day])).id;
+  await check('B nao consegue pagar conta do A', async () => {
+    const r = await call('PATCH', '/bills/' + bill + '/pay', tokenB, { paymentMethod: 'pix' });
+    assert.ok([403, 404].includes(r.status), 'status ' + r.status);
+    assert.equal((await one('SELECT status FROM bills WHERE id=$1', [bill])).status, 'pendente');
+  });
+  await check('A paga a propria conta e o lancamento realizado nasce no tenant A', async () => {
+    const r = await call('PATCH', '/bills/' + bill + '/pay', tokenA, { paymentMethod: 'pix' });
+    assert.ok([200, 201].includes(r.status), r.status + ' ' + JSON.stringify(r.json));
+    const mov = await one("SELECT tenant_id, type, is_forecast FROM financial_movements WHERE bill_id=$1", [bill]);
+    assert.equal(mov.tenant_id, A); assert.equal(mov.type, 'despesa'); assert.equal(mov.is_forecast, false);
+  });
+
+  console.log('Baixa com multa e juros (venda e contrato)');
+  const cust = (await one("INSERT INTO customers (tenant_id, name) VALUES ($1,'Cliente A') RETURNING id", [A])).id;
+  const tech = (await one("SELECT id FROM users WHERE tenant_id=$1 LIMIT 1", [A])).id;
+  const sale = (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments) VALUES ($1,$2,$3,'boleto',600,600,1) RETURNING id", [A, tech, cust])).id;
+  await db.query("INSERT INTO sale_items (tenant_id, sale_id, name, quantity, unit_price, total_price) VALUES ($1,$2,'Servico de rede',1,600,600)", [A, sale]);
+  const salePay = (await one("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto','COD-VENDA-1','a_receber',600,'Cliente A',$4) RETURNING id", [A, sale, cust, day])).id;
+  await check('venda: baixa manual com R$ 630 quita a parcela em 600 e registra 30 de multa/juros no tenant A', async () => {
+    const r = await call('POST', '/inter/payments/' + salePay + '/mark-received', tokenA, { note: 'teste', receivedValue: 630 });
+    assert.ok([200, 201].includes(r.status), r.status + ' ' + JSON.stringify(r.json));
+    const pay = await one('SELECT status, received_value FROM payments WHERE id=$1', [salePay]);
+    assert.equal(pay.status, 'pago'); assert.equal(Number(pay.received_value), 630);
+    const rows = (await db.query("SELECT category, value, tenant_id, is_forecast FROM financial_movements WHERE sale_id=$1 AND is_forecast=false ORDER BY value DESC", [sale])).rows;
+    assert.deepEqual(rows.map((x) => [x.category, Number(x.value)]), [['venda', 600], ['multa_juros', 30]]);
+    assert.ok(rows.every((x) => x.tenant_id === A), 'todos os lancamentos devem estar no tenant A');
+    const acc = await one('SELECT paid_value, total_value, status FROM accounts_receivable WHERE sale_id=$1', [sale]);
+    assert.equal(Number(acc.paid_value), 600); assert.equal(acc.status, 'pago');
+  });
+  await check('venda: repetir a baixa nao duplica a multa', async () => {
+    await call('POST', '/inter/payments/' + salePay + '/mark-received', tokenA, { receivedValue: 630 });
+    assert.equal(Number((await one("SELECT COUNT(*) c FROM financial_movements WHERE sale_id=$1 AND category='multa_juros'", [sale])).c), 1);
+  });
+  const contract = (await one("INSERT INTO contracts (tenant_id, customer_id, title, total_value, start_date) VALUES ($1,$2,'Manutencao Mensal',600,$3) RETURNING id", [A, cust, day])).id;
+  await db.query("INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code) VALUES ($1,$2,$3,$4,600,'COD-CONTRATO-1')", [contract, cust, month, day]);
+  const contractPay = (await one("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,NULL,$2,'boleto','COD-CONTRATO-1','a_receber',600,'Cliente A',$3) RETURNING id", [A, cust, day])).id;
+  await check('contrato: baixa com R$ 630 vira UM credito de 630 (categoria contrato) no tenant A', async () => {
+    const r = await call('POST', '/inter/payments/' + contractPay + '/mark-received', tokenA, { receivedValue: 630 });
+    assert.ok([200, 201].includes(r.status), r.status + ' ' + JSON.stringify(r.json));
+    const rows = (await db.query("SELECT category, value, tenant_id, type FROM financial_movements WHERE idempotency_key='contract:COD-CONTRATO-1'")).rows;
+    assert.equal(rows.length, 1); assert.equal(rows[0].category, 'contrato'); assert.equal(Number(rows[0].value), 630);
+    assert.equal(rows[0].tenant_id, A); assert.equal(rows[0].type, 'receita');
+  });
+  await check('B nao consegue dar baixa em pagamento do A', async () => {
+    const other = (await one("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,NULL,$2,'boleto','COD-X','a_receber',50,'Cliente A',$3) RETURNING id", [A, cust, day])).id;
+    const r = await call('POST', '/inter/payments/' + other + '/mark-received', tokenB, { receivedValue: 50 });
+    assert.ok([403, 404].includes(r.status), 'status ' + r.status);
+    assert.equal((await one('SELECT status FROM payments WHERE id=$1', [other])).status, 'a_receber');
+  });
+
+  console.log('Financeiro e DRE');
+  await check('movimentos financeiros: cada tenant ve so os seus', async () => {
+    const a = await call('GET', '/financial/movements', tokenA);
+    const b = await call('GET', '/financial/movements', tokenB);
+    assert.equal(a.status, 200);
+    assert.ok(a.json.length >= 3);
+    assert.ok(a.json.every((m) => m.tenantId === A));
+    assert.equal(b.json.length, 1);
+    assert.equal(Number(b.json[0].value), 7777);
+  });
+  await check('DRE do A soma venda recebida, multa e contrato (receita 2260) e nada do B', async () => {
+    const y = new Date().getFullYear();
+    const m = new Date().getMonth() + 1;
+    const r = await call('GET', `/reports/dre?year=${y}&month=${m}`, tokenA);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(Number(r.json.totals.receitaBruta), 2260);
+    assert.equal(Number(r.json.months[0].despesasFixas), 300);
+    assert.equal(Number(r.json.months[0].contasPagas), 250);
+  });
+  await check('DRE do B usa so os numeros do B (receita 7777)', async () => {
+    const y = new Date().getFullYear();
+    const m = new Date().getMonth() + 1;
+    const r = await call('GET', `/reports/dre?year=${y}&month=${m}`, tokenB);
+    assert.equal(Number(r.json.totals.receitaBruta), 7777);
+  });
+
+  console.log('Relatorio PDF');
+  await check('fluxo de caixa em PDF: gera para o tenant A e exige perfil/login', async () => {
+    const start = month + '-01'; const end = month + '-28';
+    const res = await fetch(API + '/api/financial/cash-flow-report/pdf?startDate=' + start + '&endDate=' + end, { headers: { authorization: 'Bearer ' + tokenA } });
+    assert.equal(res.status, 200); assert.ok((res.headers.get('content-type') || '').includes('application/pdf'));
+    const buf = Buffer.from(await res.arrayBuffer()); assert.equal(buf.subarray(0, 4).toString(), '%PDF'); assert.ok(buf.length > 1500);
+    assert.equal((await fetch(API + '/api/financial/cash-flow-report/pdf?startDate=' + start + '&endDate=' + end)).status, 401);
+  });
+
+  console.log('Configuracao por tenant');
+  await check('empresa: A salva e B nao ve', async () => {
+    assert.ok([200, 201].includes((await call('PATCH', '/company-profile', tokenA, { razaoSocial: 'A LTDA', cnpj: '11' })).status));
+    assert.equal((await call('GET', '/company-profile', tokenA)).json.razaoSocial, 'A LTDA');
+    assert.equal((await call('GET', '/company-profile', tokenB)).json.razaoSocial, undefined);
+  });
+  await check('fiscal: tenantId no corpo e ignorado e B nao ve a config do A', async () => {
+    const r = await call('PATCH', '/fiscal/config', tokenA, { cnpj: '99999999000199', companyName: 'A FISCAL', tenantId: B });
+    assert.ok([200, 201].includes(r.status), r.status + JSON.stringify(r.json));
+    assert.equal((await one("SELECT tenant_id FROM fiscal_config WHERE cnpj='99999999000199'")).tenant_id, A);
+    assert.equal((await call('GET', '/fiscal/config', tokenB)).json.companyName, '');
+  });
+
+  console.log('Seguranca da API');
+  await check('CORS: origem desconhecida nao recebe Access-Control-Allow-Origin', async () => {
+    const r = await call('GET', '/health', null, null, { origin: 'http://evil.example' });
+    assert.equal(r.headers.get('access-control-allow-origin'), null);
+  });
+  await check('CORS: origem configurada e aceita', async () => {
+    const r = await call('GET', '/health', null, null, { origin: 'http://localhost:5173' });
+    assert.equal(r.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+  });
+  await check('cabecalhos de seguranca presentes', async () => {
+    const r = await call('GET', '/health');
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  });
+  await check('sem token a API recusa (401)', async () => {
+    assert.equal((await call('GET', '/products')).status, 401);
+  });
+
+  console.log(`\n${passed} verificacoes passaram${process.exitCode ? ', COM FALHAS' : ''}.`);
+  await db.end();
+})().catch((e) => { console.error('ERRO NO TESTE', e); process.exit(1); });
