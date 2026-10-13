@@ -134,9 +134,24 @@ async function bootstrap() {
 
   // Enable CORS
   const allowedOrigins = String(env.server.corsOrigin || '').split(',').map(item => item.trim()).filter(Boolean);
+  // Origem '*' reflete qualquer site; combinada com credentials:true permitiria que outro site
+  // faça requisições autenticadas com o cookie do usuário. Com '*' desligamos credentials (o
+  // app em si fala com a API pelo mesmo domínio via nginx, então CORS nem entra em jogo).
+  const wildcardOrigin = allowedOrigins.includes('*');
+  if (wildcardOrigin && String(process.env.NODE_ENV || '').toLowerCase() === 'production') {
+    console.warn('CORS_ORIGIN="*" em produção: credentials desligado. Defina CORS_ORIGIN com o domínio do ERP.');
+  }
   app.enableCors({
-    origin: allowedOrigins.includes('*') ? true : allowedOrigins,
-    credentials: true,
+    origin: wildcardOrigin ? true : allowedOrigins,
+    credentials: !wildcardOrigin,
+  });
+
+  // Cabeçalhos de segurança básicos nas respostas da API (a API só devolve JSON/arquivos).
+  app.use((_req: any, res: any, next: () => void) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
   });
 
   // Global validation pipe

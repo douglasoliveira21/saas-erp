@@ -1,4 +1,4 @@
-import { DeleteQueryBuilder, EntitySubscriberInterface, EventSubscriber, InsertEvent, SelectQueryBuilder, UpdateQueryBuilder } from 'typeorm';
+import { DeleteQueryBuilder, EntitySubscriberInterface, EventSubscriber, InsertEvent, SelectQueryBuilder, UpdateEvent, UpdateQueryBuilder } from 'typeorm';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import { currentTenantId } from './tenant-context.service';
 
@@ -88,10 +88,21 @@ export async function stampTenantRow(manager: { query: (sql: string, params?: an
 
 @EventSubscriber()
 export class TenantStampSubscriber implements EntitySubscriberInterface {
+  // Dentro de uma requisição de tenant o tenantId é SEMPRE o do contexto - nunca o que veio no
+  // corpo da requisição. Vários endpoints fazem repo.create(body)/Object.assign(entidade, body)
+  // com body livre; sem isso um usuário poderia enviar { tenantId: <outro tenant> } e gravar ou
+  // mover dados para outro tenant.
   beforeInsert(event: InsertEvent<any>): void {
     const entity = event.entity;
     if (!entity || typeof entity !== 'object') return;
     const tenantId = scopedTenantId(event.metadata);
-    if (tenantId && !entity.tenantId) entity.tenantId = tenantId;
+    if (tenantId) entity.tenantId = tenantId;
+  }
+
+  beforeUpdate(event: UpdateEvent<any>): void {
+    const entity = event.entity as any;
+    if (!entity || typeof entity !== 'object') return;
+    const tenantId = scopedTenantId(event.metadata);
+    if (tenantId && entity.tenantId !== undefined) entity.tenantId = tenantId;
   }
 }

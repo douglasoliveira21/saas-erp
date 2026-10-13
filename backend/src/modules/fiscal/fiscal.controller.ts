@@ -155,7 +155,10 @@ export class FiscalController {
 
   @Patch('config')
   @Roles(UserRole.ADMIN)
-  async updateConfig(@Body() body: any, @Request() req: any) {
+  async updateConfig(@Body() rawBody: any, @Request() req: any) {
+    // Campos de controle nunca vêm do cliente (id/tenantId/datas) - evita sobrescrever a chave da
+    // linha ou mover a configuração para outro tenant via corpo da requisição.
+    const { id: _id, tenantId: _tenantId, createdAt: _createdAt, updatedAt: _updatedAt, ...body } = rawBody || {};
     const config = await this.configRepo.findOne({ where: {} });
     if (!config) {
       const saved = await this.configRepo.save(this.configRepo.create(body));
