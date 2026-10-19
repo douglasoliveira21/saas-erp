@@ -892,14 +892,14 @@ export function Payments() {
                           // Ordem pensada pro fluxo de uso: confirmar que pagou, baixar os documentos
                           // (boleto/NF/XML), e só então as ações que alteram o boleto. Consultar status,
                           // reverter e excluir ficam no fim por serem ações de exceção/correção.
-                          { label: 'Confirmar pagamento (recebido por fora)', icon: <CheckCircle className="w-4 h-4 text-emerald-600" />, onClick: () => markAsReceived(row.data), hidden: ['pago', 'cancelado'].includes(row.data.status) },
+                          { label: 'Confirmar pagamento', icon: <CheckCircle className="w-4 h-4 text-emerald-600" />, onClick: () => markAsReceived(row.data), hidden: ['pago', 'cancelado'].includes(row.data.status) },
                           { label: 'Baixar boleto', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(row.data.codigoSolicitacao), hidden: row.data.type !== 'boleto' },
                           { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
                           { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
                           { label: 'Mudar data e valor', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
                           { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelPayment(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
-                          { label: 'Consultar status no Inter', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
-                          { label: 'Corrigir valor recebido (multa e juros)', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
+                          { label: 'Consultar status', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
+                          { label: 'Corrigir valor recebido', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
                           { label: 'Reverter para A Receber', icon: <Undo2 className="w-4 h-4 text-amber-600" />, onClick: () => revertToReceivable(row.data), hidden: !(row.data.status === 'pago' && row.data.origem === 'venda') },
                           { label: 'Excluir da lista', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: () => deletePayment(row.data), hidden: row.data.status !== 'cancelado' },
                         ]} />

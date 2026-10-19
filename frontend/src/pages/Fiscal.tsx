@@ -940,7 +940,7 @@ export function Fiscal() {
                     <td className="table-cell">
                       <ActionMenu items={[
                         { label: 'Visualizar nota', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => openViewInvoice(inv.id) },
-                        { label: 'Visualizar PDF oficial', icon: <FileText className="w-4 h-4 text-purple-600" />, onClick: () => viewPdf(inv.id), hidden: !(inv.status === 'autorizada' && inv.accessKey) },
+                        { label: 'Ver PDF oficial', icon: <FileText className="w-4 h-4 text-purple-600" />, onClick: () => viewPdf(inv.id), hidden: !(inv.status === 'autorizada' && inv.accessKey) },
                         { label: 'Baixar PDF oficial', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(inv.id), hidden: !(inv.status === 'autorizada' && inv.accessKey) },
                         { label: 'Baixar XML', icon: <code className="w-4 text-center text-xs font-bold text-green-600">&lt;/&gt;</code>, onClick: () => downloadXml(inv.id), hidden: !['autorizada', 'rejeitada', 'cancelada'].includes(inv.status) },
                         { label: 'Cancelar nota', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelInvoice(inv.id), hidden: inv.status !== 'autorizada' },

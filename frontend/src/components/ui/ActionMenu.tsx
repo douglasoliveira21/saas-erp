@@ -91,13 +91,14 @@ export function ActionMenu({ items, label = 'Ações' }: { items: ActionMenuItem
           {visible.map((item, index) => {
             const content = <>{item.icon}<span className="truncate">{item.label}</span></>
             if (item.to && !item.disabled) {
-              return <Link key={index} role="menuitem" to={item.to} onClick={() => setOpen(false)} className={itemClass(item)}>{content}</Link>
+              return <Link key={index} role="menuitem" title={item.label} to={item.to} onClick={() => setOpen(false)} className={itemClass(item)}>{content}</Link>
             }
             return (
               <button
                 key={index}
                 type="button"
                 role="menuitem"
+                title={item.label}
                 disabled={item.disabled}
                 onClick={() => { setOpen(false); item.onClick?.() }}
                 className={itemClass(item)}
