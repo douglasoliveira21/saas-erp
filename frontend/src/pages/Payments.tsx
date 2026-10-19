@@ -144,6 +144,11 @@ export function Payments() {
   const [reissueDueDate, setReissueDueDate] = useState('')
   const [reissueValue, setReissueValue] = useState('')
   const [reissuing, setReissuing] = useState(false)
+  // Correção do valor recebido de um pagamento já baixado (multa e juros)
+  const [adjustingPayment, setAdjustingPayment] = useState<Payment | null>(null)
+  const [adjustValue, setAdjustValue] = useState('')
+  const [adjustNote, setAdjustNote] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
   const [reviewSaleId, setReviewSaleId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(LEDGER_PAGE_SIZE)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
@@ -401,6 +406,33 @@ export function Payments() {
       setError(error.response?.data?.message || 'Erro ao reemitir boleto')
     } finally {
       setReissuing(false)
+    }
+  }
+
+  function openAdjustModal(payment: Payment) {
+    setAdjustingPayment(payment)
+    setAdjustValue(Number(payment.receivedValue || payment.value).toFixed(2))
+    setAdjustNote('')
+  }
+
+  async function confirmAdjust() {
+    if (!adjustingPayment) return
+    const value = Number(String(adjustValue).replace(',', '.'))
+    if (!Number.isFinite(value) || value <= 0) { setError('Informe um valor recebido válido'); return }
+    setAdjusting(true)
+    setError('')
+    try {
+      // Só corrige o valor registrado NO SISTEMA - nada é enviado ao Banco Inter.
+      await runOperation(
+        () => api.patch(`/inter/payments/${adjustingPayment.id}/received-value`, { receivedValue: value, note: adjustNote.trim() || undefined }),
+        { title: 'Corrigindo valor recebido', processingMessage: 'Atualizando o financeiro.', successMessage: 'Valor recebido corrigido. O financeiro já reflete a multa e os juros.', errorMessage: (error: any) => error.response?.data?.message || 'Erro ao corrigir o valor recebido' },
+      )
+      setAdjustingPayment(null)
+      await load()
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Erro ao corrigir o valor recebido')
+    } finally {
+      setAdjusting(false)
     }
   }
 
@@ -877,6 +909,9 @@ export function Payments() {
                             <button onClick={() => cancelPayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>
                           )}
                           <button onClick={() => checkStatus(row.data.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
+                          {row.data.status === 'pago' && (
+                            <button onClick={() => openAdjustModal(row.data)} className="p-1 text-sky-600 hover:bg-sky-50 rounded" title="Corrigir valor recebido (multa e juros)"><Edit2 className="w-4 h-4" /></button>
+                          )}
                           {row.data.status === 'pago' && row.data.origem === 'venda' && (
                             <button onClick={() => revertToReceivable(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter para A Receber (marcado como pago por engano)"><Undo2 className="w-4 h-4" /></button>
                           )}
@@ -1132,6 +1167,46 @@ export function Payments() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ==================== MODAL: CORRIGIR VALOR RECEBIDO ==================== */}
+      {adjustingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Corrigir valor recebido</h2>
+                <p className="text-sm text-gray-500 mt-0.5">{adjustingPayment.customerName}</p>
+              </div>
+              <button onClick={() => setAdjustingPayment(null)} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg bg-gray-50 p-3"><p className="text-xs text-gray-500">Valor original</p><p className="font-semibold text-gray-900">{formatCurrency(Number(adjustingPayment.value))}</p></div>
+                <div className="rounded-lg bg-gray-50 p-3"><p className="text-xs text-gray-500">Recebido (registrado)</p><p className="font-semibold text-gray-900">{formatCurrency(Number(adjustingPayment.receivedValue || adjustingPayment.value))}</p></div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor realmente recebido (R$)</label>
+                <input type="number" step="0.01" min="0" className="input" value={adjustValue} onChange={e => setAdjustValue(e.target.value)} />
+                {Number(adjustValue) > Number(adjustingPayment.value) + 0.009 && (
+                  <p className="mt-1 text-xs text-gray-500">Multa e juros: {formatCurrency(Number(adjustValue) - Number(adjustingPayment.value))}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Observação (opcional)</label>
+                <input className="input" value={adjustNote} onChange={e => setAdjustNote(e.target.value)} placeholder="Ex.: pago com 5 dias de atraso" />
+              </div>
+              <p className="text-xs text-gray-500">Corrige apenas o valor registrado no sistema, para o financeiro (caixa, DRE e relatórios) bater com o que entrou. Nada é alterado no Banco Inter. O valor não pode ser menor que o original.</p>
+            </div>
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+              <button onClick={() => setAdjustingPayment(null)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={confirmAdjust} disabled={adjusting} className="btn btn-primary flex items-center gap-2">
+                {adjusting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />}
+                {adjusting ? 'Salvando...' : 'Salvar valor'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

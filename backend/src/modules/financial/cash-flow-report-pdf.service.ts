@@ -64,7 +64,9 @@ export class CashFlowReportPdfService {
     const movements = (await this.movementRepo.find({
       where: { date: Between(startDate, endDate), isForecast: false },
       order: { date: 'ASC' },
-    })).filter((m) => m.type !== 'estorno');
+    // Exceção: redução de multa/juros (correção do valor recebido) fica no relatório como débito, senão
+    // o crédito original de multa continuaria aparecendo cheio.
+    })).filter((m) => m.type !== 'estorno' || m.referenceType === 'multa_juros_adjustment');
 
     const saleIds = [...new Set(movements.map((m) => m.saleId).filter(Boolean))];
     const installmentIds = [...new Set(movements.map((m) => m.installmentId).filter(Boolean))];

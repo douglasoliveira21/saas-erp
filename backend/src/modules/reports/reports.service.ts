@@ -133,7 +133,7 @@ export class ReportsService {
             AND COALESCE(o.type, 'despesa') = 'despesa'
             AND e.category NOT IN ('impostos', 'imposto', 'depreciacao', 'amortizacao', 'compra_mercadoria')), 0) AS despesas
         FROM financial_movements e
-        LEFT JOIN financial_movements o ON o.id = e.reference_id AND e.reference_type IN ('financial_movement_reversal', 'bill_payment_reversal')
+        LEFT JOIN financial_movements o ON o.id = e.reference_id AND e.reference_type IN ('financial_movement_reversal', 'bill_payment_reversal', 'multa_juros_adjustment')
         WHERE e.type = 'estorno' AND e.date >= $1 AND e.date <= $2 AND e.is_forecast = false${tenantSql('e')}
       `, [startDate, endDate]);
 

@@ -1,5 +1,6 @@
 import {
   Controller,
+  Patch,
   Post,
   Get,
   Delete,
@@ -144,6 +145,18 @@ export class InterController {
   @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async markPaymentAsReceived(@Param('id') id: string, @Body('note') note: string, @Body('receivedValue') receivedValue: number, @Req() req: Request) {
     return this.interService.markAsReceivedManually(id, (req as any).user?.id, note, receivedValue);
+  }
+
+  /**
+   * PATCH /api/inter/payments/:id/received-value
+   * Corrige o valor recebido de um pagamento JÁ baixado (ex.: pago com multa e juros mas gravado só
+   * com o valor original). Só pagamentos com status "pago"; o valor não pode ser menor que o original.
+   */
+  @Patch('payments/:id/received-value')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
+  async updateReceivedValue(@Param('id') id: string, @Body('receivedValue') receivedValue: number, @Body('note') note: string, @Req() req: Request) {
+    return this.interService.updateReceivedValue(id, receivedValue, (req as any).user?.id, note);
   }
 
   /**

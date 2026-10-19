@@ -202,6 +202,75 @@ const call = async (method, path, token, body, headers = {}) => {
     assert.equal(Number(r.json.totals.receitaBruta), 7777);
   });
 
+  console.log('Corrigir valor recebido de pagamento ja baixado');
+  const sale2 = (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments) VALUES ($1,$2,$3,'boleto',600,600,1) RETURNING id", [A, tech, cust])).id;
+  const pay2 = (await one("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto','COD-VENDA-2','a_receber',600,'Cliente A',$4) RETURNING id", [A, sale2, cust, day])).id;
+  const adjust = (id, token, receivedValue) => call('PATCH', '/inter/payments/' + id + '/received-value', token, { receivedValue });
+  const sumMov = async (code) => Number((await one("SELECT COALESCE(SUM(CASE WHEN type='receita' THEN value ELSE -value END),0) t FROM financial_movements WHERE category='multa_juros' AND idempotency_key LIKE $1 OR (category='multa_juros' AND type='estorno' AND reference_id IN (SELECT id FROM financial_movements WHERE idempotency_key LIKE $1))", ['latefee:' + code + '%'])).t);
+  await check('pagamento ainda nao baixado nao pode ter o valor recebido corrigido (400)', async () => {
+    assert.equal((await adjust(pay2, tokenA, 640)).status, 400);
+  });
+  await call('POST', '/inter/payments/' + pay2 + '/mark-received', tokenA, { note: 'baixa antiga no valor original' });
+  await check('baixa antiga no valor original: corrigir para 640 cria 40 de multa/juros no tenant A', async () => {
+    const r = await adjust(pay2, tokenA, 640);
+    assert.ok([200, 201].includes(r.status), r.status + JSON.stringify(r.json));
+    assert.equal(Number((await one('SELECT received_value FROM payments WHERE id=$1', [pay2])).received_value), 640);
+    const m = (await db.query("SELECT value, tenant_id, sale_id FROM financial_movements WHERE category='multa_juros' AND type='receita' AND idempotency_key LIKE 'latefee:COD-VENDA-2%'")).rows;
+    assert.equal(m.length, 1); assert.equal(Number(m[0].value), 40); assert.equal(m[0].tenant_id, A); assert.equal(m[0].sale_id, sale2);
+  });
+  await check('corrigir de novo para 650 soma so a diferenca (mais 10), sem mexer no lancamento antigo', async () => {
+    assert.ok([200, 201].includes((await adjust(pay2, tokenA, 650)).status));
+    assert.equal(await sumMov('COD-VENDA-2'), 50);
+  });
+  await check('reduzir para 635 estorna 15 do ajuste (total de multa/juros 35)', async () => {
+    assert.ok([200, 201].includes((await adjust(pay2, tokenA, 635)).status));
+    assert.equal(await sumMov('COD-VENDA-2'), 35);
+    assert.equal(Number((await one('SELECT received_value FROM payments WHERE id=$1', [pay2])).received_value), 635);
+  });
+  await check('voltar ao valor original (600) zera a multa/juros', async () => {
+    assert.ok([200, 201].includes((await adjust(pay2, tokenA, 600)).status));
+    assert.equal(await sumMov('COD-VENDA-2'), 0);
+  });
+  await check('valor menor que o original e recusado (400) e o registro nao muda', async () => {
+    const r = await adjust(pay2, tokenA, 590); assert.equal(r.status, 400); assert.match(String(r.json.message), /menor que o valor original/);
+    assert.equal(Number((await one('SELECT received_value FROM payments WHERE id=$1', [pay2])).received_value), 600);
+  });
+  await check('valor igual ao registrado e invalido/zero sao recusados (400)', async () => {
+    assert.equal((await adjust(pay2, tokenA, 600)).status, 400);
+    assert.equal((await adjust(pay2, tokenA, 0)).status, 400);
+    assert.equal((await adjust(pay2, tokenA, 'abc')).status, 400);
+  });
+  await check('outro tenant nao consegue corrigir o valor (404) e financeiro nao e alterado', async () => {
+    const before = await sumMov('COD-VENDA-2');
+    assert.equal((await adjust(pay2, tokenB, 700)).status, 404);
+    assert.equal(await sumMov('COD-VENDA-2'), before);
+  });
+  await check('contrato com lancamento (630): subir para 650 soma 20; reduzir abaixo do ja registrado e recusado', async () => {
+    assert.ok([200, 201].includes((await adjust(contractPay, tokenA, 650)).status));
+    assert.equal(await sumMov('COD-CONTRATO-1'), 20);
+    const low = await adjust(contractPay, tokenA, 625);
+    assert.equal(low.status, 400, JSON.stringify(low.json));
+  });
+  await check('contrato antigo sem lancamento: so atualiza o valor recebido (sem criar lancamento, sem contar em dobro)', async () => {
+    const old = (await one("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date, paid_at) VALUES ($1,NULL,$2,'boleto','COD-CONTRATO-OLD','pago',500,'Cliente A',$3, now()) RETURNING id", [A, cust, day])).id;
+    await db.query("INSERT INTO contract_billings (contract_id, customer_id, billing_period, due_date, value, boleto_code) VALUES ($1,$2,$3,$4,500,'COD-CONTRATO-OLD')", [contract, cust, month.slice(0, 4) + '-99', day]);
+    assert.ok([200, 201].includes((await adjust(old, tokenA, 560)).status));
+    assert.equal(Number((await one('SELECT received_value FROM payments WHERE id=$1', [old])).received_value), 560);
+    assert.equal(Number((await one("SELECT COUNT(*) c FROM financial_movements WHERE idempotency_key LIKE 'contract:COD-CONTRATO-OLD%' OR idempotency_key LIKE 'latefee:COD-CONTRATO-OLD%'")).c), 0);
+  });
+  await check('DRE do A reflete os ajustes (receitas - reducoes + contrato antigo recebido a mais)', async () => {
+    const y = new Date().getFullYear(); const m = new Date().getMonth() + 1;
+    const rec = Number((await one("SELECT COALESCE(SUM(value),0) t FROM financial_movements WHERE tenant_id=$1 AND type='receita' AND is_forecast=false AND to_char(date,'YYYY-MM')=$2", [A, month])).t);
+    const red = Number((await one("SELECT COALESCE(SUM(value),0) t FROM financial_movements WHERE tenant_id=$1 AND type='estorno' AND reference_type='multa_juros_adjustment' AND is_forecast=false AND to_char(date,'YYYY-MM')=$2", [A, month])).t);
+    const r = await call('GET', '/reports/dre?year=' + y + '&month=' + m, tokenA);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(Number(r.json.totals.receitaBruta), rec - red + 560, 'receita do DRE deve = lancamentos - reducoes + contrato antigo (560)');
+  });
+  await check('nenhuma chamada ao Banco Inter: o ajuste e so no sistema (auditoria registrada)', async () => {
+    const a = await one("SELECT COUNT(*) c FROM audit_logs WHERE action='inter.received_value_adjusted'");
+    assert.ok(Number(a.c) >= 5);
+  });
+
   console.log('E-mail por tenant (cada empresa configura o proprio)');
   await check('tenant sem e-mail configurado: config indica configured=false e o teste de envio e recusado', async () => {
     const cfg = await call('GET', '/mail/config', tokenB);
@@ -276,6 +345,9 @@ const call = async (method, path, token, body, headers = {}) => {
     const d = (await call('GET', '/dashboard/technician?month=' + m, tokenTecA)).json;
     assert.equal(d.month, m); assert.equal(d.routes.count, 0); assert.equal(d.serviceOrders.completedMonth, 0);
     assert.equal((await call('GET', '/dashboard/technician?month=lixo', tokenTecA)).json.month, month);
+  });
+  await check('tecnico nao pode corrigir valor recebido (403)', async () => {
+    assert.equal((await adjust(pay2, tokenTecA, 700)).status, 403);
   });
   await check('admin e financeiro nao acessam o painel do tecnico (403) e sem login (401)', async () => {
     assert.equal((await call('GET', '/dashboard/technician', tokenA)).status, 403);

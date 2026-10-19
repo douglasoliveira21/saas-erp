@@ -12,6 +12,8 @@ import { getCustomerEmailRecipients } from '../../common/customer-emails';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { BankCredentialsService, InterCredentials } from './bank-credentials.service';
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
+import { adjustReceivedValue, ReceivedValueAdjustment } from './received-value-adjustment';
+
 
 interface TokenCache {
   accessToken: string;
@@ -493,6 +495,17 @@ export class InterService implements OnModuleInit {
    * já faz quando o Inter confirma um pagamento "pago" (venda, parcela, financeiro), só que sem
    * depender de dados vindos da API do Inter.
    */
+  /**
+   * Corrige o valor recebido de um boleto/PIX já baixado (pago com multa e juros). O ajuste entra como
+   * lançamento novo - lançamento realizado é imutável no banco. Ver received-value-adjustment.ts.
+   */
+  async updateReceivedValue(id: string, receivedValue: number, userId?: string, note?: string): Promise<ReceivedValueAdjustment> {
+    const tenantId = this.currentTenantId();
+    const result = await this.saleRepo.manager.transaction((manager) => adjustReceivedValue(manager, { id, receivedValue, tenantId }));
+    await this.auditInter('inter.received_value_adjusted', result.saleId, { userId, note: note || null, ...result });
+    return result;
+  }
+
   async markAsReceivedManually(id: string, userId?: string, note?: string, receivedValueInput?: number): Promise<{ saleId?: string }> {
     const tenantId = this.currentTenantId();
     return this.saleRepo.manager.transaction(async (manager) => {
