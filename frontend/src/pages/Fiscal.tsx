@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { useFeedback } from '../components/ui'
+import { ActionMenu, useFeedback } from '../components/ui'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
 import { localToday } from '../utils/format'
 
@@ -938,21 +938,13 @@ export function Fiscal() {
                     </td>
                     <td className="table-cell text-sm text-gray-500">{inv.issuedAt ? new Date(inv.issuedAt).toLocaleDateString('pt-BR') : new Date(inv.createdAt).toLocaleDateString('pt-BR')}</td>
                     <td className="table-cell">
-                      <div className="flex gap-1">
-                        <button onClick={() => openViewInvoice(inv.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Visualizar nota"><Eye className="w-4 h-4" /></button>
-                        {inv.status === 'autorizada' && inv.accessKey && (
-                          <button onClick={() => viewPdf(inv.id)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Visualizar PDF oficial"><FileText className="w-4 h-4" /></button>
-                        )}
-                        {inv.status === 'autorizada' && inv.accessKey && (
-                          <button onClick={() => downloadPdf(inv.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar PDF oficial"><Download className="w-4 h-4" /></button>
-                        )}
-                        {(inv.status === 'autorizada' || inv.status === 'rejeitada' || inv.status === 'cancelada') && (
-                          <button onClick={() => downloadXml(inv.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Baixar XML"><code className="text-xs font-bold">&lt;/&gt;</code></button>
-                        )}
-                        {inv.status === 'autorizada' && (
-                          <button onClick={() => cancelInvoice(inv.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar nota"><XCircle className="w-4 h-4" /></button>
-                        )}
-                      </div>
+                      <ActionMenu items={[
+                        { label: 'Visualizar nota', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => openViewInvoice(inv.id) },
+                        { label: 'Visualizar PDF oficial', icon: <FileText className="w-4 h-4 text-purple-600" />, onClick: () => viewPdf(inv.id), hidden: !(inv.status === 'autorizada' && inv.accessKey) },
+                        { label: 'Baixar PDF oficial', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(inv.id), hidden: !(inv.status === 'autorizada' && inv.accessKey) },
+                        { label: 'Baixar XML', icon: <code className="w-4 text-center text-xs font-bold text-green-600">&lt;/&gt;</code>, onClick: () => downloadXml(inv.id), hidden: !['autorizada', 'rejeitada', 'cancelada'].includes(inv.status) },
+                        { label: 'Cancelar nota', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelInvoice(inv.id), hidden: inv.status !== 'autorizada' },
+                      ]} />
                     </td>
                   </tr>
                 ))}

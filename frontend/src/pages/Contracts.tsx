@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
+import { ActionMenu } from '../components/ui'
 import { Plus, Search, Edit, Trash2, X, Check, FileText, Download, Clock, AlertTriangle, RefreshCw, Bell, Monitor, DollarSign, Send } from 'lucide-react'
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon'
 
@@ -50,6 +51,7 @@ export function Contracts() {
   const [contracts, setContracts] = useState<Contract[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
+  const [billingLoading, setBillingLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Contract | null>(null)
@@ -67,23 +69,27 @@ export function Contracts() {
   useEffect(() => { load() }, [])
 
   async function load() {
+    let list: any[] = []
     try {
       const [c, cust] = await Promise.all([api.get('/contracts'), api.get('/customers')])
+      list = c.data
       setContracts(c.data); setCustomers(cust.data)
-      // Load billing status for active contracts
-      const activeContracts = c.data.filter((ct: any) => ct.status === 'ativo')
-      const statusMap: Record<string, { hasNf: boolean; hasBoleto: boolean; period: string }> = {}
-      const now = new Date()
-      const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-      for (const ct of activeContracts) {
+    } catch { setError('Erro ao carregar contratos'); setLoading(false); return }
+    // A lista já aparece aqui; o status de cobrança de cada contrato ativo (uma chamada por
+    // contrato) chega depois, em paralelo, sem manter a tela inteira em "carregando".
+    setLoading(false)
+    const now = new Date()
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    setBillingLoading(true)
+    try {
+      const entries = await Promise.all(list.filter(ct => ct.status === 'ativo').map(async (ct) => {
         try {
           const res = await api.get(`/contracts/${ct.id}/billing-status?period=${currentPeriod}`)
-          statusMap[ct.id] = res.data
-        } catch { statusMap[ct.id] = { hasNf: false, hasBoleto: false, period: currentPeriod } }
-      }
-      setBillingStatus(statusMap)
-    } catch { setError('Erro ao carregar contratos') }
-    finally { setLoading(false) }
+          return [ct.id, res.data] as const
+        } catch { return [ct.id, { hasNf: false, hasBoleto: false, period: currentPeriod }] as const }
+      }))
+      setBillingStatus(Object.fromEntries(entries))
+    } finally { setBillingLoading(false) }
   }
 
   function hasBillingReady(contractId: string): boolean {
@@ -377,7 +383,21 @@ export function Contracts() {
 
       <div className="space-y-3">
         {loading ? (
-          <div className="card flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" /></div>
+          <div className="space-y-3" aria-busy="true" aria-label="Carregando contratos">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="card p-4 animate-pulse">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700 flex-shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-1/3 rounded bg-gray-200 dark:bg-gray-700" />
+                    <div className="h-3 w-1/4 rounded bg-gray-200 dark:bg-gray-700" />
+                    <div className="h-3 w-2/3 rounded bg-gray-200 dark:bg-gray-700" />
+                  </div>
+                  <div className="h-6 w-6 rounded bg-gray-200 dark:bg-gray-700" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="card text-center text-gray-500 py-8">Nenhum contrato encontrado</div>
         ) : filtered.map(c => (
@@ -413,32 +433,16 @@ export function Contracts() {
                 )}
               </div>
               {canManage && (
-                <div className="flex gap-1 flex-shrink-0">
-                  {c.status === 'ativo' && <button onClick={() => generateNfse(c.id)} className={`p-1.5 rounded ${billingStatus[c.id]?.hasNf ? 'text-green-600 hover:bg-green-50' : 'text-purple-600 hover:bg-purple-50'}`} title={billingStatus[c.id]?.hasNf ? `NFS-e já emitida (${billingStatus[c.id]?.period})` : 'Gerar Nota Fiscal'}><FileText className="w-4 h-4" /></button>}
-                  {c.status === 'ativo' && <button onClick={() => generateBoleto(c.id)} className={`p-1.5 rounded ${billingStatus[c.id]?.hasBoleto ? 'text-green-600 hover:bg-green-50' : 'text-orange-600 hover:bg-orange-50'}`} title={billingStatus[c.id]?.hasBoleto ? `Boleto já emitido (${billingStatus[c.id]?.period})` : 'Gerar Boleto'}><DollarSign className="w-4 h-4" /></button>}
-                  {c.status === 'ativo' && (
-                    <button
-                      onClick={() => sendBillingEmail(c.id)}
-                      disabled={!hasBillingReady(c.id)}
-                      className={`p-1.5 rounded ${hasBillingReady(c.id) ? 'text-cyan-600 hover:bg-cyan-50' : 'text-gray-300 cursor-not-allowed'}`}
-                      title={hasBillingReady(c.id) ? 'Enviar NF + Boleto por email' : 'Gere NF e Boleto primeiro para habilitar envio'}
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  )}
-                  {c.status === 'ativo' && (
-                    <button
-                      onClick={() => sendBillingWhatsapp(c.id)}
-                      disabled={!hasBillingReady(c.id)}
-                      className={`p-1.5 rounded ${hasBillingReady(c.id) ? 'text-green-600 hover:bg-green-50' : 'text-gray-300 cursor-not-allowed'}`}
-                      title={hasBillingReady(c.id) ? 'Enviar NF + Boleto por WhatsApp' : 'Gere NF e Boleto primeiro para habilitar envio'}
-                    >
-                      <WhatsAppIcon className="w-4 h-4" />
-                    </button>
-                  )}
-                  {c.status === 'ativo' && <button onClick={() => openRenew(c)} className="p-1.5 text-green-600 hover:bg-green-50 rounded" title="Renovar"><RefreshCw className="w-4 h-4" /></button>}
-                  <button onClick={() => openEdit(c)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
-                  {isAdmin && <button onClick={() => remove(c.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>}
+                <div className="flex-shrink-0">
+                  <ActionMenu items={[
+                    { label: billingStatus[c.id]?.hasNf ? `NFS-e já emitida (${billingStatus[c.id]?.period})` : 'Gerar nota fiscal', icon: <FileText className={`w-4 h-4 ${billingStatus[c.id]?.hasNf ? 'text-green-600' : 'text-purple-600'}`} />, onClick: () => generateNfse(c.id), hidden: c.status !== 'ativo' },
+                    { label: billingStatus[c.id]?.hasBoleto ? `Boleto já emitido (${billingStatus[c.id]?.period})` : 'Gerar boleto', icon: <DollarSign className={`w-4 h-4 ${billingStatus[c.id]?.hasBoleto ? 'text-green-600' : 'text-orange-600'}`} />, onClick: () => generateBoleto(c.id), hidden: c.status !== 'ativo' },
+                    { label: hasBillingReady(c.id) ? 'Enviar NF + boleto por e-mail' : 'Enviar por e-mail (gere NF e boleto antes)', icon: <Send className="w-4 h-4 text-cyan-600" />, onClick: () => sendBillingEmail(c.id), disabled: billingLoading || !hasBillingReady(c.id), hidden: c.status !== 'ativo' },
+                    { label: hasBillingReady(c.id) ? 'Enviar NF + boleto por WhatsApp' : 'Enviar por WhatsApp (gere NF e boleto antes)', icon: <WhatsAppIcon className="w-4 h-4 text-green-600" />, onClick: () => sendBillingWhatsapp(c.id), disabled: billingLoading || !hasBillingReady(c.id), hidden: c.status !== 'ativo' },
+                    { label: 'Renovar', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => openRenew(c), hidden: c.status !== 'ativo' },
+                    { label: 'Editar', icon: <Edit className="w-4 h-4 text-blue-600" />, onClick: () => openEdit(c) },
+                    { label: 'Excluir', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: () => remove(c.id), hidden: !isAdmin },
+                  ]} />
                 </div>
               )}
             </div>

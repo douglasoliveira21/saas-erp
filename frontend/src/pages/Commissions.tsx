@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
+import { ActionMenu } from '../components/ui'
 import { Plus, Search, CheckCircle, XCircle, DollarSign, Filter, X, Check, Trash2, Eye, Edit, RefreshCw } from 'lucide-react'
 import { fixed } from '../utils/format'
 
@@ -306,16 +307,14 @@ export function Commissions() {
                   <td className="table-cell font-semibold text-gray-900 dark:text-white">R$ {Number(c.amount).toFixed(2)}</td>
                   <td className="table-cell"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[c.status]}`}>{statusLabels[c.status]}</span></td>
                   <td className="table-cell">
-                    <div className="flex gap-1">
-                      {c.sale && <button onClick={() => viewSale(c.sale!.id)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver venda"><Eye className="w-4 h-4" /></button>}
-                      {!c.sale && <button onClick={() => setSelectedCommission(c)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver comissão"><Eye className="w-4 h-4" /></button>}
-                      {isAdmin && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => openEdit(c)} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>}
-                      {canManage && c.status === 'pendente' && <button onClick={() => pay(c.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar pagamento"><DollarSign className="w-4 h-4" /></button>}
-                      {canManage && !['paga', 'cancelada'].includes(c.status) && <button onClick={() => cancel(c.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>}
-                      {isAdmin && c.status === 'cancelada' && (
-                        <button onClick={async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
-                      )}
-                    </div>
+                    <ActionMenu items={[
+                      { label: 'Ver venda', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => viewSale(c.sale!.id), hidden: !c.sale },
+                      { label: 'Ver comissão', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => setSelectedCommission(c), hidden: !!c.sale },
+                      { label: 'Editar', icon: <Edit className="w-4 h-4 text-yellow-600" />, onClick: () => openEdit(c), hidden: !(isAdmin && !['paga', 'cancelada'].includes(c.status)) },
+                      { label: 'Confirmar pagamento', icon: <DollarSign className="w-4 h-4 text-green-600" />, onClick: () => pay(c.id), hidden: !(canManage && c.status === 'pendente') },
+                      { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancel(c.id), hidden: !(canManage && !['paga', 'cancelada'].includes(c.status)) },
+                      { label: 'Excluir do histórico', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }, hidden: !(isAdmin && c.status === 'cancelada') },
+                    ]} />
                   </td>
                 </tr>
               ))}

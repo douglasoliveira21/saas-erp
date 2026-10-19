@@ -7,7 +7,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight, Plus, Check, X, AlertTriangle, DollarSign, Clock, Edit2, Receipt, Users,
   TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle, FileDown, FileCode,
 } from 'lucide-react'
-import { useFeedback } from '../components/ui'
+import { ActionMenu, useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 
 interface Payment {
@@ -888,40 +888,21 @@ export function Payments() {
                       </td>
                       <td className="table-cell text-sm">{row.data.invoiceNumber || '-'}</td>
                       <td className="table-cell">
-                        <div className="flex gap-1">
-                          {/* Ordem pensada pro fluxo de uso: confirmar que pagou, baixar os documentos
-                              (boleto/NF/XML), e só então as ações que alteram o boleto (mudar
-                              data/valor, cancelar). O resto (consultar status, reverter, excluir)
-                              fica no fim por serem ações de exceção/correção, não do dia a dia. */}
-                          {!['pago', 'cancelado'].includes(row.data.status) && (
-                            <button onClick={() => markAsReceived(row.data)} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Confirmar pagamento (recebido por fora do Inter)"><CheckCircle className="w-4 h-4" /></button>
-                          )}
-                          {row.data.type === 'boleto' && (
-                            <button onClick={() => downloadPdf(row.data.codigoSolicitacao)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Baixar boleto"><Download className="w-4 h-4" /></button>
-                          )}
-                          {row.data.invoiceId && (
-                            <>
-                              <button onClick={() => downloadInvoicePdf(row.data)} className="p-1 text-indigo-600 hover:bg-indigo-50 rounded" title="Baixar nota fiscal"><FileDown className="w-4 h-4" /></button>
-                              <button onClick={() => downloadInvoiceXml(row.data)} className="p-1 text-teal-600 hover:bg-teal-50 rounded" title="Baixar XML"><FileCode className="w-4 h-4" /></button>
-                            </>
-                          )}
-                          {row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status) && (
-                            <button onClick={() => openReissueModal(row.data)} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Mudar data e valor"><CalendarClock className="w-4 h-4" /></button>
-                          )}
-                          {row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status) && (
-                            <button onClick={() => cancelPayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>
-                          )}
-                          <button onClick={() => checkStatus(row.data.codigoSolicitacao)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Consultar status no Inter"><RefreshCw className="w-4 h-4" /></button>
-                          {row.data.status === 'pago' && (
-                            <button onClick={() => openAdjustModal(row.data)} className="p-1 text-sky-600 hover:bg-sky-50 rounded" title="Corrigir valor recebido (multa e juros)"><Edit2 className="w-4 h-4" /></button>
-                          )}
-                          {row.data.status === 'pago' && row.data.origem === 'venda' && (
-                            <button onClick={() => revertToReceivable(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter para A Receber (marcado como pago por engano)"><Undo2 className="w-4 h-4" /></button>
-                          )}
-                          {row.data.status === 'cancelado' && (
-                            <button onClick={() => deletePayment(row.data)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir da lista"><Trash2 className="w-4 h-4" /></button>
-                          )}
-                        </div>
+                        <ActionMenu items={[
+                          // Ordem pensada pro fluxo de uso: confirmar que pagou, baixar os documentos
+                          // (boleto/NF/XML), e só então as ações que alteram o boleto. Consultar status,
+                          // reverter e excluir ficam no fim por serem ações de exceção/correção.
+                          { label: 'Confirmar pagamento (recebido por fora)', icon: <CheckCircle className="w-4 h-4 text-emerald-600" />, onClick: () => markAsReceived(row.data), hidden: ['pago', 'cancelado'].includes(row.data.status) },
+                          { label: 'Baixar boleto', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(row.data.codigoSolicitacao), hidden: row.data.type !== 'boleto' },
+                          { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
+                          { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
+                          { label: 'Mudar data e valor', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
+                          { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelPayment(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
+                          { label: 'Consultar status no Inter', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
+                          { label: 'Corrigir valor recebido (multa e juros)', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
+                          { label: 'Reverter para A Receber', icon: <Undo2 className="w-4 h-4 text-amber-600" />, onClick: () => revertToReceivable(row.data), hidden: !(row.data.status === 'pago' && row.data.origem === 'venda') },
+                          { label: 'Excluir da lista', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: () => deletePayment(row.data), hidden: row.data.status !== 'cancelado' },
+                        ]} />
                       </td>
                     </tr>
                   ) : row.kind === 'credito' ? (
@@ -942,23 +923,13 @@ export function Payments() {
                       </td>
                       <td className="table-cell text-sm">{row.data.documentNumber || '-'}</td>
                       <td className="table-cell">
-                        <div className="flex gap-1">
-                          {['pendente', 'vencido', 'parcial'].includes(row.data.status) && (
-                            <button onClick={() => openPay(row.data)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Confirmar recebimento"><DollarSign className="w-4 h-4" /></button>
-                          )}
-                          {['pendente', 'vencido'].includes(row.data.status) && (
-                            <button onClick={() => openEditBill(row.data)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit2 className="w-4 h-4" /></button>
-                          )}
-                          {['pendente', 'vencido'].includes(row.data.status) && (
-                            <button onClick={() => cancelBill(row.data.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Cancelar"><Ban className="w-4 h-4" /></button>
-                          )}
-                          {['pago', 'parcial'].includes(row.data.status) && (
-                            <button onClick={() => revertBillPayment(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter pagamento (valor errado, pagou com juros, etc)"><Undo2 className="w-4 h-4" /></button>
-                          )}
-                          {isAdmin && (
-                            <button onClick={() => removeBill(row.data.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
-                          )}
-                        </div>
+                        <ActionMenu items={[
+                          { label: 'Confirmar recebimento', icon: <DollarSign className="w-4 h-4 text-green-600" />, onClick: () => openPay(row.data), hidden: !['pendente', 'vencido', 'parcial'].includes(row.data.status) },
+                          { label: 'Editar', icon: <Edit2 className="w-4 h-4 text-blue-600" />, onClick: () => openEditBill(row.data), hidden: !['pendente', 'vencido'].includes(row.data.status) },
+                          { label: 'Cancelar', icon: <Ban className="w-4 h-4 text-orange-600" />, onClick: () => cancelBill(row.data.id), hidden: !['pendente', 'vencido'].includes(row.data.status) },
+                          { label: 'Reverter pagamento', icon: <Undo2 className="w-4 h-4 text-amber-600" />, onClick: () => revertBillPayment(row.data), hidden: !['pago', 'parcial'].includes(row.data.status) },
+                          { label: 'Excluir', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: () => removeBill(row.data.id), hidden: !isAdmin },
+                        ]} />
                       </td>
                     </tr>
                   ) : (
@@ -979,23 +950,13 @@ export function Payments() {
                       </td>
                       <td className="table-cell text-sm">{row.data.documentNumber || '-'}</td>
                       <td className="table-cell">
-                        <div className="flex gap-1">
-                          {['pendente', 'vencido', 'parcial'].includes(row.data.status) && (
-                            <button onClick={() => openPay(row.data)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Pagar"><DollarSign className="w-4 h-4" /></button>
-                          )}
-                          {['pendente', 'vencido'].includes(row.data.status) && (
-                            <button onClick={() => openEditBill(row.data)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit2 className="w-4 h-4" /></button>
-                          )}
-                          {['pendente', 'vencido'].includes(row.data.status) && (
-                            <button onClick={() => cancelBill(row.data.id)} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Cancelar"><Ban className="w-4 h-4" /></button>
-                          )}
-                          {['pago', 'parcial'].includes(row.data.status) && (
-                            <button onClick={() => revertBillPayment(row.data)} className="p-1 text-amber-600 hover:bg-amber-50 rounded" title="Reverter pagamento (valor errado, pagou com juros, etc)"><Undo2 className="w-4 h-4" /></button>
-                          )}
-                          {isAdmin && (
-                            <button onClick={() => removeBill(row.data.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Excluir"><Trash2 className="w-4 h-4" /></button>
-                          )}
-                        </div>
+                        <ActionMenu items={[
+                          { label: 'Pagar', icon: <DollarSign className="w-4 h-4 text-green-600" />, onClick: () => openPay(row.data), hidden: !['pendente', 'vencido', 'parcial'].includes(row.data.status) },
+                          { label: 'Editar', icon: <Edit2 className="w-4 h-4 text-blue-600" />, onClick: () => openEditBill(row.data), hidden: !['pendente', 'vencido'].includes(row.data.status) },
+                          { label: 'Cancelar', icon: <Ban className="w-4 h-4 text-orange-600" />, onClick: () => cancelBill(row.data.id), hidden: !['pendente', 'vencido'].includes(row.data.status) },
+                          { label: 'Reverter pagamento', icon: <Undo2 className="w-4 h-4 text-amber-600" />, onClick: () => revertBillPayment(row.data), hidden: !['pago', 'parcial'].includes(row.data.status) },
+                          { label: 'Excluir', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: () => removeBill(row.data.id), hidden: !isAdmin },
+                        ]} />
                       </td>
                     </tr>
                   ))}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { useFeedback } from '../components/ui'
+import { ActionMenu, useFeedback } from '../components/ui'
 import { getErrorMessage } from '../services/errors'
 import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit, Send } from 'lucide-react'
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon'
@@ -350,40 +350,19 @@ export function Sales() {
                     </div>
                   </td>
                   <td className="table-cell">
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
                       <button onClick={() => setSelected(s)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Ver detalhes"><Eye className="w-4 h-4" /></button>
-                      {(isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status) && (
-                        <Link to={`/sales/new?edit=${s.id}`} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar Venda"><Edit className="w-4 h-4" /></Link>
-                      )}
-                      {(isAdmin || isFinanceiro) && s.fiscalStatus !== 'autorizada' && !['cancelado', 'finalizado'].includes(s.status) && (!(s.nextDueDate || s.dueDate) || String(s.nextDueDate || s.dueDate) >= localToday()) && (
-                        <button onClick={() => window.location.href = '/fiscal?emit=' + s.id} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Emitir Nota Fiscal"><FileText className="w-4 h-4" /></button>
-                      )}
-                      {(isAdmin || isFinanceiro) && s.billingStatus !== 'emitido' && !['boleto_emitido', 'pago'].includes(s.status) && ['pendente', 'nf_emitida'].includes(s.status) && (
-                        <button onClick={() => generatePayment(s.id, 'boleto')} className="p-1 text-orange-600 hover:bg-orange-50 rounded" title="Gerar Boleto"><CreditCard className="w-4 h-4" /></button>
-                      )}
-                      {(isAdmin || isFinanceiro) && s.billingStatus !== 'emitido' && !['boleto_emitido', 'pago'].includes(s.status) && ['pendente', 'nf_emitida'].includes(s.status) && (
-                        <button onClick={() => generatePayment(s.id, 'pix')} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded" title="Gerar PIX"><DollarSign className="w-4 h-4" /></button>
-                      )}
-                      {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
-                        <button onClick={() => openEmailModal(s.id)} disabled={emailSending && emailSaleId === s.id} className="p-1 text-cyan-600 hover:bg-cyan-50 rounded disabled:opacity-50" title="Enviar documentos por email">
-                          <Send className={'w-4 h-4 ' + (emailSending && emailSaleId === s.id ? 'animate-pulse' : '')} />
-                        </button>
-                      )}
-                      {(isAdmin || isFinanceiro) && !['cancelado'].includes(s.status) && (
-                        <button onClick={() => openWhatsappModal(s.id)} disabled={whatsappSending && whatsappSaleId === s.id} className="p-1 text-green-600 hover:bg-green-50 rounded disabled:opacity-50" title="Enviar documentos por WhatsApp">
-                          <WhatsAppIcon className={'w-4 h-4 ' + (whatsappSending && whatsappSaleId === s.id ? 'animate-pulse' : '')} />
-                        </button>
-                      )}
-
-                      {(isAdmin || isFinanceiro) && s.status === 'pago' && (
-                        <button onClick={() => finalize(s.id)} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Finalizar"><Check className="w-4 h-4" /></button>
-                      )}
-                      {(isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status) && (
-                        <button onClick={() => cancel(s.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Cancelar"><XCircle className="w-4 h-4" /></button>
-                      )}
-                      {isAdmin && s.status === 'cancelado' && (
-                        <button onClick={async () => { if (!confirm('Excluir esta venda cancelada do historico?')) return; try { await api.delete('/sales/' + s.id); load() } catch {} }} className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded" title="Excluir do historico"><Trash2 className="w-4 h-4" /></button>
-                      )}
+                      <ActionMenu items={[
+                        { label: 'Editar venda', icon: <Edit className="w-4 h-4 text-yellow-600" />, to: `/sales/new?edit=${s.id}`, hidden: !((isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status)) },
+                        { label: 'Emitir nota fiscal', icon: <FileText className="w-4 h-4 text-purple-600" />, onClick: () => { window.location.href = '/fiscal?emit=' + s.id }, hidden: !((isAdmin || isFinanceiro) && s.fiscalStatus !== 'autorizada' && !['cancelado', 'finalizado'].includes(s.status) && (!(s.nextDueDate || s.dueDate) || String(s.nextDueDate || s.dueDate) >= localToday())) },
+                        { label: 'Gerar boleto', icon: <CreditCard className="w-4 h-4 text-orange-600" />, onClick: () => generatePayment(s.id, 'boleto'), hidden: !((isAdmin || isFinanceiro) && s.billingStatus !== 'emitido' && !['boleto_emitido', 'pago'].includes(s.status) && ['pendente', 'nf_emitida'].includes(s.status)) },
+                        { label: 'Gerar PIX', icon: <DollarSign className="w-4 h-4 text-emerald-600" />, onClick: () => generatePayment(s.id, 'pix'), hidden: !((isAdmin || isFinanceiro) && s.billingStatus !== 'emitido' && !['boleto_emitido', 'pago'].includes(s.status) && ['pendente', 'nf_emitida'].includes(s.status)) },
+                        { label: 'Enviar documentos por e-mail', icon: <Send className={'w-4 h-4 text-cyan-600 ' + (emailSending && emailSaleId === s.id ? 'animate-pulse' : '')} />, onClick: () => openEmailModal(s.id), disabled: emailSending && emailSaleId === s.id, hidden: !((isAdmin || isFinanceiro) && s.status !== 'cancelado') },
+                        { label: 'Enviar documentos por WhatsApp', icon: <WhatsAppIcon className={'w-4 h-4 text-green-600 ' + (whatsappSending && whatsappSaleId === s.id ? 'animate-pulse' : '')} />, onClick: () => openWhatsappModal(s.id), disabled: whatsappSending && whatsappSaleId === s.id, hidden: !((isAdmin || isFinanceiro) && s.status !== 'cancelado') },
+                        { label: 'Finalizar', icon: <Check className="w-4 h-4 text-gray-600" />, onClick: () => finalize(s.id), hidden: !((isAdmin || isFinanceiro) && s.status === 'pago') },
+                        { label: 'Cancelar venda', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancel(s.id), hidden: !((isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status)) },
+                        { label: 'Excluir do histórico', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: async () => { if (!confirm('Excluir esta venda cancelada do historico?')) return; try { await api.delete('/sales/' + s.id); load() } catch {} }, hidden: !(isAdmin && s.status === 'cancelado') },
+                      ]} />
                     </div>
                   </td>
                 </tr>
