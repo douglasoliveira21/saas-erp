@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useFeedback } from '../components/ui'
@@ -63,6 +63,39 @@ export function Sales() {
   const [whatsappSaleId, setWhatsappSaleId] = useState('')
   const [whatsappPhone, setWhatsappPhone] = useState('')
   const [whatsappSending, setWhatsappSending] = useState(false)
+
+  // Vindo de Inadimplentes (?highlight=<id>): mostra a venda sem filtros e a destaca com um anel animado.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [extraSale, setExtraSale] = useState<Sale | null>(null)
+  const focusScrolled = useRef(false)
+  const highlightParam = searchParams.get('highlight')
+
+  useEffect(() => {
+    if (!highlightParam) return
+    setSearch(''); setStatusFilter(''); setDateFrom(''); setDateTo('')
+    setFocusId(highlightParam); focusScrolled.current = false; setExtraSale(null)
+    const next = new URLSearchParams(searchParams); next.delete('highlight')
+    setSearchParams(next, { replace: true })
+  }, [highlightParam])
+
+  useEffect(() => {
+    if (!focusId || loading) return
+    if (!sales.some(s => s.id === focusId) && extraSale?.id !== focusId) {
+      // A lista traz só as 100 vendas mais recentes: busca a venda isolada.
+      api.get(`/sales/${focusId}`).then(res => setExtraSale(res.data)).catch(() => setFocusId(null))
+      return
+    }
+    if (focusScrolled.current) return
+    const row = document.getElementById(`sale-row-${focusId}`)
+    if (row) { focusScrolled.current = true; row.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+  }, [focusId, loading, sales, extraSale])
+
+  useEffect(() => {
+    if (!focusId) return
+    const timer = window.setTimeout(() => setFocusId(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [focusId])
 
   useEffect(() => { load(); const timer = window.setInterval(load, 30000); return () => window.clearInterval(timer) }, [])
 
@@ -184,7 +217,8 @@ export function Sales() {
     }
   }
 
-  const filtered = sales.filter(s => {
+  const allSales = extraSale && !sales.some(s => s.id === extraSale.id) ? [extraSale, ...sales] : sales
+  const filtered = allSales.filter(s => {
     const matchSearch = s.customer?.name?.toLowerCase().includes(search.toLowerCase()) ||
       s.technician?.name?.toLowerCase().includes(search.toLowerCase())
     const matchStatus = !statusFilter || s.status === statusFilter
@@ -267,7 +301,7 @@ export function Sales() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={8} className="table-cell text-center text-gray-500">Nenhuma venda encontrada</td></tr>
               ) : filtered.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <tr key={s.id} id={`sale-row-${s.id}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700/50${s.id === focusId ? ' sale-focus' : ''}`}>
                   <td className="table-cell text-gray-600 dark:text-gray-400 text-sm">
                     {new Date(s.createdAt).toLocaleDateString('pt-BR')}
                   </td>

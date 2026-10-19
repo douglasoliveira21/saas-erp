@@ -1049,7 +1049,7 @@ export function Payments() {
                     <tr key={inst.id} className="bg-red-50/50 hover:bg-red-50">
                       <td className="table-cell font-medium text-sm">
                         {inst.account?.saleId ? (
-                          <Link to={`/sales/new?edit=${inst.account.saleId}`} className="hover:text-primary-600 hover:underline">{inst.customer?.name || '-'}</Link>
+                          <Link to={`/sales?highlight=${inst.account.saleId}`} className="hover:text-primary-600 hover:underline" title="Ver a venda na lista">{inst.customer?.name || '-'}</Link>
                         ) : (inst.customer?.name || '-')}
                       </td>
                       <td className="table-cell text-sm">#{inst.number}</td>

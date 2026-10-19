@@ -223,3 +223,12 @@
 .page-transition {
   view-transition-name: page;
 }
+
+/* Destaque da venda aberta a partir de Inadimplentes: anel que pulsa em volta da linha */
+@keyframes sale-focus-ring {
+  0%, 100% { box-shadow: inset 0 3px 0 0 #2563eb, inset 0 -3px 0 0 #2563eb; background-color: rgba(37, 99, 235, 0.10); }
+  50% { box-shadow: inset 0 3px 0 0 #60a5fa, inset 0 -3px 0 0 #60a5fa; background-color: rgba(37, 99, 235, 0.22); }
+}
+tr.sale-focus > td { animation: sale-focus-ring 1.2s ease-in-out infinite; }
+tr.sale-focus > td:first-child { box-shadow: inset 3px 3px 0 0 #2563eb, inset 0 -3px 0 0 #2563eb; }
+tr.sale-focus > td:last-child { box-shadow: inset -3px 3px 0 0 #2563eb, inset 0 -3px 0 0 #2563eb; }
