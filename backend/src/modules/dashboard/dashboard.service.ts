@@ -7,6 +7,7 @@ import { Commission } from '../commissions/entities/commission.entity';
 import { Product } from '../products/entities/product.entity';
 import { Route } from '../routes/entities/route.entity';
 import { buildTechnicianDashboard } from './technician-dashboard';
+import { BRT_TODAY_SQL } from '../../common/date';
 
 @Injectable()
 export class DashboardService {
@@ -191,12 +192,12 @@ export class DashboardService {
         COUNT(*)::int AS "overdueCount",
         SUM(i.value - i.paid_value)::numeric AS "overdueAmount",
         MIN(i.due_date) AS "oldestDueDate",
-        MAX((CURRENT_DATE - i.due_date))::int AS "maxDaysOverdue"
+        MAX((${BRT_TODAY_SQL} - i.due_date))::int AS "maxDaysOverdue"
       FROM installments i
       JOIN accounts_receivable a ON a.id = i.account_id
       JOIN customers c ON c.id = a.customer_id
       WHERE i.status IN ('pendente', 'vencido')
-        AND i.due_date < CURRENT_DATE
+        AND i.due_date < ${BRT_TODAY_SQL}
         AND a.status NOT IN ('cancelado')${tenantSql('a')}
       GROUP BY c.id, c.name, c.phone
       ORDER BY "overdueAmount" DESC

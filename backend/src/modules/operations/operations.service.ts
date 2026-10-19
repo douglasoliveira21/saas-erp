@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { BRT_TODAY_SQL } from '../../common/date';
 
 @Injectable()
 export class OperationsService {
@@ -95,7 +96,7 @@ export class OperationsService {
     await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
       SELECT 'Conta vencida', COALESCE(c.name,'Cliente') || ': R$ ' || ar.pending_value::text, 'financeiro', 'account_receivable', ar.id
       FROM accounts_receivable ar LEFT JOIN customers c ON c.id=ar.customer_id
-      WHERE ar.due_date < CURRENT_DATE AND ar.status IN ('pendente','parcial','vencido')
+      WHERE ar.due_date < ${BRT_TODAY_SQL} AND ar.status IN ('pendente','parcial','vencido')
       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.entity_type='account_receivable' AND n.entity_id=ar.id AND n.status<>'resolvida')`);
     await this.db.query(`INSERT INTO notifications(title,message,type,entity_type,entity_id)
       SELECT 'Rejeicao fiscal', UPPER(i.type) || COALESCE(' ' || i.number::text,'') || ': ' || COALESCE(i.rejection_reason,'Verifique a tentativa de emissao'), 'fiscal', 'invoice', i.id

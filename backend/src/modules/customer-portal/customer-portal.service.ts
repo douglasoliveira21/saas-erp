@@ -15,6 +15,7 @@ import { NfseService } from '../fiscal/services/nfse.service';
 import { PortalUser } from './entities/portal-user.entity';
 import { PortalTicketForm } from './entities/portal-form.entity';
 import { PortalTicket } from './entities/portal-ticket.entity';
+import { invoiceDocumentNumberSql } from '../fiscal/invoice-number';
 
 @Injectable()
 export class CustomerPortalService {
@@ -283,7 +284,7 @@ export class CustomerPortalService {
   async documents(actor: any) {
     if (!['admin','finance'].includes(actor.role)) throw new ForbiddenException();
     const receivables = await this.dataSource.query(`WITH documents AS (SELECT ar.id "accountId",ar.description,ar.total_value,ar.pending_value,ar.status,ar.due_date,p.id "paymentId",p.type,p.codigo_solicitacao code,p.status "paymentStatus",p.value "paymentValue",p.due_date "paymentDueDate",p.pix_copia_e_cola "pixCopiaECola",p.linha_digitavel "linhaDigitavel",ROW_NUMBER() OVER (PARTITION BY ar.id ORDER BY p.due_date,p.created_at,p.id) "installmentNumber",COUNT(p.id) OVER (PARTITION BY ar.id) "installmentCount" FROM accounts_receivable ar LEFT JOIN payments p ON p.sale_id=ar.sale_id AND COALESCE(LOWER(p.status),'') NOT IN ('rejeitado','rejeitada','cancelado','cancelada','erro','falha') WHERE ar.customer_id=$1 AND COALESCE(LOWER(ar.status),'') NOT IN ('cancelado','cancelada','rejeitado','rejeitada','erro')) SELECT CASE WHEN "paymentId" IS NULL THEN "accountId" ELSE "paymentId" END id,CASE WHEN "installmentCount">1 THEN description||' - Parcela '||"installmentNumber"||'/'||"installmentCount" ELSE description END description,COALESCE("paymentValue",total_value) "totalValue",CASE WHEN "paymentId" IS NULL THEN pending_value ELSE COALESCE("paymentValue",0) END "pendingValue",status,COALESCE("paymentDueDate",due_date) "dueDate","paymentId",type,code,"paymentStatus","pixCopiaECola","linhaDigitavel" FROM documents ORDER BY COALESCE("paymentDueDate",due_date) DESC LIMIT 100`, [actor.customerId]);
-    const invoices = await this.dataSource.query(`SELECT i.id,i.type,i.number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 AND COALESCE(LOWER(i.status),'') NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
+    const invoices = await this.dataSource.query(`SELECT i.id,i.type,${invoiceDocumentNumberSql('i')} AS number,i.status,i.issued_at "issuedAt",s.total_amount "totalValue" FROM invoices i JOIN sales s ON s.id=i.sale_id WHERE s.customer_id=$1 AND COALESCE(LOWER(i.status),'') NOT IN ('rejeitada','rejeitado','cancelada','cancelado','erro','falha') ORDER BY i.created_at DESC LIMIT 100`, [actor.customerId]);
     const contracts = await this.contracts.find({ where: { customerId: actor.customerId }, order: { createdAt: 'DESC' } });
     return { receivables, invoices, contracts };
   }

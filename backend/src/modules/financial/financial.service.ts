@@ -16,6 +16,8 @@ import { InstallmentPayment } from './entities/installment-payment.entity';
 import { AccountPayable } from './entities/account-payable.entity';
 import { tenantSql } from '../../common/tenant/tenant-scope';
 import { runInTenant } from '../../common/tenant/tenant-context.service';
+import { todayInBrasilia, BRT_TODAY_SQL } from '../../common/date';
+import { invoiceDocumentNumberSql } from '../fiscal/invoice-number';
 
 @Injectable()
 export class FinancialService implements OnModuleInit {
@@ -366,7 +368,7 @@ export class FinancialService implements OnModuleInit {
    * Get overdue installments.
    */
   async getOverdue() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInBrasilia();
 
     const overdue = await this.installmentRepo.find({
       where: {
@@ -394,7 +396,7 @@ export class FinancialService implements OnModuleInit {
     const invoicesBySaleId = new Map<string, { id: string; number: number }>();
     if (saleIds.length > 0) {
       const invoiceRows = await this.dataSource.query(
-        `SELECT DISTINCT ON (sale_id) sale_id, id, number FROM invoices WHERE sale_id = ANY($1) AND status = 'autorizada' ORDER BY sale_id, issued_at DESC NULLS LAST, created_at DESC`,
+        `SELECT DISTINCT ON (i.sale_id) i.sale_id, i.id, ${invoiceDocumentNumberSql('i')} AS number FROM invoices i WHERE i.sale_id = ANY($1) AND i.status = 'autorizada' ORDER BY i.sale_id, i.issued_at DESC NULLS LAST, i.created_at DESC`,
         [saleIds],
       );
       for (const row of invoiceRows) invoicesBySaleId.set(row.sale_id, { id: row.id, number: row.number });
@@ -887,7 +889,7 @@ export class FinancialService implements OnModuleInit {
           // pendente/parcial - volta o boleto ligado a essa parcela pra "a_receber"/"vencido".
           if (installment.status !== 'pago') {
             await manager.query(
-              `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
+              `UPDATE payments SET status = CASE WHEN due_date < ${BRT_TODAY_SQL} THEN 'vencido' ELSE 'a_receber' END,
                  paid_at = NULL, settled_manually = false, payment_note = NULL, reverted_at = NOW(), updated_at = NOW()
                WHERE installment_id = $1 AND status NOT IN ('cancelado')`,
               [installment.id],
@@ -903,7 +905,7 @@ export class FinancialService implements OnModuleInit {
         // payments.installment_id IS NULL, então o loop acima não cobre esse caso.
         if (!fullyPaid) {
           await manager.query(
-            `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END,
+            `UPDATE payments SET status = CASE WHEN due_date < ${BRT_TODAY_SQL} THEN 'vencido' ELSE 'a_receber' END,
                paid_at = NULL, settled_manually = false, payment_note = NULL, reverted_at = NOW(), updated_at = NOW()
              WHERE sale_id = $1 AND installment_id IS NULL AND status NOT IN ('cancelado')`,
             [movement.saleId],
@@ -1010,7 +1012,7 @@ export class FinancialService implements OnModuleInit {
       accumulated += realizedIncome-realizedExpense;
       return { date:r.date, projectedIncome, projectedExpense, realizedIncome, realizedExpense, projectedBalance:projectedIncome-projectedExpense, realizedBalance:realizedIncome-realizedExpense, accumulatedRealized:accumulated, scenarios:{ optimistic:Number((projectedIncome-projectedExpense*0.95).toFixed(2)), realistic:Number((projectedIncome*0.85-projectedExpense).toFixed(2)), pessimistic:Number((projectedIncome*0.6-projectedExpense*1.1).toFixed(2)) } };
     });
-    const overdue = await this.dataSource.query("SELECT COUNT(*)::int count, COALESCE(SUM(pending_value),0)::numeric total FROM accounts_receivable WHERE due_date < CURRENT_DATE AND status IN ('pendente','parcial','vencido')" + tenantSql());
+    const overdue = await this.dataSource.query("SELECT COUNT(*)::int count, COALESCE(SUM(pending_value),0)::numeric total FROM accounts_receivable WHERE due_date < " + BRT_TODAY_SQL + " AND status IN ('pendente','parcial','vencido')" + tenantSql());
     const totals = series.reduce((a: any,x: any)=>{ for(const k of ['projectedIncome','projectedExpense','realizedIncome','realizedExpense','projectedBalance','realizedBalance']) a[k]+=x[k]; return a; },{projectedIncome:0,projectedExpense:0,realizedIncome:0,realizedExpense:0,projectedBalance:0,realizedBalance:0});
     return { period:{startDate,endDate,granularity}, totals, overdue:{count:Number(overdue[0]?.count||0),total:Number(overdue[0]?.total||0)}, series };
   }

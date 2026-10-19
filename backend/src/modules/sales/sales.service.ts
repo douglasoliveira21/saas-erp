@@ -23,6 +23,7 @@ import { money, moneySum, moneyMultiply } from '../../common/money';
 import { getCustomerEmailRecipients } from '../../common/customer-emails';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { todayInBrasilia } from '../../common/date';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -269,9 +270,12 @@ export class SalesService {
     );
     const withBoleto = new Set(rows.map((row: any) => row.sale_id));
 
-    // Get earliest pending due date per sale (from payments or installments)
+    // Próximo vencimento EM ABERTO de cada venda = o menor vencimento entre os boletos/PIX a receber e as
+    // parcelas pendentes. Antes usava o vencimento da própria venda (data da 1ª parcela/original), então
+    // venda com a 1ª parcela já paga, ou boleto reemitido com nova data, aparecia como inadimplente
+    // mesmo com o vencimento em dia.
     const dueDates = await this.dataSource.query(
-      `SELECT sale_id, MIN(due_date) as earliest_due
+      `SELECT sale_id, MIN(due_date)::text as earliest_due
        FROM payments
        WHERE sale_id = ANY($1::uuid[])
          AND type IN ('boleto', 'pix')
@@ -279,40 +283,43 @@ export class SalesService {
        GROUP BY sale_id`,
       [ids],
     );
-    const dueDateMap = new Map(dueDates.map((r: any) => [r.sale_id, r.earliest_due]));
-
-    // Also check installments for due dates when payments table doesn't have them
     const installDueDates = await this.dataSource.query(
-      `SELECT sale_id, MIN(due_date) as earliest_due
+      `SELECT sale_id, MIN(due_date)::text as earliest_due
        FROM installments
        WHERE sale_id::uuid = ANY($1::uuid[])
          AND status IN ('pendente', 'vencido')
        GROUP BY sale_id`,
       [ids],
     );
-    for (const r of installDueDates) {
-      if (!dueDateMap.has(r.sale_id)) dueDateMap.set(r.sale_id, r.earliest_due);
+    const dayOf = (value: any): string | null => (value ? String(value).split('T')[0] : null);
+    const dueDateMap = new Map<string, string>();
+    for (const r of [...dueDates, ...installDueDates]) {
+      const day = dayOf(r.earliest_due);
+      if (!day) continue;
+      const current = dueDateMap.get(r.sale_id);
+      if (!current || day < current) dueDateMap.set(r.sale_id, day);
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInBrasilia();
 
     for (const sale of sales) {
       if (withBoleto.has(sale.id) && !['pago', 'vencido'].includes(sale.billingStatus)) {
         sale.billingStatus = 'emitido';
       }
 
-      // Set dueDate from payments/installments if not set on sale
-      const earliestDue = dueDateMap.get(sale.id);
-      if (earliestDue && !sale.dueDate) {
-        sale.dueDate = String(earliestDue).split('T')[0];
-      }
+      const nextDue = dueDateMap.get(sale.id) || null;
+      // Vencimento a exibir/avaliar: o do próximo item em aberto; sem cobrança em aberto, o da venda.
+      (sale as any).nextDueDate = nextDue || dayOf(sale.dueDate);
+      if (nextDue && !sale.dueDate) sale.dueDate = nextDue;
 
-      // Set paymentStatus based on billing and due date
+      // Inadimplente = existe cobrança em aberto E o vencimento dela já passou (hoje ainda é em dia).
       if (!['pago', 'cancelado'].includes(sale.billingStatus) && !['pago', 'finalizado', 'cancelado'].includes(sale.status)) {
-        const rawDue = earliestDue ? String(earliestDue) : null;
-        const effectiveDue = sale.dueDate || (rawDue ? rawDue.split('T')[0] : null);
+        const effectiveDue = (sale as any).nextDueDate as string | null;
         if (effectiveDue && effectiveDue < today && (sale.billingStatus === 'emitido' || withBoleto.has(sale.id))) {
           (sale as any).paymentStatus = 'inadimplente';
+        } else if ((sale as any).paymentStatus === 'inadimplente') {
+          // Estava gravado como inadimplente, mas o vencimento em aberto está em dia (ex.: boleto reemitido).
+          (sale as any).paymentStatus = 'pendente';
         }
       }
     }

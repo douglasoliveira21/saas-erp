@@ -6,6 +6,7 @@ import { useFeedback } from '../components/ui'
 import { getErrorMessage } from '../services/errors'
 import { Plus, Search, Eye, CheckCircle, XCircle, Filter, Trash2, FileText, DollarSign, Check, CreditCard, Edit, Send } from 'lucide-react'
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon'
+import { localToday } from '../utils/format'
 
 interface Sale {
   id: string
@@ -17,6 +18,7 @@ interface Sale {
   billingStatus?: string
   paymentStatus?: string
   dueDate?: string
+  nextDueDate?: string | null
   paymentMethod: string
   totalAmount: number
   netProfit: number
@@ -299,8 +301,8 @@ export function Sales() {
                           return <span className="px-2 py-1 rounded-full text-xs font-medium bg-cyan-100 text-cyan-700">Pago Parcial</span>
                         }
                         if (s.billingStatus === 'emitido' || s.status === 'boleto_emitido') {
-                          const today = new Date().toISOString().split('T')[0]
-                          const dueDate = s.dueDate || ''
+                          const today = localToday()
+                          const dueDate = s.nextDueDate || s.dueDate || ''
                           if (dueDate && dueDate < today) {
                             return <span className="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 animate-pulse">Inadimplente</span>
                           }
@@ -319,7 +321,7 @@ export function Sales() {
                       {(isAdmin || isFinanceiro) && !['finalizado', 'cancelado'].includes(s.status) && (
                         <Link to={`/sales/new?edit=${s.id}`} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar Venda"><Edit className="w-4 h-4" /></Link>
                       )}
-                      {(isAdmin || isFinanceiro) && s.fiscalStatus !== 'autorizada' && !['cancelado', 'finalizado'].includes(s.status) && (!s.dueDate || s.dueDate >= new Date().toISOString().split('T')[0]) && (
+                      {(isAdmin || isFinanceiro) && s.fiscalStatus !== 'autorizada' && !['cancelado', 'finalizado'].includes(s.status) && (!(s.nextDueDate || s.dueDate) || String(s.nextDueDate || s.dueDate) >= localToday()) && (
                         <button onClick={() => window.location.href = '/fiscal?emit=' + s.id} className="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Emitir Nota Fiscal"><FileText className="w-4 h-4" /></button>
                       )}
                       {(isAdmin || isFinanceiro) && s.billingStatus !== 'emitido' && !['boleto_emitido', 'pago'].includes(s.status) && ['pendente', 'nf_emitida'].includes(s.status) && (
@@ -515,7 +517,7 @@ function SaleDetailModal({ sale, onClose, isAdmin, isFinanceiro, approve, cancel
                 <thead><tr className="border-b"><th className="text-left py-1">Parcela</th><th className="text-right py-1">Valor</th><th className="text-center py-1">Vencimento</th><th className="text-center py-1">Status</th></tr></thead>
                 <tbody>
                   {installments.sort((a: any, b: any) => a.number - b.number).map((inst: any) => {
-                    const isOverdue = inst.status === 'pendente' && new Date(inst.dueDate) < new Date()
+                    const isOverdue = inst.status === 'pendente' && String(inst.dueDate).split('T')[0] < localToday()
                     return (
                       <tr key={inst.id} className={'border-b border-gray-100 ' + (isOverdue ? 'bg-red-50' : '')}>
                         <td className="py-1">{inst.number}ª parcela</td>

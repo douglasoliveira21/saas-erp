@@ -9,6 +9,9 @@ import { Bill } from '../suppliers/entities/bill.entity';
 import { Invoice } from '../fiscal/entities/invoice.entity';
 import { SaleItem } from '../sales/entities/sale-item.entity';
 import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
+import { invoiceDocumentNumber } from '../fiscal/invoice-number';
+
+export type CashFlowReportType = 'all' | 'credits' | 'debits';
 
 const PAGE_WIDTH = 595.28; // A4 pt
 const MARGIN = 40;
@@ -49,10 +52,12 @@ export class CashFlowReportPdfService {
     @InjectRepository(CompanyProfile) private companyProfileRepo: Repository<CompanyProfile>,
   ) {}
 
-  async generate(tenantId: string, startDate: string, endDate: string): Promise<Buffer> {
-    const rows = await this.buildRows(startDate, endDate);
+  async generate(tenantId: string, startDate: string, endDate: string, type: CashFlowReportType = 'all'): Promise<Buffer> {
+    const allRows = await this.buildRows(startDate, endDate);
+    // Só créditos ou só débitos: o saldo corrido passa a somar apenas as linhas mostradas.
+    const rows = type === 'credits' ? allRows.filter((r) => r.credit > 0) : type === 'debits' ? allRows.filter((r) => r.debit > 0) : allRows;
     const company = await this.companyProfileRepo.findOne({ where: { tenantId } });
-    return this.render(rows, company, startDate, endDate);
+    return this.render(rows, company, startDate, endDate, type);
   }
 
   private async buildRows(startDate: string, endDate: string): Promise<LedgerRow[]> {
@@ -105,7 +110,7 @@ export class CashFlowReportPdfService {
         : (m.description || '-');
       return {
         date: m.date,
-        documentNumber: invoice ? String(invoice.number) : (bill?.documentNumber || '-'),
+        documentNumber: invoice ? invoiceDocumentNumber(invoice) : (bill?.documentNumber || '-'),
         saleNumber: m.saleId ? m.saleId.substring(0, 8).toUpperCase() : '-',
         description,
         installmentLabel: installment && account
@@ -182,7 +187,7 @@ export class CashFlowReportPdfService {
     try { return Buffer.from(match[1].replace(/\s/g, ''), 'base64'); } catch { return null; }
   }
 
-  private render(rows: LedgerRow[], company: CompanyProfile | null, startDate: string, endDate: string): Promise<Buffer> {
+  private render(rows: LedgerRow[], company: CompanyProfile | null, startDate: string, endDate: string, type: CashFlowReportType): Promise<Buffer> {
     const doc = new PDFDocument({ size: 'A4', margin: MARGIN, bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on('data', (c) => chunks.push(Buffer.from(c)));
@@ -229,7 +234,7 @@ export class CashFlowReportPdfService {
 
     // ---- Título ----
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#111827')
-      .text('LANÇAMENTOS FINANCEIROS - FLUXO DE CAIXA', MARGIN, doc.y, { width: CONTENT_WIDTH, align: 'center' });
+      .text(type === 'credits' ? 'LANÇAMENTOS FINANCEIROS - CRÉDITOS' : type === 'debits' ? 'LANÇAMENTOS FINANCEIROS - DÉBITOS' : 'LANÇAMENTOS FINANCEIROS - FLUXO DE CAIXA', MARGIN, doc.y, { width: CONTENT_WIDTH, align: 'center' });
     doc.font('Helvetica').fontSize(9).fillColor('#6b7280')
       .text(`Período: ${dateFmt(startDate)} a ${dateFmt(endDate)}`, MARGIN, doc.y, { width: CONTENT_WIDTH, align: 'center' });
     doc.moveDown(0.8);
@@ -289,7 +294,7 @@ export class CashFlowReportPdfService {
 
     if (!rows.length) {
       ensureSpace(20);
-      doc.font('Helvetica').fontSize(9.5).fillColor('#6b7280').text('Nenhum lançamento encontrado no período selecionado.', MARGIN, doc.y + 6);
+      doc.font('Helvetica').fontSize(9.5).fillColor('#6b7280').text(type === 'all' ? 'Nenhum lançamento encontrado no período selecionado.' : 'Nenhum lançamento deste tipo no período selecionado.', MARGIN, doc.y + 6);
     }
 
     // ---- Totais (cards) ----
@@ -298,14 +303,17 @@ export class CashFlowReportPdfService {
     doc.moveDown(0.8);
 
     const gap = 12;
-    const boxWidth = (CONTENT_WIDTH - gap * 2) / 3;
     const boxHeight = 48;
     const boxY = doc.y;
-    const cards = [
-      { label: 'TOTAL DE CRÉDITOS', value: money(totalCredit), bg: '#f0fdf4', color: '#15803d' },
-      { label: 'TOTAL DE DÉBITOS', value: money(totalDebit), bg: '#fef2f2', color: '#b91c1c' },
-      { label: 'SALDO DO PERÍODO', value: money(finalBalance), bg: '#eff6ff', color: finalBalance >= 0 ? '#1d4ed8' : '#b91c1c' },
-    ];
+    const creditCard = { label: 'TOTAL DE CRÉDITOS', value: money(totalCredit), bg: '#f0fdf4', color: '#15803d' };
+    const debitCard = { label: 'TOTAL DE DÉBITOS', value: money(totalDebit), bg: '#fef2f2', color: '#b91c1c' };
+    const countCard = { label: 'QUANTIDADE DE LANÇAMENTOS', value: String(rows.length), bg: '#f3f4f6', color: '#111827' };
+    const cards = type === 'credits'
+      ? [creditCard, countCard]
+      : type === 'debits'
+        ? [debitCard, countCard]
+        : [creditCard, debitCard, { label: 'SALDO DO PERÍODO', value: money(finalBalance), bg: '#eff6ff', color: finalBalance >= 0 ? '#1d4ed8' : '#b91c1c' }];
+    const boxWidth = (CONTENT_WIDTH - gap * (cards.length - 1)) / cards.length;
     cards.forEach((card, i) => {
       const x = MARGIN + i * (boxWidth + gap);
       doc.roundedRect(x, boxY, boxWidth, boxHeight, 4).fill(card.bg);

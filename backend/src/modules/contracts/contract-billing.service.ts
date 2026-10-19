@@ -8,6 +8,7 @@ import { InterService } from '../inter/inter.service';
 import { NfseService } from '../fiscal/services/nfse.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { invoiceDocumentNumber } from '../fiscal/invoice-number';
 
 @Injectable()
 export class ContractBillingService implements OnModuleInit {
@@ -859,7 +860,7 @@ export class ContractBillingService implements OnModuleInit {
         const xml = invoices[0].xml_authorized || invoices[0].xml_sent;
         if (xml) {
           attachments.push({
-            filename: `NFSe_${invoices[0].number || 'nota'}_serie${invoices[0].series || 1}.xml`,
+            filename: `NFSe_${invoiceDocumentNumber({ type: 'nfse', number: invoices[0].number, xmlAuthorized: invoices[0].xml_authorized }) || 'nota'}_serie${invoices[0].series || 1}.xml`,
             content: Buffer.from(xml, 'utf-8'),
             contentType: 'application/xml',
           });
@@ -868,7 +869,7 @@ export class ContractBillingService implements OnModuleInit {
           try {
             const pdf = await this.nfseService.downloadPdf(invoices[0].access_key, invoices[0].certificate_id);
             attachments.push({
-              filename: `NFSe_${invoices[0].number || 'nota'}.pdf`,
+              filename: `NFSe_${invoiceDocumentNumber({ type: 'nfse', number: invoices[0].number, xmlAuthorized: invoices[0].xml_authorized }) || 'nota'}.pdf`,
               content: pdf,
               contentType: 'application/pdf',
             });

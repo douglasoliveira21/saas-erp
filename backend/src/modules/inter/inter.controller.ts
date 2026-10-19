@@ -30,6 +30,7 @@ import { PlanGuard } from '../platform/guards/plan.guard';
 import { RequireModule } from '../platform/decorators/require-module.decorator';
 import { BankCredentialsService } from './bank-credentials.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { invoiceDocumentNumberSql } from '../fiscal/invoice-number';
 
 // @RequireModule funciona no nível da classe mesmo com os guards declarados por método (a
 // leitura do metadado independe de onde o PlanGuard está listado) — só o guard em si precisa
@@ -91,10 +92,10 @@ export class InterController {
       `SELECT p.id, p.sale_id as "saleId", p.customer_id as "customerId", p.type, p.codigo_solicitacao as "codigoSolicitacao", p.status, p.value, p.received_value as "receivedValue", p.customer_name as "customerName", p.customer_doc as "customerDoc", p.due_date as "dueDate", p.linha_digitavel as "linhaDigitavel", p.pix_copia_e_cola as "pixCopiaECola", p.nosso_numero as "nossoNumero", p.created_at as "createdAt", p.settled_manually as "settledManually", p.payment_note as "paymentNote", p.installment_id as "installmentId",
        CASE WHEN p.sale_id IS NOT NULL THEN 'venda' ELSE COALESCE((SELECT 'contrato' FROM contract_billings cb WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1), 'outro') END as "origem",
        CASE WHEN p.sale_id IS NOT NULL THEN NULL ELSE (SELECT c.title FROM contract_billings cb JOIN contracts c ON c.id = cb.contract_id WHERE cb.boleto_code = p.codigo_solicitacao LIMIT 1) END as "contractTitle",
-       inv.number as "invoiceNumber", inv.id as "invoiceId", inv.type as "invoiceType", inv.series as "invoiceSeries", inv.status as "invoiceStatus", inv.access_key as "invoiceAccessKey"
+       inv.doc_number as "invoiceNumber", inv.number as "invoiceDpsNumber", inv.id as "invoiceId", inv.type as "invoiceType", inv.series as "invoiceSeries", inv.status as "invoiceStatus", inv.access_key as "invoiceAccessKey"
        FROM payments p
        LEFT JOIN LATERAL (
-         SELECT i.id, i.type, i.series, i.status, i.access_key, i.number
+         SELECT i.id, i.type, i.series, i.status, i.access_key, i.number, ${invoiceDocumentNumberSql('i')} AS doc_number
          FROM invoices i
          WHERE i.status = 'autorizada' AND (
            (p.sale_id IS NOT NULL AND i.sale_id = p.sale_id)

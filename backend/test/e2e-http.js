@@ -45,7 +45,7 @@ const call = async (method, path, token, body, headers = {}) => {
     await db.query('SET session_replication_role = DEFAULT');
   }
   await db.query("DELETE FROM plans WHERE name = 'e2e'");
-  const modules = ['products', 'sales', 'pagamentos', 'financeiro', 'dre', 'reports', 'fiscal', 'contracts', 'compras', 'stock', 'services', 'orcamentos', 'contas_pagar', 'company', 'email_settings'];
+  const modules = ['products', 'sales', 'pagamentos', 'financeiro', 'dre', 'reports', 'fiscal', 'contracts', 'compras', 'stock', 'services', 'orcamentos', 'contas_pagar', 'company', 'email_settings', 'financeiro'];
   const plan = await one('INSERT INTO plans (name, modules) VALUES ($1, $2::jsonb) RETURNING id', ['e2e', JSON.stringify(modules)]);
   const mkTenant = async (name, slug) => (await one("INSERT INTO tenants (name, slug, status, plan_id) VALUES ($1,$2,'ativo',$3) RETURNING id", [name, slug, plan.id])).id;
   const A = await mkTenant('Empresa A', 'a-e2e');
@@ -352,6 +352,67 @@ const call = async (method, path, token, body, headers = {}) => {
   await check('admin e financeiro nao acessam o painel do tecnico (403) e sem login (401)', async () => {
     assert.equal((await call('GET', '/dashboard/technician', tokenA)).status, 403);
     assert.equal((await call('GET', '/dashboard/technician')).status, 401);
+  });
+
+  console.log('Numero do documento: NFS-e (nao a DPS)');
+  const nfseSale = (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status, billing_status) VALUES ($1,$2,$3,'boleto',100,100,1,'pendente','emitido') RETURNING id", [A, tech, cust])).id;
+  await db.query("INSERT INTO invoices (tenant_id, sale_id, type, number, status, xml_authorized, issued_at) VALUES ($1,$2,'nfse',7,'autorizada','<NFSe><infNFSe><nNFSe>1234</nNFSe><DPS><infDPS><nDPS>7</nDPS></infDPS></DPS></infNFSe></NFSe>', now())", [A, nfseSale]);
+  await db.query("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto','COD-NFSE-1','a_receber',100,'Cliente A',$4)", [A, nfseSale, cust, day]);
+  const nfeSale = (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status, billing_status) VALUES ($1,$2,$3,'boleto',100,100,1,'pendente','emitido') RETURNING id", [A, tech, cust])).id;
+  await db.query("INSERT INTO invoices (tenant_id, sale_id, type, number, status, issued_at) VALUES ($1,$2,'nfe',555,'autorizada', now())", [A, nfeSale]);
+  await db.query("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto','COD-NFE-1','a_receber',100,'Cliente A',$4)", [A, nfeSale, cust, day]);
+  const noXmlSale = (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status, billing_status) VALUES ($1,$2,$3,'boleto',100,100,1,'pendente','emitido') RETURNING id", [A, tech, cust])).id;
+  await db.query("INSERT INTO invoices (tenant_id, sale_id, type, number, status, issued_at) VALUES ($1,$2,'nfse',9,'autorizada', now())", [A, noXmlSale]);
+  await db.query("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto','COD-NFSE-SEMXML','a_receber',100,'Cliente A',$4)", [A, noXmlSale, cust, day]);
+  await check('lista de pagamentos mostra o numero da NFS-e (1234) e nao o da DPS (7)', async () => {
+    const r = await call('GET', '/inter/payments?limit=100&page=1&month=' + month, tokenA);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const row = (r.json.data || []).find((p) => p.codigoSolicitacao === 'COD-NFSE-1');
+    assert.ok(row, 'pagamento nao listado');
+    assert.equal(String(row.invoiceNumber), '1234'); assert.equal(String(row.invoiceDpsNumber), '7');
+  });
+  await check('NF-e continua mostrando o proprio numero e NFS-e sem XML cai no numero reservado', async () => {
+    const rows = (await call('GET', '/inter/payments?limit=100&page=1&month=' + month, tokenA)).json.data;
+    assert.equal(String(rows.find((p) => p.codigoSolicitacao === 'COD-NFE-1').invoiceNumber), '555');
+    assert.equal(String(rows.find((p) => p.codigoSolicitacao === 'COD-NFSE-SEMXML').invoiceNumber), '9');
+  });
+
+  console.log('Inadimplencia das vendas');
+  const brt = (offsetDays) => new Date(Date.now() - 3 * 3600000 + offsetDays * 86400000).toISOString().split('T')[0];
+  const mkSale = async (dueDate) => (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status, billing_status, due_date) VALUES ($1,$2,$3,'boleto',300,300,2,'pendente','emitido',$4) RETURNING id", [A, tech, cust, dueDate])).id;
+  const mkPay = (sale, code, status, due) => db.query("INSERT INTO payments (tenant_id, sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, due_date) VALUES ($1,$2,$3,'boleto',$4,$5,150,'Cliente A',$6)", [A, sale, cust, code, status, due]);
+  const firstPaid = await mkSale(brt(-40)); await mkPay(firstPaid, 'COD-INAD-1A', 'pago', brt(-40)); await mkPay(firstPaid, 'COD-INAD-1B', 'a_receber', brt(+20));
+  const dueToday = await mkSale(brt(0)); await mkPay(dueToday, 'COD-INAD-2', 'a_receber', brt(0));
+  const trulyLate = await mkSale(brt(-3)); await mkPay(trulyLate, 'COD-INAD-3', 'a_receber', brt(-3));
+  const reissued = await mkSale(brt(-15)); await mkPay(reissued, 'COD-INAD-4A', 'cancelado', brt(-15)); await mkPay(reissued, 'COD-INAD-4B', 'a_receber', brt(+5));
+  const salesList = async () => { const r = await call('GET', '/sales?limit=200&page=1', tokenA); assert.equal(r.status, 200, JSON.stringify(r.json)); return r.json.data || r.json; };
+  await check('venda com a 1a parcela paga e a 2a a vencer NAO e inadimplente', async () => {
+    const sale = (await salesList()).find((x) => x.id === firstPaid);
+    assert.notEqual(sale.paymentStatus, 'inadimplente'); assert.equal(sale.nextDueDate, brt(+20));
+  });
+  await check('venda que vence HOJE (horario de Brasilia) NAO e inadimplente', async () => {
+    const sale = (await salesList()).find((x) => x.id === dueToday);
+    assert.notEqual(sale.paymentStatus, 'inadimplente'); assert.equal(sale.nextDueDate, brt(0));
+  });
+  await check('venda com boleto vencido ontem ou antes E inadimplente', async () => {
+    const sale = (await salesList()).find((x) => x.id === trulyLate);
+    assert.equal(sale.paymentStatus, 'inadimplente');
+  });
+  await check('boleto reemitido com nova data em dia NAO e inadimplente (vencimento antigo da venda ignorado)', async () => {
+    const sale = (await salesList()).find((x) => x.id === reissued);
+    assert.notEqual(sale.paymentStatus, 'inadimplente'); assert.equal(sale.nextDueDate, brt(+5));
+  });
+
+  console.log('Relatorio por tipo');
+  await check('relatorio de creditos, debitos e completo geram PDF; tipo invalido da 400', async () => {
+    const start = month + '-01'; const end = month + '-28';
+    for (const [type, suffix] of [['all', ''], ['credits', '-creditos'], ['debits', '-debitos']]) {
+      const res = await fetch(API + '/api/financial/cash-flow-report/pdf?startDate=' + start + '&endDate=' + end + '&type=' + type, { headers: { authorization: 'Bearer ' + tokenA } });
+      assert.equal(res.status, 200, type); assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+      assert.ok((res.headers.get('content-disposition') || '').includes('fluxo-de-caixa' + suffix + '-'), type + ' ' + res.headers.get('content-disposition'));
+    }
+    const bad = await fetch(API + '/api/financial/cash-flow-report/pdf?startDate=' + start + '&endDate=' + end + '&type=outro', { headers: { authorization: 'Bearer ' + tokenA } });
+    assert.equal(bad.status, 400);
   });
 
   console.log('Relatorio PDF');

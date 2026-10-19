@@ -4,6 +4,7 @@ import { Repository, LessThanOrEqual, In, DataSource } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { Bill } from './entities/bill.entity';
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
+import { todayInBrasilia } from '../../common/date';
 
 @Injectable()
 export class SuppliersService {
@@ -169,7 +170,7 @@ export class SuppliersService {
       const movIdempotencyKey = `bill-payment-${billPaymentId || id}-${Date.now()}`;
       const existingMov = await manager.query('SELECT id FROM financial_movements WHERE idempotency_key=$1', [movIdempotencyKey]);
       if (!existingMov[0]) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayInBrasilia();
         const isReceivable = bill.type === 'receber';
         const insertedMovement = await insertWithTenant(manager, `INSERT INTO financial_movements (type, category, description, value, date, bill_id, reference_id, reference_type, payment_method, is_forecast, idempotency_key, created_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'bill_payment', $8, false, $9, $10) RETURNING id`,
@@ -273,7 +274,7 @@ export class SuppliersService {
 
   // Alerts: bills due in next N days
   async getAlerts(days = 7): Promise<{ overdue: Bill[]; upcoming: Bill[] }> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInBrasilia();
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + days);
     const futureDateStr = futureDate.toISOString().split('T')[0];
@@ -327,7 +328,7 @@ export class SuppliersService {
 
   // Dashboard summary
   async getSummary(): Promise<any> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInBrasilia();
     const endOfMonth = new Date();
     endOfMonth.setMonth(endOfMonth.getMonth() + 1, 0);
 

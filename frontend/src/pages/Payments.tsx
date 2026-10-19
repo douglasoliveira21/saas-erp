@@ -4,7 +4,7 @@ import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import {
   Download, Search, RefreshCw, CreditCard, XCircle, Trash2, CheckCircle, Undo2, CalendarClock,
-  ChevronLeft, ChevronRight, Plus, Check, X, AlertTriangle, DollarSign, Clock, Edit2, Receipt, Users,
+  ChevronDown, ChevronLeft, ChevronRight, Plus, Check, X, AlertTriangle, DollarSign, Clock, Edit2, Receipt, Users,
   TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle, FileDown, FileCode,
 } from 'lucide-react'
 import { useFeedback } from '../components/ui'
@@ -149,6 +149,7 @@ export function Payments() {
   const [adjustValue, setAdjustValue] = useState('')
   const [adjustNote, setAdjustNote] = useState('')
   const [adjusting, setAdjusting] = useState(false)
+  const [reportMenuOpen, setReportMenuOpen] = useState(false)
   const [reviewSaleId, setReviewSaleId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(LEDGER_PAGE_SIZE)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
@@ -277,11 +278,13 @@ export function Payments() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  async function downloadCashFlowReport() {
+  async function downloadCashFlowReport(type: 'all' | 'credits' | 'debits' = 'all') {
+    setReportMenuOpen(false)
     try {
       const { start, end } = monthBounds(month)
-      const res = await api.get('/financial/cash-flow-report/pdf', { params: { startDate: start, endDate: end }, responseType: 'blob' })
-      saveBlob(res.data, `fluxo-de-caixa-${start}-a-${end}.pdf`)
+      const res = await api.get('/financial/cash-flow-report/pdf', { params: { startDate: start, endDate: end, type }, responseType: 'blob' })
+      const suffix = type === 'credits' ? '-creditos' : type === 'debits' ? '-debitos' : ''
+      saveBlob(res.data, `fluxo-de-caixa${suffix}-${start}-a-${end}.pdf`)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao gerar o relatório de fluxo de caixa') }
   }
 
@@ -1127,9 +1130,27 @@ export function Payments() {
             <h3 className="font-semibold text-gray-900 dark:text-white">Relatório por Fornecedor</h3>
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-500 capitalize">{monthLabel(month)}</span>
-              <button onClick={downloadCashFlowReport} className="btn btn-secondary flex items-center gap-2 text-sm" title="Gerar PDF com todos os lançamentos do período">
-                <FileDown className="w-4 h-4" /> Gerar Relatório Completo
-              </button>
+              <div className="relative">
+                <button onClick={() => setReportMenuOpen(open => !open)} className="btn btn-secondary flex items-center gap-2 text-sm" aria-haspopup="menu" aria-expanded={reportMenuOpen} title="Gerar PDF dos lançamentos do período">
+                  <FileDown className="w-4 h-4" /> Gerar relatório <ChevronDown className="w-4 h-4" />
+                </button>
+                {reportMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setReportMenuOpen(false)} />
+                    <div role="menu" className="absolute right-0 z-20 mt-2 w-60 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+                      <button role="menuitem" onClick={() => downloadCashFlowReport('all')} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50">
+                        <FileDown className="w-4 h-4 text-gray-500" /> Relatório completo
+                      </button>
+                      <button role="menuitem" onClick={() => downloadCashFlowReport('credits')} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50">
+                        <ArrowDownCircle className="w-4 h-4 text-green-600" /> Somente créditos
+                      </button>
+                      <button role="menuitem" onClick={() => downloadCashFlowReport('debits')} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50">
+                        <ArrowUpCircle className="w-4 h-4 text-red-600" /> Somente débitos
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           {report.length === 0 ? (

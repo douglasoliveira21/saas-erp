@@ -176,12 +176,16 @@ export class FinancialController {
   async getCashFlowReportPdf(
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
+    @Query('type') type: string,
     @Res() res: Response,
   ) {
     if (!startDate || !endDate) throw new BadRequestException('Informe o período (startDate e endDate).');
-    const buffer = await this.cashFlowReportPdfService.generate(this.tenantContext.requireTenantId(), startDate, endDate);
+    if (type && !['all', 'credits', 'debits'].includes(type)) throw new BadRequestException('Tipo de relatório inválido. Use all, credits ou debits.');
+    const reportType = (type || 'all') as 'all' | 'credits' | 'debits';
+    const buffer = await this.cashFlowReportPdfService.generate(this.tenantContext.requireTenantId(), startDate, endDate, reportType);
+    const suffix = reportType === 'credits' ? '-creditos' : reportType === 'debits' ? '-debitos' : '';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="fluxo-de-caixa-${startDate}-a-${endDate}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="fluxo-de-caixa${suffix}-${startDate}-a-${endDate}.pdf"`);
     res.send(buffer);
   }
 

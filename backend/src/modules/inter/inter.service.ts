@@ -13,6 +13,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { BankCredentialsService, InterCredentials } from './bank-credentials.service';
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
 import { adjustReceivedValue, ReceivedValueAdjustment } from './received-value-adjustment';
+import { BRT_TODAY_SQL } from '../../common/date';
 
 
 interface TokenCache {
@@ -941,7 +942,7 @@ export class InterService implements OnModuleInit {
       );
     } else {
       await this.saleRepo.manager.query(
-        `UPDATE payments SET status = CASE WHEN due_date < CURRENT_DATE THEN 'vencido' ELSE 'a_receber' END, paid_at=NULL, updated_at=NOW() WHERE id=$1`,
+        `UPDATE payments SET status = CASE WHEN due_date < ${BRT_TODAY_SQL} THEN 'vencido' ELSE 'a_receber' END, paid_at=NULL, updated_at=NOW() WHERE id=$1`,
         [paymentId],
       );
     }

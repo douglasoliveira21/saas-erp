@@ -3,6 +3,7 @@ import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useFeedback } from '../components/ui'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
+import { localToday } from '../utils/format'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
 interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
@@ -133,7 +134,7 @@ export function Fiscal() {
         api.get('/sales'),
         api.get('/fiscal/config').catch(() => ({ data: null })),
       ])
-      setCertificates(certs.data); setInvoices(invs.data.data || invs.data); const today = new Date().toISOString().split('T')[0]; setSales((salesRes.data.data || salesRes.data).filter((sale: any) => sale.status !== 'cancelado' && sale.fiscalStatus !== 'autorizada' && (!sale.dueDate || sale.dueDate >= today)))
+      setCertificates(certs.data); setInvoices(invs.data.data || invs.data); const today = localToday(); setSales((salesRes.data.data || salesRes.data).filter((sale: any) => sale.status !== 'cancelado' && sale.fiscalStatus !== 'autorizada' && (!(sale.nextDueDate || sale.dueDate) || (sale.nextDueDate || sale.dueDate) >= today)))
       if (cfgRes.data) { setNfeAmbiente(cfgRes.data.environment || 1); setFiscalConfig(cfgRes.data) }
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar') }
     finally { setLoading(false) }
