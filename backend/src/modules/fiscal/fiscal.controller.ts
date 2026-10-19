@@ -24,6 +24,7 @@ import { Sale } from '../sales/entities/sale.entity';
 import { getCustomerEmailRecipients, getCustomerEmails } from '../../common/customer-emails';
 import { PlanGuard } from '../platform/guards/plan.guard';
 import { RequireModule } from '../platform/decorators/require-module.decorator';
+import { invoiceDocumentNumber, invoiceDocumentNumberSql } from './invoice-number';
 
 @Controller('fiscal')
 @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
@@ -209,12 +210,24 @@ export class FiscalController {
     }
 
     const [data, total] = await query.getManyAndCount();
+    // A lista não carrega o XML (pesado), então o número da NFS-e vem de uma consulta à parte; "number" é o
+    // número reservado para a DPS e continua no objeto para quem precisar dele.
+    if (data.length) {
+      const rows: Array<{ id: string; doc: string }> = await this.invoiceRepo.manager.query(
+        `SELECT i.id, ${invoiceDocumentNumberSql('i')} AS doc FROM invoices i WHERE i.id = ANY($1::uuid[])`,
+        [data.map((invoice) => invoice.id)],
+      );
+      const byId = new Map(rows.map((row) => [row.id, row.doc]));
+      for (const invoice of data) (invoice as any).documentNumber = byId.get(invoice.id) ?? (invoice.number != null ? String(invoice.number) : null);
+    }
     return { data, total, page: safePage, limit: safeLimit };
   }
   @Get('invoices/:id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  getInvoice(@Param('id') id: string) {
-    return this.invoiceRepo.findOne({ where: { id }, relations: ['sale', 'sale.customer', 'certificate'] });
+  async getInvoice(@Param('id') id: string) {
+    const invoice = await this.invoiceRepo.findOne({ where: { id }, relations: ['sale', 'sale.customer', 'certificate'] });
+    if (invoice) (invoice as any).documentNumber = invoiceDocumentNumber(invoice) || null;
+    return invoice;
   }
 
   @Get('invoices/:id/xml')

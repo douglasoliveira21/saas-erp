@@ -377,6 +377,19 @@ const call = async (method, path, token, body, headers = {}) => {
     assert.equal(String(rows.find((p) => p.codigoSolicitacao === 'COD-NFSE-SEMXML').invoiceNumber), '9');
   });
 
+  await check('tela de Notas Fiscais (lista e detalhe) tambem mostra o numero da NFS-e, nao o da DPS', async () => {
+    const list = await call('GET', '/fiscal/invoices?limit=100&page=1', tokenA);
+    assert.equal(list.status, 200, JSON.stringify(list.json));
+    const byNumber = (n) => list.json.data.find((i) => Number(i.number) === n);
+    assert.equal(String(byNumber(7).documentNumber), '1234'); assert.equal(Number(byNumber(7).number), 7);
+    assert.equal(String(byNumber(555).documentNumber), '555');
+    assert.equal(String(byNumber(9).documentNumber), '9');
+    const detail = await call('GET', '/fiscal/invoices/' + byNumber(7).id, tokenA);
+    assert.equal(detail.status, 200); assert.equal(String(detail.json.documentNumber), '1234');
+    const other = await call('GET', '/fiscal/invoices?limit=100&page=1', tokenB);
+    assert.ok(!other.json.data.some((i) => Number(i.number) === 7), 'tenant B nao pode ver notas do A');
+  });
+
   console.log('Inadimplencia das vendas');
   const brt = (offsetDays) => new Date(Date.now() - 3 * 3600000 + offsetDays * 86400000).toISOString().split('T')[0];
   const mkSale = async (dueDate) => (await one("INSERT INTO sales (tenant_id, technician_id, customer_id, payment_method, subtotal, total_amount, installments, status, billing_status, due_date) VALUES ($1,$2,$3,'boleto',300,300,2,'pendente','emitido',$4) RETURNING id", [A, tech, cust, dueDate])).id;

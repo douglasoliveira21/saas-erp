@@ -6,7 +6,7 @@ import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, 
 import { localToday } from '../utils/format'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
-interface Invoice { id: string; type: string; number: number; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
+interface Invoice { id: string; type: string; number: number; documentNumber?: string | null; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
 interface Sale { id: string; customer: { name: string; cpfCnpj: string; email: string; address: string; city: string; uf: string; neighborhood: string; cep: string; stateRegistration: string }; totalAmount: number; status: string; paymentMethod: string; items: any[] }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', processando: 'Processando', autorizada: 'Autorizada', rejeitada: 'Rejeitada', cancelada: 'Cancelada' }
@@ -345,7 +345,7 @@ export function Fiscal() {
   async function downloadXml(id: string) {
     const inv = invoices.find(i => i.id === id) || viewInvoice
     const path = inv?.type === 'nfe' ? '/fiscal/nfe/download-xml/' + id : inv?.status === 'autorizada' && inv?.accessKey ? '/fiscal/nfse/xml-oficial/' + id : '/fiscal/invoices/' + id + '/download-xml'
-    const filename = inv?.type === 'nfe' ? 'NFe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.xml' : 'NFSe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + (inv?.status === 'autorizada' ? '_oficial' : '') + '.xml'
+    const filename = inv?.type === 'nfe' ? 'NFe_' + (inv?.documentNumber || inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.xml' : 'NFSe_' + (inv?.documentNumber || inv?.number || 'nota') + '_serie' + (inv?.series || 1) + (inv?.status === 'autorizada' ? '_oficial' : '') + '.xml'
     try { saveBlob(await getFiscalBlob(path), filename) }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar XML') }
   }
@@ -354,7 +354,7 @@ export function Fiscal() {
     const inv = invoices.find(i => i.id === id) || viewInvoice
     setError('')
     if (inv?.type === 'nfe') { viewDanfeNfe(id); return }
-    try { saveBlob(await getFiscalBlob('/fiscal/nfse/pdf/' + id), 'NFSe_' + (inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.pdf') }
+    try { saveBlob(await getFiscalBlob('/fiscal/nfse/pdf/' + id), 'NFSe_' + (inv?.documentNumber || inv?.number || 'nota') + '_serie' + (inv?.series || 1) + '.pdf') }
     catch (e: any) { setError(e.response?.data?.message || 'Erro ao baixar PDF') }
   }
 
@@ -897,7 +897,7 @@ export function Fiscal() {
                 const s = invSearch.toLowerCase()
                 const match = (inv.recipientName || '').toLowerCase().includes(s) ||
                   (inv.recipientCnpj || '').includes(s) ||
-                  String(inv.number || '').includes(s) ||
+                  String(inv.documentNumber || inv.number || '').includes(s) ||
                   (inv.accessKey || '').includes(s) ||
                   (inv.type || '').includes(s) ||
                   (inv.status || '').includes(s)
@@ -929,7 +929,7 @@ export function Fiscal() {
                 ) : paginated.map(inv => (
                   <tr key={inv.id} className="hover:bg-gray-50">
                     <td className="table-cell"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + (inv.type === 'nfe' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700')}>{inv.type === 'nfe' ? 'NF-e' : 'NFS-e'}</span></td>
-                    <td className="table-cell font-mono text-sm">{inv.number || '-'}</td>
+                    <td className="table-cell font-mono text-sm">{inv.documentNumber || inv.number || '-'}</td>
                     <td className="table-cell text-sm">{inv.recipientName || '-'}</td>
                     <td className="table-cell font-medium">R$ {Number(inv.totalValue || 0).toFixed(2)}</td>
                     <td className="table-cell">
@@ -1022,7 +1022,7 @@ export function Fiscal() {
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <FileText className="w-5 h-5" />
-                    {viewInvoice.type === 'nfse' ? 'NFS-e' : 'NF-e'} #{viewInvoice.number || 'Rascunho'}
+                    {viewInvoice.type === 'nfse' ? 'NFS-e' : 'NF-e'} #{viewInvoice.documentNumber || viewInvoice.number || 'Rascunho'}
                   </h2>
                   <button onClick={() => { setShowView(false); setViewInvoice(null); setXmlContent(null); setShowXml(false) }} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
                 </div>
@@ -1034,7 +1034,7 @@ export function Fiscal() {
 
                 {/* Dados da Nota */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div><p className="text-xs text-gray-500">Numero</p><p className="font-semibold">{viewInvoice.number || '-'}</p></div>
+                  <div><p className="text-xs text-gray-500">Numero</p><p className="font-semibold">{viewInvoice.documentNumber || viewInvoice.number || '-'}</p></div>
                   <div><p className="text-xs text-gray-500">Serie</p><p className="font-semibold">{viewInvoice.series || 1}</p></div>
                   <div><p className="text-xs text-gray-500">Tipo</p><p className="font-semibold">{viewInvoice.type === 'nfse' ? 'NFS-e' : 'NF-e'}</p></div>
                   <div><p className="text-xs text-gray-500">Emissao</p><p className="font-semibold">{viewInvoice.issuedAt ? new Date(viewInvoice.issuedAt).toLocaleString('pt-BR') : new Date(viewInvoice.createdAt).toLocaleString('pt-BR')}</p></div>
