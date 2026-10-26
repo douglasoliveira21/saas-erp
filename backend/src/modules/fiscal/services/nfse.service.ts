@@ -94,6 +94,28 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       // Padrao nacional: DPS + cLocEmi(7) + tpInsc(1: 2=CNPJ) + CNPJ(14) + serie(5) + nDPS(15) = 45 caracteres.
       const dpsId = (nacional ? 'DPS' + String(config.cityCode).padStart(7, '0') + '2' : 'DPS') + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(config.nfseNextNumber).padStart(15, '0');
 
+      if (nacional) {
+        // Producao e homologacao do Emissor Nacional nao trocam de leiaute na mesma data: a homologacao ja exige finNFSe
+        // (NT 009) e a producao ainda nao. Comeca pelo esperado do ambiente e, se o esquema reclamar de finNFSe, tenta o outro.
+        const sendNacional = async (withFinNFSe: boolean) => {
+          const dps = this.buildDpsXml(config, invoice, serviceData, dpsId, true, withFinNFSe);
+          invoice.xmlSent = dps;
+          const signed = await this.signXml(dps, certId);
+          this.logger.log('XML assinado (primeiros 500 chars): ' + signed.substring(0, 500));
+          // O Emissor Nacional exige a declaracao UTF-8 no XML (E1229); a assinatura nao a inclui.
+          const gz = zlib.gzipSync(Buffer.from('<?xml version="1.0" encoding="UTF-8"?>' + signed, 'utf-8')).toString('base64');
+          return this.emitNacional(invoice, baseUrl, gz, agent, dpsId);
+        };
+        const firstTry = config.environment !== 1;
+        try {
+          return await sendNacional(firstTry);
+        } catch (error: any) {
+          if (!/finNFSe/.test(String(error?.message))) throw error;
+          this.logger.warn('Leiaute com finNFSe=' + firstTry + ' recusado; tentando com finNFSe=' + !firstTry);
+          return await sendNacional(!firstTry);
+        }
+      }
+
       // Montar XML DPS (Declaracao de Prestacao de Servicos) conforme padrao nacional
       const xml = this.buildDpsXml(config, invoice, serviceData, dpsId, nacional);
       invoice.xmlSent = xml;
@@ -412,7 +434,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     return result;
   }
 
-  private buildDpsXml(config: FiscalConfig, invoice: Invoice, serviceData: any, dpsId: string, nacional = false): string {
+  private buildDpsXml(config: FiscalConfig, invoice: Invoice, serviceData: any, dpsId: string, nacional = false, withFinNFSe = nacional): string {
     const cnpj = (config.cnpj || '').replace(/\D/g, '').padStart(14, '0');
     const recipientDoc = (invoice.recipientCnpj || '').replace(/\D/g, '');
     const now = new Date();
@@ -491,10 +513,10 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       : '<totTrib><indTotTrib>0</indTotTrib></totTrib>';
     // Leiaute do Emissor Nacional (NT 009): finNFSe (0 = NFS-e regular) fica logo apos tpEmit, obrigatorio, e sai do grupo IBSCBS.
     const ibsCbsBlock = ibsCbs.enabled
-      ? `<IBSCBS>${nacional ? '' : '<finNFSe>' + ibsCbs.purpose + '</finNFSe>'}<indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
+      ? `<IBSCBS>${withFinNFSe ? '' : '<finNFSe>' + ibsCbs.purpose + '</finNFSe>'}<indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
       : '';
 
-    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit>${nacional ? '<finNFSe>0</finNFSe>' : ''}<cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ>${imTag}<regTrib><opSimpNac>${opSimpNac}</opSimpNac>${opSimpNac === '3' ? '<regApTribSN>1</regApTribSN>' : ''}<regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN>${pAliqTag}</tribMun>${pisCofinsBlock}${totTribTag}</trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
+    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit>${withFinNFSe ? '<finNFSe>0</finNFSe>' : ''}<cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ>${imTag}<regTrib><opSimpNac>${opSimpNac}</opSimpNac>${opSimpNac === '3' ? '<regApTribSN>1</regApTribSN>' : ''}<regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN>${pAliqTag}</tribMun>${pisCofinsBlock}${totTribTag}</trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
   }
 
   private escapeXml(value: string): string {
