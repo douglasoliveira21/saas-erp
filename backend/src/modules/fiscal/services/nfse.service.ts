@@ -173,7 +173,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     } else {
       invoice.status = 'autorizada';
       invoice.accessKey = response.chaveAcesso;
-      invoice.protocolNumber = response.idDps || dpsId;
+      // O idDps da resposta e o Id da NFS-e (53 caracteres) e estoura a coluna de 50; guardamos o Id da DPS (45), que e o que a consulta usa.
+      invoice.protocolNumber = dpsId;
       invoice.issuedAt = new Date();
       invoice.xmlAuthorized = this.gunzipB64(response.nfseXmlGZipB64) || invoice.xmlAuthorized;
     }
@@ -304,7 +305,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
         if (erros.length) throw new Error(erros.map((e: any) => (e.codigo ? e.codigo + ': ' : '') + (e.descricao || '')).join('; '));
         invoice.status = 'cancelada';
         invoice.cancelReason = reason;
-        invoice.cancelProtocol = response?.idEvento || response?.protocolo || '';
+        invoice.cancelProtocol = String(response?.idEvento || response?.protocolo || '').slice(0, 50);
         invoice.canceledAt = new Date();
         invoice.xmlCancel = this.gunzipB64(response?.eventoXmlGZipB64) || invoice.xmlCancel;
       } else {
