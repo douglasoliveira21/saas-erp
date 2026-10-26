@@ -11,6 +11,7 @@ import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { CertificateService } from './certificate.service';
 import { AuditService } from '../../audit/audit.service';
 import { MunicipalitiesService } from '../../platform/municipalities.service';
+import { renderDanfseFromXml } from './danfse-local';
 
 @Injectable()
 export class NfseService {
@@ -228,9 +229,16 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
     if (await this.isNacional(config)) {
-      const pdf = await this.apiRequest((await this.nacionalUrls(config)).adn + '/danfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional', binary: true });
-      if (Buffer.isBuffer(pdf) && pdf.subarray(0, 4).toString() === '%PDF') return this.applyCompanyLogo(pdf, config?.companyLogo);
-      throw new BadRequestException('PDF (DANFSe) nao disponivel no Emissor Nacional');
+      // O DANFSe oficial do portal nem sempre esta no ar (404): nesse caso o PDF e gerado aqui a partir do XML autorizado.
+      try {
+        const pdf = await this.apiRequest((await this.nacionalUrls(config)).adn + '/danfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional', binary: true });
+        if (Buffer.isBuffer(pdf) && pdf.subarray(0, 4).toString() === '%PDF') return this.applyCompanyLogo(pdf, config?.companyLogo);
+      } catch (error: any) {
+        this.logger.warn('DANFSe oficial indisponivel, gerando PDF local: ' + error?.message);
+      }
+      const invoice = await this.invoiceRepository.findOne({ where: { accessKey: chave } });
+      if (!invoice?.xmlAuthorized) throw new BadRequestException('PDF (DANFSe) nao disponivel: a nota nao tem XML autorizado salvo');
+      return renderDanfseFromXml(invoice.xmlAuthorized, chave, config?.companyLogo);
     }
     const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
