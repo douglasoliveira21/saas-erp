@@ -26,6 +26,31 @@ export class NfseService {
     private municipalitiesService: MunicipalitiesService,
   ) {}
 
+  // Municipios que aderiram ao Emissor Nacional (ex.: Betim/MG) emitem direto na SEFIN Nacional,
+  // com o certificado A1 do tenant (mTLS), sem passar pelo Cidade360.
+  private async isNacional(config: FiscalConfig): Promise<boolean> {
+    if (!config?.cityCode) return false;
+    const municipality = await this.municipalitiesService.findByIbgeCode(config.cityCode);
+    return municipality?.provider === 'nfse_nacional';
+  }
+
+  // URLs editaveis: o tenant (ou o catalogo da plataforma) pode sobrescrever o padrao sem novo deploy.
+  private async nacionalUrls(config: FiscalConfig): Promise<{ sefin: string; adn: string }> {
+    const production = config.environment === 1;
+    const municipality = await this.municipalitiesService.findByIbgeCode(config.cityCode);
+    const custom = production
+      ? (config.nfseApiUrl || municipality?.nfseApiUrl)
+      : (config.nfseTestUrl || municipality?.nfseTestUrl);
+    const sefin = (custom || (production ? 'https://sefin.nfse.gov.br/SefinNacional' : 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional')).trim().replace(/\/+$/, '');
+    const adn = production ? 'https://adn.nfse.gov.br' : 'https://adn.producaorestrita.nfse.gov.br';
+    return { sefin, adn };
+  }
+
+  private gunzipB64(value?: string): string | null {
+    if (!value) return null;
+    try { return zlib.gunzipSync(Buffer.from(value, 'base64')).toString('utf-8'); } catch { return null; }
+  }
+
   private async reserveNfseNumber(configId: string): Promise<number> {
     return this.configRepository.manager.transaction(async manager => {
       const rows = await manager.query(`SELECT nfse_next_number FROM fiscal_config WHERE id=$1 FOR UPDATE`, [configId]);
@@ -47,7 +72,8 @@ export class NfseService {
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
 
-    const baseUrl = await this.getBaseUrl(config);
+    const nacional = await this.isNacional(config);
+    const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);
     if (!baseUrl) throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Acesse Modulo Fiscal > Configuracao e preencha o campo "URL API NFS-e${config.environment !== 1 ? ' Teste' : ''}".`);
 
     const agent = await this.certificateService.getHttpsAgent(certId);
@@ -62,7 +88,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
       const cnpj = (config.cnpj || '').replace(/\D/g, '');
       const now = new Date();
-      const dpsId = 'DPS' + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(config.nfseNextNumber).padStart(15, '0');
+      // Padrao nacional: DPS + cLocEmi(7) + tpInsc(1: 2=CNPJ) + CNPJ(14) + serie(5) + nDPS(15) = 45 caracteres.
+      const dpsId = (nacional ? 'DPS' + String(config.cityCode).padStart(7, '0') + '2' : 'DPS') + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(config.nfseNextNumber).padStart(15, '0');
 
       // Montar XML DPS (Declaracao de Prestacao de Servicos) conforme padrao nacional
       const xml = this.buildDpsXml(config, invoice, serviceData, dpsId);
@@ -75,6 +102,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
       // Compactar em GZip e converter para Base64
       const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedXml, 'utf-8')).toString('base64');
+
+      if (nacional) return await this.emitNacional(invoice, baseUrl, xmlGzipB64, agent, dpsId);
 
       // Montar payload conforme API Cidade360
       const payload = {
@@ -127,9 +156,31 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     }
   }
 
+  private async emitNacional(invoice: Invoice, sefinUrl: string, xmlGzipB64: string, agent: any, dpsId: string): Promise<Invoice> {
+    const response = await this.apiRequest(sefinUrl + '/nfse', 'POST', { dpsXmlGZipB64: xmlGzipB64 }, agent, { label: 'Emissor Nacional' });
+    this.logger.log('Resposta Emissor Nacional: ' + JSON.stringify(response).substring(0, 500));
+    const erros = Array.isArray(response?.erros) ? response.erros : [];
+    if (erros.length || !response?.chaveAcesso) {
+      invoice.status = 'rejeitada';
+      invoice.rejectionReason = erros.length
+        ? erros.map((e: any) => `${e.codigo || ''}${e.codigo ? ': ' : ''}${e.descricao || ''}${e.complemento ? ' (' + e.complemento + ')' : ''}`).join('; ')
+        : JSON.stringify(response);
+    } else {
+      invoice.status = 'autorizada';
+      invoice.accessKey = response.chaveAcesso;
+      invoice.protocolNumber = response.idDps || dpsId;
+      invoice.issuedAt = new Date();
+      invoice.xmlAuthorized = this.gunzipB64(response.nfseXmlGZipB64) || invoice.xmlAuthorized;
+    }
+    await this.invoiceRepository.save(invoice);
+    return invoice;
+  }
+
   async consultProtocol(protocolo: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
+    // No Emissor Nacional o "protocolo" guardado e o Id da DPS: a consulta devolve a chave de acesso.
+    if (await this.isNacional(config)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/dps/' + encodeURIComponent(protocolo), 'GET', null, agent, { label: 'Emissor Nacional' });
     const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarProtocolo/' + encodeURIComponent(protocolo), 'GET', null, agent);
   }
@@ -137,6 +188,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async consult(chave: string, certId: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
+    if (await this.isNacional(config)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/nfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional' });
     const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
   }
@@ -150,12 +202,30 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const response = invoice.accessKey
       ? await this.consult(invoice.accessKey, invoice.certificateId)
       : await this.consultProtocol(invoice.protocolNumber, invoice.certificateId);
+    if (response?.nfseXmlGZipB64 || response?.chaveAcesso) {
+      // Emissor Nacional: se a nota existe na consulta ela esta emitida; o cancelamento e tratado pelo evento.
+      return {
+        configured: true,
+        provider: 'nfse_nacional',
+        status: invoice.status === 'cancelada' ? 'cancelada' : 'autorizada',
+        situacao: invoice.status === 'cancelada' ? 'CANCELADA' : 'AUTORIZADA',
+        protocolo: invoice.protocolNumber,
+        accessKey: response.chaveAcesso || invoice.accessKey,
+        verificationCode: invoice.verificationCode,
+        raw: response,
+      };
+    }
     return this.normalizeStatusResponse(response, invoice);
   }
 
   async downloadPdf(chave: string, certId: string): Promise<Buffer> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
+    if (await this.isNacional(config)) {
+      const pdf = await this.apiRequest((await this.nacionalUrls(config)).adn + '/danfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional', binary: true });
+      if (Buffer.isBuffer(pdf) && pdf.subarray(0, 4).toString() === '%PDF') return this.applyCompanyLogo(pdf, config?.companyLogo);
+      throw new BadRequestException('PDF (DANFSe) nao disponivel no Emissor Nacional');
+    }
     const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.pdfGZipB64) {
@@ -189,6 +259,11 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async downloadXmlFromApi(chave: string, certId: string): Promise<string> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
+    if (await this.isNacional(config)) {
+      const nacionalXml = this.gunzipB64((await this.consult(chave, certId))?.nfseXmlGZipB64);
+      if (nacionalXml) return nacionalXml;
+      throw new BadRequestException('XML nao disponivel no Emissor Nacional');
+    }
     const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.notas?.length > 0 && response.notas[0].xmlGZipB64) {
@@ -205,7 +280,8 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const baseUrl = await this.getBaseUrl(config);
+    const nacional = await this.isNacional(config);
+    const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);
 
     try {
       // Montar XML de evento de cancelamento
@@ -215,10 +291,24 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       const signedCancelXml = await this.signCancelXml(cancelXml, certId);
       const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedCancelXml, 'utf-8')).toString('base64');
 
-      const payload = { loteXmlGZipB64: [xmlGzipB64], dadosExtras: [] };
-      const response = await this.apiRequest(baseUrl + '/EnviarSincrono', 'POST', payload, agent);
+      let response: any = {};
+      if (nacional) {
+        if (!invoice.accessKey) throw new Error('Nota sem chave de acesso');
+        response = await this.apiRequest(baseUrl + '/nfse/' + encodeURIComponent(invoice.accessKey) + '/eventos', 'POST', { pedidoRegistroEventoXmlGZipB64: xmlGzipB64 }, agent, { label: 'Emissor Nacional' });
+        const erros = Array.isArray(response?.erros) ? response.erros : [];
+        if (erros.length) throw new Error(erros.map((e: any) => (e.codigo ? e.codigo + ': ' : '') + (e.descricao || '')).join('; '));
+        invoice.status = 'cancelada';
+        invoice.cancelReason = reason;
+        invoice.cancelProtocol = response?.idEvento || response?.protocolo || '';
+        invoice.canceledAt = new Date();
+        invoice.xmlCancel = this.gunzipB64(response?.eventoXmlGZipB64) || invoice.xmlCancel;
+      } else {
+        response = await this.apiRequest(baseUrl + '/EnviarSincrono', 'POST', { loteXmlGZipB64: [xmlGzipB64], dadosExtras: [] }, agent);
+      }
 
-      if (response.processado && response.lote?.[0]?.statusProcessamento === 'SUCESSO') {
+      if (nacional) {
+        // ja tratado acima
+      } else if (response.processado && response.lote?.[0]?.statusProcessamento === 'SUCESSO') {
         invoice.status = 'cancelada';
         invoice.cancelReason = reason;
         invoice.cancelProtocol = response.protocolo || '';
@@ -451,7 +541,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     return result;
   }
 
-  private apiRequest(url: string, method: string, body: any, agent: any): Promise<any> {
+  private apiRequest(url: string, method: string, body: any, agent: any, opts: { label?: string; binary?: boolean } = {}): Promise<any> {
     return new Promise((resolve, reject) => {
       const urlObj = new URL(url);
       const options: any = {
@@ -466,16 +556,23 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       };
 
       const req = https.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk: string) => data += chunk);
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
         res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          const okStatus = (res.statusCode || 500) >= 200 && (res.statusCode || 500) < 300;
+          if (opts.binary && okStatus) { resolve(raw); return; }
+          const data = raw.toString('utf-8');
           let parsed: any;
           try { parsed = data ? JSON.parse(data) : {}; }
           catch { parsed = { raw: data }; }
 
           if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
-            const detail = parsed?.detail || parsed?.message || parsed?.title || parsed?.raw || `HTTP ${res.statusCode}`;
-            reject(new Error(`Cidade360 respondeu ${res.statusCode}: ${detail}`));
+            const apiErrors = Array.isArray(parsed?.erros) && parsed.erros.length
+              ? parsed.erros.map((e: any) => `${e.codigo ? e.codigo + ': ' : ''}${e.descricao || e.mensagem || ''}${e.complemento ? ' (' + e.complemento + ')' : ''}`).join('; ')
+              : '';
+            const detail = apiErrors || parsed?.detail || parsed?.message || parsed?.title || parsed?.raw || `HTTP ${res.statusCode}`;
+            reject(new Error(`${opts.label || 'Cidade360'} respondeu ${res.statusCode}: ${detail}`));
             return;
           }
           resolve(parsed);
