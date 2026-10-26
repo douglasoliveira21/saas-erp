@@ -1177,6 +1177,16 @@ export function Fiscal() {
   )
 }
 
+// Cadastro da empresa -> campos equivalentes da configuracao fiscal (so os que a empresa tem preenchidos).
+function companyToFiscal(company: any): Record<string, string> {
+  const map: Record<string, string> = {
+    cnpj: company?.cnpj, companyName: company?.razaoSocial, stateRegistration: company?.inscricaoEstadual,
+    cityRegistration: company?.inscricaoMunicipal, emitAddress: company?.endereco, emitCep: company?.cep,
+    emitPhone: company?.telefone,
+  }
+  return Object.fromEntries(Object.entries(map).filter(([, value]) => typeof value === 'string' && value.trim() !== ''))
+}
+
 function FiscalConfigForm() {
   const [cfg, setCfg] = useState<any>(null)
   const [saving, setSaving] = useState(false)
@@ -1197,9 +1207,24 @@ function FiscalConfigForm() {
         data.ufCode = linked.slice(0, 2)
         setMsg(`Município ajustado para ${myTenant.municipality.name}/${myTenant.municipality.uf}, conforme o cadastro da empresa. Revise e salve.`)
       }
+      // Campos fiscais ainda vazios nascem preenchidos com o cadastro da empresa.
+      const company = await api.get('/company-profile').then(res => res.data).catch(() => null)
+      const fromCompany = companyToFiscal(company)
+      const filled = Object.keys(fromCompany).filter(key => !String(data[key] ?? '').trim())
+      for (const key of filled) data[key] = fromCompany[key]
+      if (filled.length) setMsg(current => (current ? current + ' ' : '') + 'Dados da empresa preenchidos automaticamente. Revise e salve.')
       setCfg(data)
     }).catch(() => setCfg({}))
   }, [])
+
+  // Sobrescreve a configuracao fiscal com o cadastro atual da empresa.
+  async function pullFromCompany() {
+    const company = await api.get('/company-profile').then(res => res.data).catch(() => null)
+    const fromCompany = companyToFiscal(company)
+    if (!Object.keys(fromCompany).length) { setMsg('Cadastre os dados da empresa primeiro (menu Empresa).'); return }
+    setCfg((current: any) => ({ ...current, ...fromCompany }))
+    setMsg('Dados da empresa carregados. Revise e clique em Salvar Configuracao.')
+  }
 
   // Consulta o catálogo de municípios (mantido pelo super admin) sempre que o código IBGE muda,
   // para avisar se aquela prefeitura já tem provedor de NFS-e homologado.
@@ -1231,7 +1256,10 @@ function FiscalConfigForm() {
 
   return (
     <div className="card space-y-6">
-      <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2"><Settings className="w-5 h-5" /> Configuracao Fiscal</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold text-gray-900 text-lg flex items-center gap-2"><Settings className="w-5 h-5" /> Configuracao Fiscal</h3>
+        <button type="button" onClick={pullFromCompany} className="btn btn-secondary text-sm" title="Copia CNPJ, razão social, inscrições, endereço, CEP e telefone do cadastro da empresa">Puxar dados da empresa</button>
+      </div>
       {msg && <div className="p-3 bg-green-50 text-green-700 rounded-lg text-sm">{msg}</div>}
 
       <div className="grid grid-cols-2 gap-4">
