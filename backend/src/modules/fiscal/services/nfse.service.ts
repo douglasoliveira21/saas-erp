@@ -156,6 +156,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
       return invoice;
     } catch (e) {
+      this.logger.error('Falha ao emitir NFS-e (' + (nacional ? 'Emissor Nacional' : 'Cidade360') + '): ' + e.message);
       invoice.status = 'rejeitada';
       invoice.rejectionReason = e.message;
       await this.invoiceRepository.save(invoice);
