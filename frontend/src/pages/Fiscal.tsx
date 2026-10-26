@@ -16,6 +16,13 @@ export function Fiscal() {
   const { isAdmin } = useAuth()
   const { runOperation } = useFeedback()
   const [tab, setTab] = useState<'invoices' | 'emit' | 'certificates' | 'config'>('invoices')
+  const [nfseProviderLabel, setNfseProviderLabel] = useState('')
+  useEffect(() => {
+    api.get('/catalogs/my-tenant').then(r => {
+      const m = r.data?.municipality
+      if (m) setNfseProviderLabel(`${m.name} / ${m.provider === 'nfse_nacional' ? 'Emissor Nacional' : 'Cidade360'}`)
+    }).catch(() => {})
+  }, [])
   const [certificates, setCertificates] = useState<Certificate[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [sales, setSales] = useState<Sale[]>([])
@@ -449,7 +456,7 @@ export function Fiscal() {
                   <button onClick={() => setEmitType('nfse')} className={'px-4 py-3 rounded-lg border-2 text-sm font-medium flex-1 text-center ' + (emitType === 'nfse' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600')}>
                     <FileText className="w-5 h-5 mx-auto mb-1" />
                     NFS-e (Servico)
-                    <p className="text-xs font-normal mt-1">Cidade360 / Contagem</p>
+                    <p className="text-xs font-normal mt-1">{nfseProviderLabel || 'Cidade360 / Contagem'}</p>
                   </button>
                   <button onClick={() => setEmitType('nfe')} className={'px-4 py-3 rounded-lg border-2 text-sm font-medium flex-1 text-center ' + (emitType === 'nfe' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600')}>
                     <FileText className="w-5 h-5 mx-auto mb-1" />
@@ -1181,9 +1188,14 @@ function FiscalConfigForm() {
       const data = r.data || {}
       // Sem cidade configurada ainda, sugere a do município vinculado ao tenant (escolhido na
       // criação do cliente) em vez de deixar sempre o placeholder fixo de Contagem.
-      if (!data.cityCode) {
-        const myTenant = await api.get('/catalogs/my-tenant').then(res => res.data).catch(() => null)
-        if (myTenant?.municipality?.ibgeCode) data.cityCode = myTenant.municipality.ibgeCode
+      // O municipio escolhido para o tenant manda: uma configuracao antiga ficou com o padrao (Contagem)
+      // e fazia o tenant de outra cidade ver os campos do Cidade360.
+      const myTenant = await api.get('/catalogs/my-tenant').then(res => res.data).catch(() => null)
+      const linked = myTenant?.municipality?.ibgeCode
+      if (linked && data.cityCode !== linked) {
+        data.cityCode = linked
+        data.ufCode = linked.slice(0, 2)
+        setMsg(`Município ajustado para ${myTenant.municipality.name}/${myTenant.municipality.uf}, conforme o cadastro da empresa. Revise e salve.`)
       }
       setCfg(data)
     }).catch(() => setCfg({}))

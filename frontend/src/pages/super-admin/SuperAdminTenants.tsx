@@ -16,7 +16,7 @@ interface TenantUser { id: string; name: string; email: string; role: string; ac
 // escolher mesmo assim (deixa o tenant já configurado pra quando a integração existir), só não
 // pode achar que já funciona.
 function catalogLabel(name: string, status: 'suportado' | 'em_teste' | 'nao_suportado') {
-  return status === 'suportado' ? name : `${name} (em breve)`
+  return status === 'suportado' ? name : status === 'em_teste' ? `${name} (em teste)` : `${name} (em breve)`
 }
 
 const statusColors: Record<string, string> = {
