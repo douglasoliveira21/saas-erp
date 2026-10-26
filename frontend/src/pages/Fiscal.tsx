@@ -1276,9 +1276,9 @@ function FiscalConfigForm() {
           <input className="input" value={cfg.stateRegistration || ''} onChange={e => setCfg({...cfg, stateRegistration: e.target.value})} placeholder="IE" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Inscricao Municipal *</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Inscricao Municipal{nacional ? ' (opcional)' : ' *'}</label>
           <input className="input" value={cfg.cityRegistration || ''} onChange={e => setCfg({...cfg, cityRegistration: e.target.value})} placeholder={nacional ? 'IM do prestador em Betim' : 'IM da Prefeitura'} />
-          {nacional && <p className="text-xs text-gray-400 mt-1">A mesma inscrição municipal cadastrada na Prefeitura de {municipality?.name}.</p>}
+          {nacional && <p className="text-xs text-gray-400 mt-1">Se a empresa não tem inscrição municipal, deixe em branco: a nota é emitida sem ela.</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Regime Tributario</label>

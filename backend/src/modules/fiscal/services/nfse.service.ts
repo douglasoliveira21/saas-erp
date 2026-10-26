@@ -73,11 +73,6 @@ export class NfseService {
     if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada. Acesse Modulo Fiscal > Configuracao e preencha os dados.');
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
-    // No Emissor Nacional o prestador de Betim precisa da IM real; o valor falso '000000' (usado como padrao
-    // no Cidade360) faria a DPS ser rejeitada sem explicar o motivo.
-    if (!String(config.cityRegistration || '').replace(/\D/g, '').replace(/^0+$/, '') && (await this.isNacional(config))) {
-      throw new BadRequestException('Inscricao Municipal nao configurada. Preencha a IM do prestador em Modulo Fiscal > Configuracao antes de emitir.');
-    }
 
     const nacional = await this.isNacional(config);
     const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);
@@ -99,7 +94,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       const dpsId = (nacional ? 'DPS' + String(config.cityCode).padStart(7, '0') + '2' : 'DPS') + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(config.nfseNextNumber).padStart(15, '0');
 
       // Montar XML DPS (Declaracao de Prestacao de Servicos) conforme padrao nacional
-      const xml = this.buildDpsXml(config, invoice, serviceData, dpsId);
+      const xml = this.buildDpsXml(config, invoice, serviceData, dpsId, nacional);
       invoice.xmlSent = xml;
 
       // Assinar XML com certificado A1
@@ -406,7 +401,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     return result;
   }
 
-  private buildDpsXml(config: FiscalConfig, invoice: Invoice, serviceData: any, dpsId: string): string {
+  private buildDpsXml(config: FiscalConfig, invoice: Invoice, serviceData: any, dpsId: string, nacional = false): string {
     const cnpj = (config.cnpj || '').replace(/\D/g, '').padStart(14, '0');
     const recipientDoc = (invoice.recipientCnpj || '').replace(/\D/g, '');
     const now = new Date();
@@ -426,7 +421,9 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     let codTribNac = serviceData?.codTribNacional || '010701';
     codTribNac = codTribNac.replace(/\D/g, '').slice(0, 6);
 
-    const im = config.cityRegistration || '000000';
+    // Emissor Nacional: a IM e opcional, entao prestador sem inscricao municipal omite a tag em vez de mandar valor falso.
+    const imDigits = String(config.cityRegistration || '').replace(/\D/g, '');
+    const imTag = imDigits ? '<IM>' + imDigits + '</IM>' : nacional ? '' : '<IM>000000</IM>';
     const serie = String(config.nfseSeries).padStart(5, '0');
     const nDPS = String(config.nfseNextNumber).padStart(15, '0');
 
@@ -479,7 +476,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       ? `<IBSCBS><finNFSe>${ibsCbs.purpose}</finNFSe><indFinal>${ibsCbs.finalConsumer}</indFinal><cIndOp>${ibsCbs.operationIndicator}</cIndOp><indDest>${ibsCbs.destinationIndicator || '0'}</indDest><valores><trib><gIBSCBS><CST>${ibsCbs.cst}</CST><cClassTrib>${ibsCbs.taxClassification}</cClassTrib></gIBSCBS></trib></valores></IBSCBS>`
       : '';
 
-    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ><IM>${im}</IM><regTrib><opSimpNac>${opSimpNac}</opSimpNac>${opSimpNac === '3' ? '<regApTribSN>1</regApTribSN>' : ''}<regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
+    return `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="${idDps}"><tpAmb>${config.environment}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>VGON-ERP-1.0</verAplic><serie>${config.nfseSeries}</serie><nDPS>${config.nfseNextNumber}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${config.cityCode}</cLocEmi><prest><CNPJ>${cnpj}</CNPJ>${imTag}<regTrib><opSimpNac>${opSimpNac}</opSimpNac>${opSimpNac === '3' ? '<regApTribSN>1</regApTribSN>' : ''}<regEspTrib>0</regEspTrib></regTrib></prest><toma>${recipientDoc.length === 14 ? '<CNPJ>' + recipientDoc + '</CNPJ>' : '<CPF>' + recipientDoc.padStart(11, '0') + '</CPF>'}<xNome>${this.escapeXml(invoice.recipientName || '')}</xNome>${tomaEndBlock}${tomaEmailBlock}</toma><serv><locPrest><cLocPrestacao>${config.cityCode}</cLocPrestacao></locPrest><cServ><cTribNac>${codTribNac}</cTribNac><xDescServ>${this.escapeXml(serviceData?.discriminacao || 'Servicos de informatica')}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valor}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>${issRetentionType}</tpRetISSQN><pAliq>${aliqFormatted}</pAliq></tribMun>${pisCofinsBlock}<totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores>${ibsCbsBlock}</infDPS></DPS>`;
   }
 
   private escapeXml(value: string): string {
