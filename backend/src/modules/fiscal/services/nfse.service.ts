@@ -103,7 +103,9 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       this.logger.log('XML assinado (ultimos 200 chars): ' + signedXml.substring(signedXml.length - 200));
 
       // Compactar em GZip e converter para Base64
-      const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedXml, 'utf-8')).toString('base64');
+      // O Emissor Nacional exige a declaracao UTF-8 no XML (E1229); a assinatura nao a inclui.
+      const xmlToSend = nacional ? '<?xml version="1.0" encoding="UTF-8"?>' + signedXml : signedXml;
+      const xmlGzipB64 = zlib.gzipSync(Buffer.from(xmlToSend, 'utf-8')).toString('base64');
 
       if (nacional) return await this.emitNacional(invoice, baseUrl, xmlGzipB64, agent, dpsId);
 
@@ -292,7 +294,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       const cancelXml = this.buildCancelEventXml(invoice, cnpj, reason, config.environment);
       // Assinar XML de cancelamento com certificado
       const signedCancelXml = await this.signCancelXml(cancelXml, certId);
-      const xmlGzipB64 = zlib.gzipSync(Buffer.from(signedCancelXml, 'utf-8')).toString('base64');
+      const xmlGzipB64 = zlib.gzipSync(Buffer.from(nacional ? '<?xml version="1.0" encoding="UTF-8"?>' + signedCancelXml : signedCancelXml, 'utf-8')).toString('base64');
 
       let response: any = {};
       if (nacional) {
