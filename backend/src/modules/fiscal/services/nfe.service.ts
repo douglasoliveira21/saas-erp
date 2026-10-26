@@ -506,10 +506,14 @@ export class NfeService {
       const destCMun = destCMunDigits.length === 7 ? destCMunDigits : this.digitsField(config.cityCode, 7);
       dest += `<enderDest><xLgr>${this.escXml(saleData?.recipientAddress || 'Endereco', 60)}</xLgr><nro>${this.escXml(saleData?.recipientNumber || 'SN', 60)}</nro><xBairro>${this.escXml(saleData?.recipientNeighborhood || 'Centro', 60)}</xBairro><cMun>${destCMun}</cMun><xMun>${this.escXml(destCity, 60)}</xMun><UF>${destUf}</UF><CEP>${destCep || '32010000'}</CEP><cPais>1058</cPais><xPais>Brasil</xPais></enderDest>`;
       // indIEDest: 1=Contribuinte (tem IE), 2=Isento, 9=Nao contribuinte (CPF ou CNPJ sem IE)
-      const destIE = saleData?.recipientIE || '';
-      if (destIE) {
+      // Texto sem numeros no campo (ex.: "ISENTO") nao pode virar <IE></IE> com indIEDest=1: a SEFAZ rejeita (232).
+      const destIERaw = String(saleData?.recipientIE || '').trim();
+      const destIEDigits = destIERaw.replace(/\D/g, '');
+      if (destIEDigits) {
         dest += '<indIEDest>1</indIEDest>';
-        dest += `<IE>${destIE.replace(/\D/g, '')}</IE>`;
+        dest += `<IE>${destIEDigits}</IE>`;
+      } else if (/isent/i.test(destIERaw)) {
+        dest += '<indIEDest>2</indIEDest>';
       } else {
         dest += '<indIEDest>9</indIEDest>';
       }
