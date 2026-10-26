@@ -573,10 +573,16 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
           catch { parsed = { raw: data }; }
 
           if ((res.statusCode || 500) < 200 || (res.statusCode || 500) >= 300) {
-            const apiErrors = Array.isArray(parsed?.erros) && parsed.erros.length
-              ? parsed.erros.map((e: any) => `${e.codigo ? e.codigo + ': ' : ''}${e.descricao || e.mensagem || ''}${e.complemento ? ' (' + e.complemento + ')' : ''}`).join('; ')
+            // A API devolve a lista de erros com nomes/caixa diferentes conforme o endpoint (erros, erro, Erros...).
+            const errorList = [parsed?.erros, parsed?.erro, parsed?.Erros, parsed?.Erro, parsed?.errors].find((list: any) => Array.isArray(list) && list.length) as any[] | undefined;
+            const pick = (e: any, ...keys: string[]) => { for (const key of keys) if (e?.[key]) return String(e[key]); return ''; };
+            const apiErrors = errorList
+              ? errorList.map((e: any) => { const code = pick(e, 'codigo', 'Codigo'); const text = pick(e, 'descricao', 'Descricao', 'mensagem', 'Mensagem') || (typeof e === 'string' ? e : ''); const extra = pick(e, 'complemento', 'Complemento'); return (code ? code + ': ' : '') + text + (extra ? ' (' + extra + ')' : ''); }).join('; ')
               : '';
-            const detail = apiErrors || parsed?.detail || parsed?.message || parsed?.title || parsed?.raw || `HTTP ${res.statusCode}`;
+            // Sem formato conhecido, mostra o corpo bruto para o motivo nunca ficar escondido atras de "HTTP 400".
+            const rawBody = data && data.trim() ? data.trim().slice(0, 800) : '';
+            this.logger.warn(`${opts.label || 'Cidade360'} ${res.statusCode} em ${method} ${urlObj.pathname}: ${rawBody || '(corpo vazio)'}`);
+            const detail = apiErrors || parsed?.detail || parsed?.message || parsed?.title || rawBody || `HTTP ${res.statusCode} (corpo vazio)`;
             reject(new Error(`${opts.label || 'Cidade360'} respondeu ${res.statusCode}: ${detail}`));
             return;
           }
