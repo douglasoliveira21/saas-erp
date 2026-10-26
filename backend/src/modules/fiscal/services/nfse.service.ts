@@ -73,6 +73,11 @@ export class NfseService {
     if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada. Acesse Modulo Fiscal > Configuracao e preencha os dados.');
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
+    // No Emissor Nacional o prestador de Betim precisa da IM real; o valor falso '000000' (usado como padrao
+    // no Cidade360) faria a DPS ser rejeitada sem explicar o motivo.
+    if (!String(config.cityRegistration || '').replace(/\D/g, '').replace(/^0+$/, '') && (await this.isNacional(config))) {
+      throw new BadRequestException('Inscricao Municipal nao configurada. Preencha a IM do prestador em Modulo Fiscal > Configuracao antes de emitir.');
+    }
 
     const nacional = await this.isNacional(config);
     const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);

@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ServiceOrderStatus } from '../service-orders/entities/service-order-status.entity';
+import { DEFAULT_ORDER_STATUSES } from '../service-orders/default-statuses';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
@@ -203,6 +205,8 @@ export class TenantsService {
         await costRepo.save(costRepo.create({ code: center.code, name: center.name, active: true }));
         costCenters++;
       }
+      const statusRepo = manager.getRepository(ServiceOrderStatus);
+      if ((await statusRepo.count()) === 0) await statusRepo.save(statusRepo.create(DEFAULT_ORDER_STATUSES.map((status) => ({ ...status, active: true }))));
       return { chartAccounts, costCenters };
     });
   }

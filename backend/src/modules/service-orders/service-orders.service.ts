@@ -11,6 +11,7 @@ import { ServiceOrderEvent } from './entities/service-order-event.entity';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ServiceOrderPdfService } from './service-order-pdf.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { DEFAULT_ORDER_STATUSES } from './default-statuses';
 import { TenantsService } from '../platform/tenants.service';
 
 const ATTACHMENT_TYPES = ['foto_antes', 'foto_depois', 'documento', 'geral'];
@@ -68,7 +69,11 @@ export class ServiceOrdersService {
 
   // === Status (configurável) ===
 
-  findAllStatuses(includeInactive = false) {
+  async findAllStatuses(includeInactive = false) {
+    // Tenant novo nasce sem status: cria os padroes na primeira consulta para a OS poder evoluir.
+    if (this.tenantContext.getTenantId() && (await this.statusesRepository.count()) === 0) {
+      await this.statusesRepository.save(this.statusesRepository.create(DEFAULT_ORDER_STATUSES.map((status) => ({ ...status, active: true }))));
+    }
     return this.statusesRepository.find({
       where: includeInactive ? {} : { active: true },
       order: { sortOrder: 'ASC' },

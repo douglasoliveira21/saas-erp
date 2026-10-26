@@ -5,7 +5,7 @@ export class ServiceOrderStatus {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 40, unique: true })
+  @Column({ length: 40 })
   key: string;
 
   @Column({ length: 80 })
