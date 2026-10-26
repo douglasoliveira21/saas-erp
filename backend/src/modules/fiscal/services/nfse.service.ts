@@ -420,7 +420,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
     const aliqFormatted = Number(iss.rate ?? serviceData?.aliquota ?? 5).toFixed(2);
     // ISSQN Retido: 1 = não retido, 2 = retido pelo tomador
     const issRetentionType = iss.retentionType || (serviceData?.issRetido ? '2' : '1');
-    let codTribNac = serviceData?.codTribNacional || '010701';
+    let codTribNac = serviceData?.codTribNacional || config.defaultServiceCode || '010701';
     codTribNac = codTribNac.replace(/\D/g, '').slice(0, 6);
 
     // Emissor Nacional: a IM e opcional, entao prestador sem inscricao municipal omite a tag em vez de mandar valor falso.

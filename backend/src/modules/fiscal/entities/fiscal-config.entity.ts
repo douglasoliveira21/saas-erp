@@ -67,6 +67,10 @@ export class FiscalConfig {
   @Column({ name: 'emit_phone', length: 20, nullable: true })
   emitPhone: string;
 
+  // Codigo de Tributacao Nacional (cTribNac, 6 digitos) usado quando a nota nao informa outro.
+  @Column({ name: 'default_service_code', length: 6, nullable: true })
+  defaultServiceCode: string | null;
+
   // NFC-e
   @Column({ name: 'nfce_series', type: 'int', default: 1, nullable: true })
   nfceSeries: number;

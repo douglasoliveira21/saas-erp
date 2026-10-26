@@ -12,6 +12,17 @@ interface Sale { id: string; customer: { name: string; cpfCnpj: string; email: s
 const statusLabels: Record<string, string> = { pendente: 'Pendente', processando: 'Processando', autorizada: 'Autorizada', rejeitada: 'Rejeitada', cancelada: 'Cancelada' }
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', processando: 'bg-blue-100 text-blue-700', autorizada: 'bg-green-100 text-green-700', rejeitada: 'bg-red-100 text-red-700', cancelada: 'bg-gray-100 text-gray-700' }
 
+// Codigos de Tributacao Nacional (cTribNac = item.subitem.desdobro) mais usados; o campo aceita qualquer codigo de 6 digitos.
+const SERVICE_CODES: Array<[string, string]> = [
+  ['140101', '14.01.01 - Manutenção, conserto e conservação de máquinas, veículos e equipamentos'],
+  ['140201', '14.02.01 - Assistência técnica'],
+  ['010701', '01.07.01 - Suporte técnico em informática'],
+  ['010801', '01.08.01 - Planejamento e manutenção de páginas eletrônicas'],
+  ['010401', '01.04.01 - Elaboração de programas de computadores'],
+  ['010501', '01.05.01 - Licenciamento de programas de computação'],
+  ['010601', '01.06.01 - Assessoria e consultoria em informática'],
+]
+
 export function Fiscal() {
   const { isAdmin } = useAuth()
   const { runOperation } = useFeedback()
@@ -142,7 +153,7 @@ export function Fiscal() {
         api.get('/fiscal/config').catch(() => ({ data: null })),
       ])
       setCertificates(certs.data); setInvoices(invs.data.data || invs.data); const today = localToday(); setSales((salesRes.data.data || salesRes.data).filter((sale: any) => sale.status !== 'cancelado' && sale.fiscalStatus !== 'autorizada' && (!(sale.nextDueDate || sale.dueDate) || (sale.nextDueDate || sale.dueDate) >= today)))
-      if (cfgRes.data) { setNfeAmbiente(cfgRes.data.environment || 1); setFiscalConfig(cfgRes.data) }
+      if (cfgRes.data) { setNfeAmbiente(cfgRes.data.environment || 1); setFiscalConfig(cfgRes.data); if (cfgRes.data.defaultServiceCode) setItemLista(cfgRes.data.defaultServiceCode) }
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao carregar') }
     finally { setLoading(false) }
   }
@@ -227,6 +238,7 @@ export function Fiscal() {
   async function emitNote() {
     if (!activeCert) { setError('Nenhum certificado ativo'); return }
     if (!recipientName || !totalValue) { setError('Preencha destinatario e valor'); return }
+    if (emitType === 'nfse' && !/^\d{6}$/.test(itemLista)) { setError('Informe o Codigo de Tributacao Nacional com 6 digitos (ex.: 140101)'); return }
     setEmitting(true); setError(''); setSuccess('')
     try {
       const payload = {
@@ -550,15 +562,9 @@ export function Fiscal() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Codigo Tributacao Nacional ISS</label>
-                      <select className="input" value={itemLista} onChange={e => setItemLista(e.target.value)}>
-                        <option value="010701">01.07.01 - Suporte tecnico em informatica</option>
-                        <option value="010801">01.08.01 - Planejamento e manutencao de paginas</option>
-                        <option value="010401">01.04.01 - Elaboracao de programas</option>
-                        <option value="010501">01.05.01 - Licenciamento de software</option>
-                        <option value="010601">01.06.01 - Assessoria e consultoria em informatica</option>
-                        <option value="140201">14.02.01 - Assistencia tecnica</option>
-                        <option value="140101">14.01.01 - Manutencao de maquinas e equipamentos</option>
-                      </select>
+                      <input className="input" list="service-codes" inputMode="numeric" maxLength={6} value={itemLista} onChange={e => setItemLista(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6 dígitos, ex.: 140101" />
+                      <datalist id="service-codes">{SERVICE_CODES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</datalist>
+                      <p className="text-xs text-gray-400 mt-1">{SERVICE_CODES.find(([code]) => code === itemLista)?.[1] || 'Digite o código de 6 dígitos (item.subitem.desdobro) da lista nacional.'}</p>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Aliquota ISS (%)</label>
@@ -1333,6 +1339,13 @@ function FiscalConfigForm() {
           <input className="input" type="number" value={cfg.nfseNextNumber || 1} onChange={e => setCfg({...cfg, nfseNextNumber: parseInt(e.target.value)})} />
           {nacional && <p className="text-xs text-gray-400 mt-1">Numeração da DPS. Se você já emitiu pelo portal nacional com esta série, comece depois do último número usado para não repetir.</p>}
         </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Código de Tributação Nacional padrão (cTribNac)</label>
+        <input className="input" list="service-codes-config" inputMode="numeric" maxLength={6} value={cfg.defaultServiceCode || ''} onChange={e => setCfg({...cfg, defaultServiceCode: e.target.value.replace(/\D/g, '').slice(0, 6)})} placeholder="Ex.: 140101" />
+        <datalist id="service-codes-config">{SERVICE_CODES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}</datalist>
+        <p className="text-xs text-gray-400 mt-1">{SERVICE_CODES.find(([code]) => code === cfg.defaultServiceCode)?.[1] || 'Serviço principal da empresa; vem preenchido ao emitir (pode ser trocado em cada nota). Sem valor, usa 01.07.01.'}</p>
       </div>
 
       {nacional && (
