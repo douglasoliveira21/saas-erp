@@ -1174,7 +1174,7 @@ function FiscalConfigForm() {
   const [cfg, setCfg] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  const [municipality, setMunicipality] = useState<{ found?: boolean; name?: string; uf?: string; status?: string; nfseApiUrl?: string | null; nfseTestUrl?: string | null } | null>(null)
+  const [municipality, setMunicipality] = useState<{ found?: boolean; name?: string; uf?: string; provider?: string | null; status?: string; nfseApiUrl?: string | null; nfseTestUrl?: string | null } | null>(null)
 
   useEffect(() => {
     api.get('/fiscal/config').then(async r => {
@@ -1198,6 +1198,10 @@ function FiscalConfigForm() {
     api.get(`/catalogs/municipalities/${cityCode}`).then(r => { if (!cancelled) setMunicipality(r.data?.found === false ? null : r.data) }).catch(() => { if (!cancelled) setMunicipality(null) })
     return () => { cancelled = true }
   }, [cfg?.cityCode])
+
+  // Prefeituras no Emissor Nacional (ex.: Betim/MG) emitem direto no portal nacional com o certificado A1,
+  // sem URL de provedor: o formulario mostra so o que esse modo precisa.
+  const nacional = municipality?.provider === 'nfse_nacional'
 
   function useMunicipalityUrls() {
     if (!municipality) return
@@ -1233,7 +1237,8 @@ function FiscalConfigForm() {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Inscricao Municipal *</label>
-          <input className="input" value={cfg.cityRegistration || ''} onChange={e => setCfg({...cfg, cityRegistration: e.target.value})} placeholder="IM da Prefeitura" />
+          <input className="input" value={cfg.cityRegistration || ''} onChange={e => setCfg({...cfg, cityRegistration: e.target.value})} placeholder={nacional ? 'IM do prestador em Betim' : 'IM da Prefeitura'} />
+          {nacional && <p className="text-xs text-gray-400 mt-1">A mesma inscrição municipal cadastrada na Prefeitura de {municipality?.name}.</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Regime Tributario</label>
@@ -1256,7 +1261,7 @@ function FiscalConfigForm() {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Municipio (codigo IBGE 7 dig)</label>
-          <input className="input" value={cfg.cityCode || '3118601'} onChange={e => setCfg({...cfg, cityCode: e.target.value})} placeholder="3118601 = Contagem" />
+          <input className="input" value={cfg.cityCode || '3118601'} onChange={e => { const cityCode = e.target.value.replace(/\D/g, '').slice(0, 7); setCfg({...cfg, cityCode, ...(cityCode.length >= 2 ? { ufCode: cityCode.slice(0, 2) } : {})}) }} placeholder="3106705 = Betim, 3118601 = Contagem" />
           {municipality && (
             <p className="text-xs mt-1 flex items-center gap-2">
               <span className={`rounded-full px-2 py-0.5 font-medium ${municipality.status === 'suportado' ? 'bg-green-100 text-green-700' : municipality.status === 'em_teste' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -1286,10 +1291,37 @@ function FiscalConfigForm() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">NFS-e Proximo Numero</label>
           <input className="input" type="number" value={cfg.nfseNextNumber || 1} onChange={e => setCfg({...cfg, nfseNextNumber: parseInt(e.target.value)})} />
+          {nacional && <p className="text-xs text-gray-400 mt-1">Numeração da DPS. Se você já emitiu pelo portal nacional com esta série, comece depois do último número usado para não repetir.</p>}
         </div>
       </div>
 
+      {nacional && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 space-y-2">
+          <p className="font-semibold">Emissão pelo Emissor Nacional de NFS-e — {municipality?.name}/{municipality?.uf}</p>
+          <p>A nota é emitida direto no portal nacional, assinada com o certificado A1 da sua empresa. Não é preciso informar URL de provedor.</p>
+          <ol className="list-decimal pl-5 space-y-1">
+            <li>Preencha CNPJ, razão social e a inscrição municipal acima.</li>
+            <li>Escolha o regime tributário (Simples Nacional, MEI ou Regime Normal).</li>
+            <li>Envie o certificado A1 na aba <b>Certificados</b>.</li>
+            <li>Emita primeiro em <b>Homologação</b>; só depois mude o ambiente para Produção.</li>
+          </ol>
+          {municipality?.status === 'em_teste' && cfg.environment === 1 && (
+            <p className="rounded bg-amber-100 px-3 py-2 text-amber-800">Esta integração ainda está em teste. Confirme uma nota em Homologação antes de emitir em Produção.</p>
+          )}
+        </div>
+      )}
+
       {/* URLs da API NFS-e */}
+      {nacional ? (
+        <details className="rounded-lg border border-gray-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">Avançado: endereços da API do Emissor Nacional (opcional)</summary>
+          <p className="text-xs text-gray-500 mt-2">Deixe em branco para usar os endereços oficiais. Preencha só se a Receita/Prefeitura informar outro endereço.</p>
+          <div className="grid grid-cols-1 gap-3 mt-3">
+            <input className="input" value={cfg.nfseApiUrl || ''} onChange={e => setCfg({...cfg, nfseApiUrl: e.target.value})} placeholder="Produção — padrão: https://sefin.nfse.gov.br/SefinNacional" />
+            <input className="input" value={cfg.nfseTestUrl || ''} onChange={e => setCfg({...cfg, nfseTestUrl: e.target.value})} placeholder="Homologação — padrão: https://sefin.producaorestrita.nfse.gov.br/SefinNacional" />
+          </div>
+        </details>
+      ) : (<>
       <h4 className="font-medium text-gray-700 mt-4">URLs API NFS-e (Cidade360 / Padrão Nacional)</h4>
       <div className="grid grid-cols-1 gap-4">
         <div>
@@ -1303,6 +1335,7 @@ function FiscalConfigForm() {
           <p className="text-xs text-gray-400 mt-1">URL para testes. Usada quando Ambiente = Homologação</p>
         </div>
       </div>
+      </>)}
 
       {/* Endereco do Emitente */}
       <h4 className="font-medium text-gray-700 mt-4">Endereco do Emitente (NF-e)</h4>      <div className="grid grid-cols-2 gap-4">

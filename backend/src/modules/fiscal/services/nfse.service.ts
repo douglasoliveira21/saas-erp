@@ -38,9 +38,11 @@ export class NfseService {
   private async nacionalUrls(config: FiscalConfig): Promise<{ sefin: string; adn: string }> {
     const production = config.environment === 1;
     const municipality = await this.municipalitiesService.findByIbgeCode(config.cityCode);
+    // Um endereco do Cidade360 deixado na configuracao (tenant que trocou de municipio) nao serve para a SEFIN.
+    const usable = (url?: string | null) => (url && !/cidade360/i.test(url) ? url : undefined);
     const custom = production
-      ? (config.nfseApiUrl || municipality?.nfseApiUrl)
-      : (config.nfseTestUrl || municipality?.nfseTestUrl);
+      ? (usable(config.nfseApiUrl) || usable(municipality?.nfseApiUrl))
+      : (usable(config.nfseTestUrl) || usable(municipality?.nfseTestUrl));
     const sefin = (custom || (production ? 'https://sefin.nfse.gov.br/SefinNacional' : 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional')).trim().replace(/\/+$/, '');
     const adn = production ? 'https://adn.nfse.gov.br' : 'https://adn.producaorestrita.nfse.gov.br';
     return { sefin, adn };
