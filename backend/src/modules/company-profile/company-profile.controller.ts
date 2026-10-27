@@ -15,6 +15,13 @@ export class CompanyProfileController {
     private readonly tenantContext: TenantContextService,
   ) {}
 
+  // Logo e nome da empresa para o menu lateral: qualquer usuario logado do tenant (inclusive tecnico) precisa ver.
+  @Get('branding')
+  async branding() {
+    const profile = await this.service.getForTenant(this.tenantContext.requireTenantId());
+    return { logo: profile?.logo || null, name: profile?.razaoSocial || null };
+  }
+
   @Get()
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async get() {

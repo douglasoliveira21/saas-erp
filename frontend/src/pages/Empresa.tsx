@@ -21,6 +21,7 @@ export function Empresa() {
     try {
       const res = await api.patch('/company-profile', cfg)
       setCfg(res.data)
+      window.dispatchEvent(new Event('company-branding-changed'))
       setMessage('Dados da empresa salvos com sucesso.')
     } catch (e: any) {
       setError(e.response?.data?.message || 'Erro ao salvar dados da empresa')

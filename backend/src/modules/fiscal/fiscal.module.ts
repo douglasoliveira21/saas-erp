@@ -16,10 +16,11 @@ import { FinancialMovement } from '../financial/entities/financial-movement.enti
 import { MailModule } from '../mail/mail.module';
 import { AuditModule } from '../audit/audit.module';
 import { Sale } from '../sales/entities/sale.entity';
+import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
 import { PlatformModule } from '../platform/platform.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FiscalEvent, FinancialTask, FinancialMovement, Sale]), MailModule, AuditModule, PlatformModule],
+  imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FiscalEvent, FinancialTask, FinancialMovement, Sale, CompanyProfile]), MailModule, AuditModule, PlatformModule],
   controllers: [FiscalController],
   providers: [CertificateService, NfeService, NfseService, DanfePdfService, FiscalIntegrationService, FiscalJobsService],
   exports: [CertificateService, NfeService, NfseService, DanfePdfService],

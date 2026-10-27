@@ -20,6 +20,15 @@ interface NotificationItem {
 
 export function Layout() {
   const { user, logout } = useAuth()
+  // Logo cadastrada em Empresa substitui a logo do sistema no menu lateral.
+  const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const load = () => { api.get('/company-profile/branding').then(res => { if (!cancelled) setCompanyLogo(res.data?.logo || null) }).catch(() => {}) }
+    load()
+    window.addEventListener('company-branding-changed', load)
+    return () => { cancelled = true; window.removeEventListener('company-branding-changed', load) }
+  }, [])
   const location = useLocation()
   const navigate = useNavigate()
   const notificationsRef = useRef<HTMLDivElement>(null)
@@ -115,7 +124,7 @@ export function Layout() {
     <>
       {/* Logo */}
       <div className="flex items-center justify-center h-20 px-5 border-b border-gray-100 flex-shrink-0">
-        <img src="https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png" alt="VGON ERP" className="h-14 object-contain" />
+        <img src={companyLogo || 'https://vgon.com.br/wp-content/uploads/2020/12/VGON-OFICIAL-PNG.png'} alt={companyLogo ? 'Logo da empresa' : 'VGON ERP'} className="h-14 max-w-full object-contain" />
       </div>
 
       {/* Nav */}

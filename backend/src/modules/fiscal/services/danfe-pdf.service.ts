@@ -6,6 +6,7 @@ import bwipjs = require('bwip-js');
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalConfig } from '../entities/fiscal-config.entity';
 import { Sale } from '../../sales/entities/sale.entity';
+import { CompanyProfile } from '../../company-profile/entities/company-profile.entity';
 
 interface DanfeItem { code: string; description: string; ncm: string; cst: string; cfop: string; unit: string; quantity: number; unitPrice: number; discount: number; total: number; bcIcms: number; icms: number; ipi: number; icmsRate: number; ipiRate: number }
 
@@ -15,19 +16,27 @@ export class DanfePdfService {
     @InjectRepository(Invoice) private readonly invoiceRepo: Repository<Invoice>,
     @InjectRepository(FiscalConfig) private readonly configRepo: Repository<FiscalConfig>,
     @InjectRepository(Sale) private readonly saleRepo: Repository<Sale>,
+    @InjectRepository(CompanyProfile) private readonly companyRepo: Repository<CompanyProfile>,
   ) {}
+
+  // A logo cadastrada em Empresas vale para a DANFE; sem ela, usa a logo da configuracao fiscal (comportamento anterior).
+  private async configWithLogo(config: FiscalConfig | null): Promise<FiscalConfig | null> {
+    if (!config) return config;
+    const profile = config.tenantId ? await this.companyRepo.findOne({ where: { tenantId: config.tenantId } }) : null;
+    return profile?.logo ? ({ ...config, companyLogo: profile.logo } as FiscalConfig) : config;
+  }
 
   async generate(invoiceId: string): Promise<Buffer> {
     const invoice = await this.invoiceRepo.findOne({ where: { id: invoiceId }, relations: ['sale', 'sale.customer', 'sale.items', 'sale.items.product', 'sale.items.service'] });
     if (!invoice || invoice.type !== 'nfe') throw new NotFoundException('NF-e não encontrada para gerar DANFE');
-    return this.render(invoice, await this.configRepo.findOne({ where: {} }), await this.installments(invoice.saleId), false);
+    return this.render(invoice, await this.configWithLogo(await this.configRepo.findOne({ where: {} })), await this.installments(invoice.saleId), false);
   }
 
   async generatePreview(saleId: string, data: any = {}): Promise<Buffer> {
     const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer', 'items', 'items.product', 'items.service'] });
     if (!sale) throw new NotFoundException('Venda não encontrada para pré-visualizar DANFE');
     const config = await this.configRepo.findOne({ where: {} });
-    return this.render({ type: 'nfe', number: null, series: config?.nfeSeries || 1, issuedAt: new Date(), recipientName: data.recipientName || sale.customer?.name, recipientCnpj: data.recipientCnpj || sale.customer?.cpfCnpj, totalValue: Number(data.totalValue || sale.totalAmount), observations: sale.observations, sale, previewData: data }, config, await this.installments(saleId), true);
+    return this.render({ type: 'nfe', number: null, series: config?.nfeSeries || 1, issuedAt: new Date(), recipientName: data.recipientName || sale.customer?.name, recipientCnpj: data.recipientCnpj || sale.customer?.cpfCnpj, totalValue: Number(data.totalValue || sale.totalAmount), observations: sale.observations, sale, previewData: data }, await this.configWithLogo(config), await this.installments(saleId), true);
   }
 
   private async installments(saleId?: string): Promise<any[]> {
