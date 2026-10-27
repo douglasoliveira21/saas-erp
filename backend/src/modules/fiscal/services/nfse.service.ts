@@ -12,6 +12,7 @@ import { CertificateService } from './certificate.service';
 import { AuditService } from '../../audit/audit.service';
 import { MunicipalitiesService } from '../../platform/municipalities.service';
 import { renderDanfseFromXml } from './danfse-local';
+import { CompanyProfile } from '../../company-profile/entities/company-profile.entity';
 
 @Injectable()
 export class NfseService {
@@ -25,7 +26,15 @@ export class NfseService {
     private certificateService: CertificateService,
     private auditService: AuditService,
     private municipalitiesService: MunicipalitiesService,
+    @InjectRepository(CompanyProfile)
+    private companyRepository: Repository<CompanyProfile>,
   ) {}
+
+  // Logo cadastrada em Empresa; sem ela, a da configuracao fiscal (comportamento anterior).
+  private async resolveLogo(config: FiscalConfig | null): Promise<string | undefined> {
+    const profile = config?.tenantId ? await this.companyRepository.findOne({ where: { tenantId: config.tenantId } }) : null;
+    return profile?.logo || config?.companyLogo || undefined;
+  }
 
   // Municipios que aderiram ao Emissor Nacional (ex.: Betim/MG) emitem direto na SEFIN Nacional,
   // com o certificado A1 do tenant (mTLS), sem passar pelo Cidade360.
@@ -249,24 +258,25 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
 
   async downloadPdf(chave: string, certId: string): Promise<Buffer> {
     const config = await this.configRepository.findOne({ where: {} });
+    const logo = await this.resolveLogo(config);
     const agent = await this.certificateService.getHttpsAgent(certId);
     if (await this.isNacional(config)) {
       // O DANFSe oficial do portal nem sempre esta no ar (404): nesse caso o PDF e gerado aqui a partir do XML autorizado.
       try {
         const pdf = await this.apiRequest((await this.nacionalUrls(config)).adn + '/danfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional', binary: true });
-        if (Buffer.isBuffer(pdf) && pdf.subarray(0, 4).toString() === '%PDF') return this.applyCompanyLogo(pdf, config?.companyLogo);
+        if (Buffer.isBuffer(pdf) && pdf.subarray(0, 4).toString() === '%PDF') return this.applyCompanyLogo(pdf, logo);
       } catch (error: any) {
         this.logger.warn('DANFSe oficial indisponivel, gerando PDF local: ' + error?.message);
       }
       const invoice = await this.invoiceRepository.findOne({ where: { accessKey: chave } });
       if (!invoice?.xmlAuthorized) throw new BadRequestException('PDF (DANFSe) nao disponivel: a nota nao tem XML autorizado salvo');
-      return renderDanfseFromXml(invoice.xmlAuthorized, chave, config?.companyLogo);
+      return renderDanfseFromXml(invoice.xmlAuthorized, chave, logo);
     }
     const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
     if (response.pdfGZipB64) {
       const officialPdf = zlib.gunzipSync(Buffer.from(response.pdfGZipB64, 'base64'));
-      return this.applyCompanyLogo(officialPdf, config?.companyLogo);
+      return this.applyCompanyLogo(officialPdf, logo);
     }
     throw new BadRequestException('PDF nao disponivel: ' + JSON.stringify(response));
   }
