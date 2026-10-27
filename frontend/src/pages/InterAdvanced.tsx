@@ -104,6 +104,8 @@ function BankConfigForm() {
 
 export function InterAdvanced() {
   const { runOperation, confirm: confirmAction } = useFeedback()
+  const [bankName, setBankName] = useState<string>('Banco Inter')
+  useEffect(() => { api.get('/catalogs/my-tenant').then(r => { if (r.data?.bank?.name) setBankName(r.data.bank.name) }).catch(() => {}) }, [])
   const [logs, setLogs] = useState<any[]>([])
   const [codigo, setCodigo] = useState('')
   const [compare, setCompare] = useState<any>(null)
@@ -171,7 +173,7 @@ export function InterAdvanced() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Banco Inter Avançado</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{bankName} Avançado</h1>
           <p className="text-sm text-gray-500">Logs, reprocessamento, comparação, vencidos e cancelamento em lote.</p>
         </div>
         <button onClick={loadLogs} className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white"><RefreshCw className="h-4 w-4" /> Atualizar</button>

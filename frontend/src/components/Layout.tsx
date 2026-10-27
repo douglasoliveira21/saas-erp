@@ -22,6 +22,11 @@ export function Layout() {
   const { user, logout } = useAuth()
   // Logo cadastrada em Empresa substitui a logo do sistema no menu lateral.
   const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+  // Banco escolhido para este tenant no painel super admin: nomeia o item de banco do menu (antes era sempre Banco Inter).
+  const [bankName, setBankName] = useState<string | null>(null)
+  useEffect(() => {
+    api.get('/catalogs/my-tenant').then(res => setBankName(res.data?.bank?.name || null)).catch(() => {})
+  }, [])
   useEffect(() => {
     let cancelled = false
     const load = () => { api.get('/company-profile/branding').then(res => { if (!cancelled) setCompanyLogo(res.data?.logo || null) }).catch(() => {}) }
@@ -101,7 +106,7 @@ export function Layout() {
   // como "sem restrição" — evita esconder o menu inteiro por causa de um campo ausente.
   const planModules = user?.planModules
   const filteredSections = navigationSections
-    .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '') && (!i.module || !planModules || planModules.includes(i.module))) }))
+    .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(user?.role || '') && (!i.module || !planModules || planModules.includes(i.module))).map(i => (i.href === '/inter-avancado' && bankName ? { ...i, name: bankName } : i)) }))
     .filter(s => s.items.length > 0)
 
   function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
