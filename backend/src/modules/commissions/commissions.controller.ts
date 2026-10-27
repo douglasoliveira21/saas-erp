@@ -49,21 +49,22 @@ export class CommissionsController {
     return this.commissionsService.pay(id, req.user.id);
   }
 
+  // TECNICO entra nas rotas abaixo so para mexer na PROPRIA comissao avulsa; o servico barra o resto.
   @Patch(':id/cancel')
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   cancel(@Param('id') id: string, @Request() req: any) {
-    return this.commissionsService.cancel(id, req.user.id);
+    return this.commissionsService.cancel(id, req.user.id, req.user.role);
   }
 
   @Patch(':id')
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   update(@Param('id') id: string, @Body() updateCommissionDto: any, @Request() req: any) {
-    return this.commissionsService.update(id, updateCommissionDto, req.user.id);
+    return this.commissionsService.update(id, updateCommissionDto, req.user.id, req.user.role);
   }
 
   @Delete(':id')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
   remove(@Param('id') id: string, @Request() req: any) {
-    return this.commissionsService.remove(id, req.user.id);
+    return this.commissionsService.remove(id, req.user.id, req.user.role);
   }
 }

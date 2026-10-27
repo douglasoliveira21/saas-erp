@@ -31,6 +31,9 @@ export function Commissions() {
   const { isAdmin, isFinanceiro, isTecnico, user } = useAuth()
   const { trackAction } = useActionToast()
   const canManage = isAdmin || isFinanceiro
+  // Comissao avulsa: so o dono edita/cancela/exclui (nem administrador mexe na de outra pessoa). As demais seguem o perfil.
+  const canModify = (c: Commission, action: 'edit' | 'cancel' | 'delete') =>
+    c.type === 'avulsa' ? c.technician?.id === user?.id : action === 'cancel' ? canManage : isAdmin
   const [commissions, setCommissions] = useState<Commission[]>([])
   const [technicians, setTechnicians] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -310,10 +313,10 @@ export function Commissions() {
                     <ActionMenu items={[
                       { label: 'Ver venda', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => viewSale(c.sale!.id), hidden: !c.sale },
                       { label: 'Ver comissão', icon: <Eye className="w-4 h-4 text-blue-600" />, onClick: () => setSelectedCommission(c), hidden: !!c.sale },
-                      { label: 'Editar', icon: <Edit className="w-4 h-4 text-yellow-600" />, onClick: () => openEdit(c), hidden: !(isAdmin && !['paga', 'cancelada'].includes(c.status)) },
+                      { label: 'Editar', icon: <Edit className="w-4 h-4 text-yellow-600" />, onClick: () => openEdit(c), hidden: !(canModify(c, 'edit') && !['paga', 'cancelada'].includes(c.status)) },
                       { label: 'Confirmar pagamento', icon: <DollarSign className="w-4 h-4 text-green-600" />, onClick: () => pay(c.id), hidden: !(canManage && c.status === 'pendente') },
-                      { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancel(c.id), hidden: !(canManage && !['paga', 'cancelada'].includes(c.status)) },
-                      { label: 'Excluir do histórico', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }, hidden: !(isAdmin && c.status === 'cancelada') },
+                      { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancel(c.id), hidden: !(canModify(c, 'cancel') && !['paga', 'cancelada'].includes(c.status)) },
+                      { label: 'Excluir do histórico', icon: <Trash2 className="w-4 h-4" />, danger: true, onClick: async () => { if (!confirm('Excluir esta comissao do historico?')) return; try { await api.delete('/commissions/' + c.id); load() } catch {} }, hidden: !(canModify(c, 'delete') && c.status === 'cancelada') },
                     ]} />
                   </td>
                 </tr>

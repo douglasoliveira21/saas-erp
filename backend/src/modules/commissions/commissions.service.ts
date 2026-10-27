@@ -249,8 +249,22 @@ export class CommissionsService implements OnModuleInit {
     return saved;
   }
 
-  async cancel(id: string, userId?: string): Promise<Commission> {
+  // Comissao avulsa e do usuario que a detem: nem administrador edita, cancela ou exclui a de outra pessoa.
+  // As demais (venda/fixa) seguem a regra de sempre: editar/cancelar admin ou financeiro, excluir so admin.
+  private assertCanModify(commission: Commission, user: { id?: string; role?: string }, action: 'update' | 'cancel' | 'remove') {
+    if (commission.type === CommissionType.AVULSA) {
+      if (!user.id || commission.technicianId !== user.id) {
+        throw new ForbiddenException('Comissão avulsa só pode ser editada, cancelada ou excluída pelo próprio dono dela.');
+      }
+      return;
+    }
+    const allowed = action === 'remove' ? user.role === UserRole.ADMIN : isPrivilegedRole(user.role);
+    if (!allowed) throw new ForbiddenException('Você não tem permissão para esta ação na comissão.');
+  }
+
+  async cancel(id: string, userId?: string, role?: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    this.assertCanModify(commission, { id: userId, role }, 'cancel');
     const oldStatus = commission.status;
     if (['paga', 'cancelada'].includes(commission.status as any)) {
       throw new BadRequestException('Esta comissao nao pode ser cancelada');
@@ -268,8 +282,9 @@ export class CommissionsService implements OnModuleInit {
     return saved;
   }
 
-  async update(id: string, updateCommissionDto: any, userId?: string): Promise<Commission> {
+  async update(id: string, updateCommissionDto: any, userId?: string, role?: string): Promise<Commission> {
     const commission = await this.findOne(id);
+    this.assertCanModify(commission, { id: userId, role }, 'update');
     const oldData = { ...commission };
     Object.assign(commission, updateCommissionDto);
     const saved = await this.commissionsRepository.save(commission);
@@ -284,8 +299,9 @@ export class CommissionsService implements OnModuleInit {
     return saved;
   }
 
-  async remove(id: string, userId?: string): Promise<void> {
+  async remove(id: string, userId?: string, role?: string): Promise<void> {
     const commission = await this.findOne(id);
+    this.assertCanModify(commission, { id: userId, role }, 'remove');
     if (commission.status !== 'cancelada' as any) {
       throw new BadRequestException('Apenas comissoes canceladas podem ser excluidas');
     }
