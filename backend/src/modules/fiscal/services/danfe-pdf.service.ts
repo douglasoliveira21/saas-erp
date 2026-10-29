@@ -56,7 +56,7 @@ export class DanfePdfService {
   }
   private saleItems(invoice: any): DanfeItem[] {
     const submitted = invoice.previewData?.items || [];
-    return (invoice.sale?.items || []).map((i: any, n: number) => { const f = submitted[n] || i.product || i.service || {}; return { code: f.code || i.productId || i.serviceId || String(n + 1), description: i.name || '-', ncm: f.ncm || '', cst: f.csosn || f.cst || '0102', cfop: f.cfop || '5102', unit: f.unit || 'UN', quantity: Number(i.quantity || 0), unitPrice: Number(i.unitPrice || 0), discount: 0, total: Number(i.totalPrice || 0), bcIcms: 0, icms: 0, ipi: 0, icmsRate: 0, ipiRate: 0 }; });
+    return (invoice.sale?.items || []).map((i: any, n: number) => { const f = submitted[n] || i.product || i.service || {}; return { code: i.product?.code || i.service?.code || (f.code && f.code !== i.productId && f.code !== i.serviceId ? f.code : '') || String(n + 1), description: i.name || '-', ncm: f.ncm || '', cst: f.csosn || f.cst || '0102', cfop: f.cfop || '5102', unit: f.unit || 'UN', quantity: Number(i.quantity || 0), unitPrice: Number(i.unitPrice || 0), discount: 0, total: Number(i.totalPrice || 0), bcIcms: 0, icms: 0, ipi: 0, icmsRate: 0, ipiRate: 0 }; });
   }
 
   async render(invoice: any, config: any, installments: any[] = [], preview = false): Promise<Buffer> {

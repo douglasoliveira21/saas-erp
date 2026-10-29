@@ -2,7 +2,8 @@ import { BadRequestException, Controller, Get, Post, Patch, Delete, Param, Body,
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { Product } from '../products/entities/product.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Permissions, Roles } from '../auth/decorators/roles.decorator';
@@ -59,7 +60,24 @@ export class FiscalController {
     const duplicate = await this.invoiceRepo.findOne({ where: { saleId, type } });
     if (duplicate && !['cancelada', 'rejeitada', 'erro'].includes(duplicate.status)) throw new BadRequestException(`Já existe ${type.toUpperCase()} ativa para esta venda`);
     if (!sale.customer) throw new BadRequestException('Venda sem cliente');
-    const items = sale.items.map((item, index) => ({ ...(submitted?.items?.[index] || {}), productId: item.productId, serviceId: item.serviceId, name: item.name, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice) }));
+    // O codigo (cProd) e os dados fiscais do item vem do cadastro do produto. A tela manda o ID interno (UUID) no campo
+    // "code", que nao pode ir para a nota.
+    const productIds = sale.items.map((item) => item.productId).filter(Boolean);
+    const products = productIds.length ? await this.saleRepo.manager.getRepository(Product).find({ where: { id: In(productIds) } }) : [];
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const items = sale.items.map((item, index) => {
+      const sub = submitted?.items?.[index] || {};
+      const product = item.productId ? productById.get(item.productId) : undefined;
+      return {
+        ...sub,
+        code: product?.code || (sub.code && sub.code !== item.productId ? sub.code : String(index + 1)),
+        ncm: sub.ncm || product?.ncm || '',
+        cfop: sub.cfop || product?.cfop || '',
+        cest: sub.cest || product?.cest || '',
+        unit: product?.unit || sub.unit || 'UN',
+        productId: item.productId, serviceId: item.serviceId, name: item.name, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice),
+      };
+    });
     const paymentCodes: Record<string, string> = { dinheiro: '01', cheque: '02', cartao_credito: '03', cartao_debito: '04', boleto: '15', pix: '17', transferencia: '18' };
     const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' };
     const paymentInstallments = await this.invoiceRepo.manager.query(
