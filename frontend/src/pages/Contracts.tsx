@@ -46,7 +46,7 @@ const statusColors: Record<string, string> = { ativo: 'bg-green-100 text-green-7
 
 export function Contracts() {
   const { isAdmin, isFinanceiro } = useAuth()
-  const { trackAction } = useActionToast()
+  const { trackAction, startAction } = useActionToast()
   const canManage = isAdmin || isFinanceiro
   const [contracts, setContracts] = useState<Contract[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -325,6 +325,7 @@ export function Contracts() {
     if (!confirm(`Enviar ${label} por e-mail para ${eligible.length} cliente(s) selecionado(s)?`)) return
     setError('')
     setBillingLoading(true)
+    const progress = startAction(`Enviando ${label} em lote...`, `0 de ${eligible.length} concluído(s)`)
     const endpoint = only === 'nf' ? 'send-nf' : only === 'boleto' ? 'send-boleto' : 'send'
     let sent = 0
     const failed: string[] = []
@@ -333,13 +334,25 @@ export function Contracts() {
         try {
           await api.post(`/contracts/${contract.id}/billing/${endpoint}`, { billingPeriod: period })
           sent++
+          progress.update(`${sent + failed.length} de ${eligible.length} processado(s)`)
         } catch {
           failed.push(contract.customer?.name || contract.title)
+          progress.update(`${sent + failed.length} de ${eligible.length} processado(s)`)
         }
       }
-      if (failed.length) setError(`${sent} envio(s) concluído(s). Falha em: ${failed.join(', ')}`)
-      else setError(`${sent} envio(s) concluído(s) com sucesso!`)
+      if (failed.length) {
+        const message = `${sent} envio(s) concluído(s). Falha em: ${failed.join(', ')}`
+        progress.reject(message)
+        setError(message)
+      } else {
+        const message = `${sent} envio(s) concluído(s) com sucesso!`
+        progress.resolve(message)
+        setError('')
+      }
       setSelectedContracts(new Set())
+    } catch (e: any) {
+      progress.reject(e?.message || 'Erro ao processar envio em lote')
+      setError(e?.message || 'Erro ao processar envio em lote')
     } finally {
       setBillingLoading(false)
     }

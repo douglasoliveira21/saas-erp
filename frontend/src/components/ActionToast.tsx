@@ -13,7 +13,7 @@ interface ActionToastItem {
 
 interface ActionToastContextType {
   /** Start an action toast - returns id and resolve/reject functions */
-  startAction: (title: string, message?: string) => { id: string; resolve: (msg?: string) => void; reject: (msg?: string) => void }
+  startAction: (title: string, message?: string) => { id: string; update: (msg?: string) => void; resolve: (msg?: string) => void; reject: (msg?: string) => void }
   /** Quick helper that wraps a promise */
   trackAction: <T>(title: string, promise: Promise<T>, successMsg?: string) => Promise<T>
   /** Remove toast manually */
@@ -40,6 +40,9 @@ export function ActionToastProvider({ children }: { children: React.ReactNode })
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
     setToasts(prev => [...prev, { id, title, message, status: 'loading' }])
 
+    const update = (msg?: string) => {
+      setToasts(prev => prev.map(t => t.id === id ? { ...t, message: msg } : t))
+    }
     const resolve = (msg?: string) => {
       setToasts(prev => prev.map(t => t.id === id ? { ...t, status: 'success' as const, message: msg || t.message } : t))
       autoRemove(id)
@@ -49,7 +52,7 @@ export function ActionToastProvider({ children }: { children: React.ReactNode })
       autoRemove(id, 6000)
     }
 
-    return { id, resolve, reject }
+    return { id, update, resolve, reject }
   }, [autoRemove])
 
   const trackAction = useCallback(async <T,>(title: string, promise: Promise<T>, successMsg?: string): Promise<T> => {
