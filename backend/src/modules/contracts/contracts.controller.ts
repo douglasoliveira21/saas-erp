@@ -174,6 +174,18 @@ export class ContractsController {
     return this.billingService.sendBillingEmail(id, body.billingPeriod);
   }
 
+  @Post(':id/billing/send-boleto')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendBillingBoleto(@Param('id') id: string, @Body() body: any) {
+    return this.billingService.sendBillingEmailDocument(id, body.billingPeriod, 'boleto');
+  }
+
+  @Post(':id/billing/send-nf')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  sendBillingNf(@Param('id') id: string, @Body() body: any) {
+    return this.billingService.sendBillingEmailDocument(id, body.billingPeriod, 'nf');
+  }
+
   @Post(':id/billing/send-whatsapp')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   sendBillingWhatsapp(@Param('id') id: string, @Body() body: any) {

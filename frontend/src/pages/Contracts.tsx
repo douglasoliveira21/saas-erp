@@ -277,6 +277,23 @@ export function Contracts() {
     }
   }
 
+  async function sendBillingEmailDocument(id: string, only: 'nf' | 'boleto') {
+    const contract = contracts.find(c => c.id === id)
+    const period = getCurrentPeriod()
+    const label = only === 'nf' ? 'nota fiscal' : 'boleto'
+    if (!confirm(`Enviar apenas ${label} por email para ${contract?.customer?.name}?`)) return
+    setError('')
+    try {
+      await trackAction(
+        `Enviando ${label} por email...`,
+        api.post(`/contracts/${id}/billing/send-${only === 'nf' ? 'nf' : 'boleto'}`, { billingPeriod: period }),
+        `${only === 'nf' ? 'Nota fiscal' : 'Boleto'} enviado com sucesso!`
+      )
+    } catch (e: any) {
+      setError(e.response?.data?.message || `Erro ao enviar ${label}`)
+    }
+  }
+
   async function sendBillingWhatsapp(id: string) {
     const contract = contracts.find(c => c.id === id)
     const period = getCurrentPeriod()
@@ -437,6 +454,8 @@ export function Contracts() {
                   <ActionMenu items={[
                     { label: billingStatus[c.id]?.hasNf ? `NFS-e emitida (${billingStatus[c.id]?.period})` : 'Gerar nota fiscal', icon: <FileText className={`w-4 h-4 ${billingStatus[c.id]?.hasNf ? 'text-green-600' : 'text-purple-600'}`} />, onClick: () => generateNfse(c.id), hidden: c.status !== 'ativo' },
                     { label: billingStatus[c.id]?.hasBoleto ? `Boleto emitido (${billingStatus[c.id]?.period})` : 'Gerar boleto', icon: <DollarSign className={`w-4 h-4 ${billingStatus[c.id]?.hasBoleto ? 'text-green-600' : 'text-orange-600'}`} />, onClick: () => generateBoleto(c.id), hidden: c.status !== 'ativo' },
+                    { label: 'Enviar somente nota fiscal (e-mail)', icon: <FileText className="w-4 h-4 text-purple-600" />, onClick: () => sendBillingEmailDocument(c.id, 'nf'), hidden: c.status !== 'ativo' || !billingStatus[c.id]?.hasNf, disabled: billingLoading },
+                    { label: 'Enviar somente boleto (e-mail)', icon: <DollarSign className="w-4 h-4 text-orange-600" />, onClick: () => sendBillingEmailDocument(c.id, 'boleto'), hidden: c.status !== 'ativo' || !billingStatus[c.id]?.hasBoleto, disabled: billingLoading },
                     { label: hasBillingReady(c.id) ? 'Enviar NF+boleto (e-mail)' : 'E-mail (gere NF/boleto antes)', icon: <Send className="w-4 h-4 text-cyan-600" />, onClick: () => sendBillingEmail(c.id), disabled: billingLoading || !hasBillingReady(c.id), hidden: c.status !== 'ativo' },
                     { label: hasBillingReady(c.id) ? 'Enviar NF+boleto (WhatsApp)' : 'WhatsApp (gere NF/boleto antes)', icon: <WhatsAppIcon className="w-4 h-4 text-green-600" />, onClick: () => sendBillingWhatsapp(c.id), disabled: billingLoading || !hasBillingReady(c.id), hidden: c.status !== 'ativo' },
                     { label: 'Renovar', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => openRenew(c), hidden: c.status !== 'ativo' },

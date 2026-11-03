@@ -813,11 +813,11 @@ export class ContractBillingService implements OnModuleInit {
    * Busca o XML/PDF da NF-e/NFS-e e o PDF do boleto de um período de faturamento - reaproveitado
    * pelo envio manual por email e pelo envio manual por WhatsApp.
    */
-  private async gatherBillingAttachments(contract: Contract, billingPeriod: string, status: { invoiceId?: string; hasNf: boolean; boletoCode?: string; hasBoleto: boolean }): Promise<{ filename: string; content: Buffer; contentType: string }[]> {
+  private async gatherBillingAttachments(contract: Contract, billingPeriod: string, status: { invoiceId?: string; hasNf: boolean; boletoCode?: string; hasBoleto: boolean }, only: 'all' | 'nf' | 'boleto' = 'all'): Promise<{ filename: string; content: Buffer; contentType: string }[]> {
     const attachments: any[] = [];
 
     // Get NFS-e XML/PDF from invoiceId (either from contract_billings or direct lookup)
-    if (status.invoiceId) {
+    if (only !== 'boleto' && status.invoiceId) {
       const invoice = await this.dataSource.query(
         `SELECT xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices WHERE id = $1`, [status.invoiceId]
       );
@@ -842,7 +842,7 @@ export class ContractBillingService implements OnModuleInit {
           } catch { /* PDF not available */ }
         }
       }
-    } else if (status.hasNf) {
+    } else if (only !== 'boleto' && status.hasNf) {
       // Fallback: find NF directly by customer doc + period
       const customerDoc = (contract.customer.cpfCnpj || '').replace(/\D/g, '');
       const [year, month] = billingPeriod.split('-').map(Number);
@@ -877,7 +877,7 @@ export class ContractBillingService implements OnModuleInit {
     }
 
     // Get Boleto PDF from boletoCode
-    if (status.boletoCode) {
+    if (only !== 'nf' && status.boletoCode) {
       try {
         const pdf = await this.interService.getBoletoPdf(status.boletoCode);
         attachments.push({
@@ -886,7 +886,7 @@ export class ContractBillingService implements OnModuleInit {
           contentType: 'application/pdf',
         });
       } catch { /* Boleto PDF not available */ }
-    } else if (status.hasBoleto) {
+    } else if (only !== 'nf' && status.hasBoleto) {
       // Fallback: find boleto by customer + period
       const [year, month] = billingPeriod.split('-').map(Number);
       const startDate = `${billingPeriod}-01T00:00:00`;
@@ -911,6 +911,30 @@ export class ContractBillingService implements OnModuleInit {
     if (attachments.length === 0) throw new Error('Nenhum documento disponível para envio (NF ou Boleto não encontrados)');
 
     return attachments;
+  }
+
+  async sendBillingEmailDocument(contractId: string, billingPeriod: string, only: 'nf' | 'boleto'): Promise<{ sent: boolean }> {
+    const contract = await this.contractRepo.findOne({ where: { id: contractId }, relations: ['customer'] });
+    if (!contract) throw new Error('Contrato não encontrado');
+    if (!contract.customer?.email) throw new Error('Cliente sem email cadastrado');
+
+    const status = await this.getBillingStatusForPeriod(contractId, billingPeriod);
+    const ready = only === 'nf' ? status.hasNf : status.hasBoleto;
+    if (!ready) {
+      throw new Error(`Não há ${only === 'nf' ? 'nota fiscal autorizada' : 'boleto emitido'} para o período ${billingPeriod}.`);
+    }
+
+    const attachments = await this.gatherBillingAttachments(contract, billingPeriod, status, only);
+    if (!attachments.length) throw new Error(`Não foi possível obter o arquivo do ${only === 'nf' ? 'nota fiscal' : 'boleto'}.`);
+    const label = only === 'nf' ? 'Nota Fiscal' : 'Boleto';
+    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2>${label} - ${contract.title}</h2><p>Olá ${contract.customer.name},</p><p>Segue em anexo o ${label.toLowerCase()} referente ao período <strong>${billingPeriod}</strong>.</p><p style="color:#6b7280;font-size:12px">VGON Soluções em Informática</p></div>`;
+    await this.mailService.sendMailWithAttachment(
+      contract.customer.email,
+      `${label} - ${contract.title} (${billingPeriod})`,
+      html,
+      attachments,
+    );
+    return { sent: true };
   }
 
   async sendBillingEmail(contractId: string, billingPeriod: string): Promise<{ sent: boolean }> {
