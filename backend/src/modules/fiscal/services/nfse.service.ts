@@ -103,7 +103,7 @@ export class NfseService {
     try { return zlib.gunzipSync(Buffer.from(value, 'base64')).toString('utf-8'); } catch { return null; }
   }
 
-  private async reserveNfseNumber(configId: string): Promise<number> {
+  private async reserveNfseNumber(configId: string, series: number): Promise<number> {
     return this.configRepository.manager.transaction(async manager => {
       const rows = await manager.query(`SELECT nfse_next_number FROM fiscal_config WHERE id=$1 FOR UPDATE`, [configId]);
       if (!rows[0]) throw new BadRequestException('Configuração fiscal não encontrada durante a reserva da numeração');
@@ -111,8 +111,21 @@ export class NfseService {
       if (!Number.isSafeInteger(current) || current <= 0) {
         throw new BadRequestException(`Próximo número da NFS-e inválido na configuração: ${rows[0].nfse_next_number ?? 'vazio'}`);
       }
-      await manager.query(`UPDATE fiscal_config SET nfse_next_number=$2, updated_at=NOW() WHERE id=$1`, [configId, current + 1]);
-      return current;
+      const history = await manager.query(
+        `SELECT i.number, i.status FROM invoices i
+         WHERE i.type='nfse' AND i.series=$1 AND i.number IS NOT NULL
+           AND (i.tenant_id = (SELECT tenant_id FROM fiscal_config WHERE id=$2) OR i.tenant_id IS NULL)
+         ORDER BY i.number`,
+        [series, configId],
+      );
+      const used = new Set(history.filter((row: any) => !['rejeitada', 'erro'].includes(String(row.status).toLowerCase())).map((row: any) => Number(row.number)).filter((value: number) => Number.isSafeInteger(value) && value > 0));
+      // Respeita o próximo número configurado e nunca reinicia a série em 1.
+      // Só avança quando o número configurado já está ocupado; uma rejeição
+      // definitiva devolve o ponteiro e permite reutilizá-lo.
+      let reserved = current;
+      while (used.has(reserved)) reserved++;
+      await manager.query(`UPDATE fiscal_config SET nfse_next_number=$2, updated_at=NOW() WHERE id=$1`, [configId, reserved + 1]);
+      return reserved;
     });
   }
 
@@ -142,7 +155,7 @@ export class NfseService {
     try {
       await this.enrichRecipientFromCep(serviceData);
       invoice.status = 'processando';
-      const reservedNumber = await this.reserveNfseNumber(config.id);
+      const reservedNumber = await this.reserveNfseNumber(config.id, config.nfseSeries);
       config.nfseNextNumber = reservedNumber;
       invoice.number = reservedNumber;
       invoice.series = config.nfseSeries;

@@ -77,12 +77,21 @@ export class NfeService {
         // Números de documentos rejeitados/erro não foram aceitos pela SEFAZ e
         // podem ser reutilizados. Documentos autorizados, cancelados ou ainda
         // em processamento continuam bloqueando a numeração.
-        `SELECT COALESCE(MAX(number), 0)::int AS "lastNumber" FROM invoices WHERE type='nfe' AND series=$1 AND status NOT IN ('rejeitada','erro')`,
-        [series],
+        `SELECT i.number, i.status FROM invoices i
+         WHERE i.type='nfe' AND i.series=$1 AND i.number IS NOT NULL
+           AND (i.tenant_id = (SELECT tenant_id FROM fiscal_config WHERE id=$2) OR i.tenant_id IS NULL)
+         ORDER BY i.number`,
+        [series, configId],
       );
       const configured = Number(configRows[0].nextNumber);
-      const lastUsed = Number(historyRows[0]?.lastNumber || 0);
-      const reserved = Math.max(Number.isSafeInteger(configured) && configured > 0 ? configured : 1, lastUsed + 1);
+      const start = Number.isSafeInteger(configured) && configured > 0 ? configured : 1;
+      const used = new Set(historyRows.filter((row: any) => !['rejeitada', 'erro'].includes(String(row.status).toLowerCase())).map((row: any) => Number(row.number)).filter((value: number) => Number.isSafeInteger(value) && value > 0));
+      // A série sempre começa no próximo número configurado. Nunca resetamos
+      // para 1: apenas avançamos se esse número já estiver ocupado. Quando uma
+      // rejeição devolve o último número, o ponteiro configurado volta para ele
+      // e a mesma sequência é reutilizada.
+      let reserved = start;
+      while (used.has(reserved)) reserved++;
       if (!Number.isSafeInteger(reserved) || reserved <= 0) {
         throw new BadRequestException(`Próximo número da ${isNfce ? 'NFC-e' : 'NF-e'} inválido`);
       }
