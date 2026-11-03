@@ -100,7 +100,11 @@ export class CommissionsService implements OnModuleInit {
       .where('c.type = :type', { type: 'fixa' })
       .andWhere('c.is_recurring = true')
       .andWhere('c.status != :cancelled', { cancelled: 'cancelada' })
-      .orderBy('c.created_at', 'DESC')
+      // Apenas a comissão-base deve ser usada como modelo. As linhas mensais
+      // geradas abaixo ficam com isRecurring=false e nunca podem alterar o
+      // valor da série por acidente.
+      .orderBy('c.reference_month', 'ASC')
+      .addOrderBy('c.created_at', 'ASC')
       .getMany();
 
     // Um mesmo tecnico costuma ter VARIAS comissoes fixas independentes (uma por contrato/motivo:
@@ -113,8 +117,9 @@ export class CommissionsService implements OnModuleInit {
       const key = `${c.technicianId}::${this.normalizeDescription(c.description)}`;
       const series = bySeries[key];
       if (!series) {
-        // fixedTemplates vem ordenado created_at DESC, entao o primeiro visto por chave e o
-        // template (o mais recente com esses dados/valor).
+        // A primeira linha da série é o modelo original. As demais são apenas
+        // lançamentos mensais (inclusive dados legados que ainda estejam com
+        // is_recurring=true).
         bySeries[key] = { template: c, earliestMonth: c.referenceMonth };
       } else if (c.referenceMonth && (!series.earliestMonth || c.referenceMonth < series.earliestMonth)) {
         series.earliestMonth = c.referenceMonth;
@@ -134,7 +139,7 @@ export class CommissionsService implements OnModuleInit {
         const existing = await this.commissionsRepository.query(
           `SELECT id FROM commissions
            WHERE technician_id = $1 AND type = 'fixa' AND reference_month = $2
-             AND regexp_replace(lower(trim(description)), '\\s+', ' ', 'g') = regexp_replace(lower(trim($3)), '\\s+', ' ', 'g')${tenantSql()}
+             AND regexp_replace(lower(trim(COALESCE(description, ''))), '\\s+', ' ', 'g') = regexp_replace(lower(trim($3)), '\\s+', ' ', 'g')${tenantSql()}
            LIMIT 1`,
           [template.technicianId, refMonth, template.description || ''],
         );
@@ -148,7 +153,10 @@ export class CommissionsService implements OnModuleInit {
             percentage: template.percentage,
             amount: template.amount,
             status: 'pendente' as any,
-            isRecurring: true,
+            // Somente a linha original criada pelo usuário é o modelo. Se as
+            // linhas geradas também fossem recorrentes, excluir uma delas faria
+            // o job recriá-la no próximo boot/check periódico.
+            isRecurring: false,
             referenceMonth: refMonth,
           });
           await this.commissionsRepository.save(newCommission);
@@ -164,6 +172,15 @@ export class CommissionsService implements OnModuleInit {
 
   private normalizeDescription(description: string): string {
     return (description || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  private async fixedSeriesRows(commission: Commission): Promise<any[]> {
+    return this.commissionsRepository.query(
+      `SELECT id FROM commissions
+       WHERE technician_id = $1 AND type = 'fixa'
+         AND regexp_replace(lower(trim(COALESCE(description, ''))), '\\s+', ' ', 'g') = regexp_replace(lower(trim($2)), '\\s+', ' ', 'g')${tenantSql()}`,
+      [commission.technicianId, commission.description || ''],
+    );
   }
 
   // Lista de meses "YYYY-MM" de start ate end, inclusive. Retorna vazio se start estiver
@@ -286,7 +303,26 @@ export class CommissionsService implements OnModuleInit {
     const commission = await this.findOne(id);
     this.assertCanModify(commission, { id: userId, role }, 'update');
     const oldData = { ...commission };
-    Object.assign(commission, updateCommissionDto);
+
+    // Nunca aceite que o cliente altere o dono, o tipo, o status ou os
+    // metadados de recorrência pela API. Para uma fixa, a alteração representa
+    // a série inteira; caso contrário as linhas antigas continuariam servindo
+    // de modelo e o valor/descrição "voltaria" no próximo job.
+    const changes = {
+      ...(updateCommissionDto.description !== undefined ? { description: updateCommissionDto.description } : {}),
+      ...(updateCommissionDto.baseValue !== undefined ? { baseValue: updateCommissionDto.baseValue } : {}),
+      ...(updateCommissionDto.percentage !== undefined ? { percentage: updateCommissionDto.percentage } : {}),
+      ...(updateCommissionDto.amount !== undefined ? { amount: updateCommissionDto.amount } : {}),
+      ...(updateCommissionDto.observations !== undefined ? { observations: updateCommissionDto.observations } : {}),
+    };
+
+    if (commission.type === CommissionType.FIXA && Object.keys(changes).length) {
+      const rows = await this.fixedSeriesRows(commission);
+      await Promise.all(rows.map((row) => this.commissionsRepository.update(row.id, changes)));
+      Object.assign(commission, changes);
+    } else {
+      Object.assign(commission, changes);
+    }
     const saved = await this.commissionsRepository.save(commission);
     await this.auditService.safeCreate({
       userId,
@@ -304,6 +340,15 @@ export class CommissionsService implements OnModuleInit {
     this.assertCanModify(commission, { id: userId, role }, 'remove');
     if (commission.status !== 'cancelada' as any) {
       throw new BadRequestException('Apenas comissoes canceladas podem ser excluidas');
+    }
+    if (commission.type === CommissionType.FIXA) {
+      // Exclusão de uma fixa encerra a série. Mantemos as demais competências
+      // históricas, mas retiramos is_recurring de todas para que nenhum job
+      // futuro consiga recriar a linha removida.
+      const rows = await this.fixedSeriesRows(commission);
+      if (rows.length) {
+        await Promise.all(rows.map((row) => this.commissionsRepository.update(row.id, { isRecurring: false })));
+      }
     }
     await this.commissionsRepository.remove(commission);
     await this.auditService.safeCreate({
