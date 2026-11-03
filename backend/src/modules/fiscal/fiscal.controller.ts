@@ -89,7 +89,20 @@ export class FiscalController {
       const schedule = paymentInstallments.map((item: any) => `${item.number}ª: R$ ${Number(item.value).toFixed(2)} venc. ${String(item.dueDate).substring(0, 10).split('-').reverse().join('/')}`).join('; ');
       discriminacao = `${discriminacao || 'Serviços prestados'} | Pagamento: ${paymentMethodLabel}${installments > 1 ? ` em ${installments} parcelas (${schedule})` : ''}`;
     }
-    return { ...(submitted || {}), recipientCnpj: sale.customer.cpfCnpj, recipientName: sale.customer.name, recipientEmail: sale.customer.email, recipientEmails: getCustomerEmails(sale.customer), totalValue: Number(sale.totalAmount), items, paymentMethod: sale.paymentMethod, paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99', installments, paymentInstallments, discriminacao };
+    return {
+      ...(submitted || {}),
+      recipientCnpj: sale.customer.cpfCnpj,
+      recipientName: sale.customer.name,
+      recipientEmail: sale.customer.email,
+      recipientEmails: getCustomerEmails(sale.customer),
+      // O município do tomador é independente do município do prestador. Sem
+      // esse código o XML caía no cityCode da empresa e o Emissor Nacional
+      // rejeitava CEPs válidos de outras cidades (E0240).
+      recipientCityCode: sale.customer.cityCode || submitted?.recipientCityCode || '',
+      totalValue: Number(sale.totalAmount), items, paymentMethod: sale.paymentMethod,
+      paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99',
+      installments, paymentInstallments, discriminacao,
+    };
   }
   private async completeNfTask(saleId: string) {
     if (!saleId) return;

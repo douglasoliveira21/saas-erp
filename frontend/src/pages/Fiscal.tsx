@@ -83,6 +83,7 @@ export function Fiscal() {
   const [recipientEmail, setRecipientEmail] = useState('')
   const [recipientAddress, setRecipientAddress] = useState('')
   const [recipientCity, setRecipientCity] = useState('')
+  const [recipientCityCode, setRecipientCityCode] = useState('')
   const [recipientUf, setRecipientUf] = useState('')
   const [recipientNeighborhood, setRecipientNeighborhood] = useState('')
   const [recipientCep, setRecipientCep] = useState('')
@@ -175,6 +176,7 @@ export function Fiscal() {
       setRecipientEmail(sale.customer?.email || '')
       setRecipientAddress(sale.customer?.address || '')
       setRecipientCity(sale.customer?.city || '')
+      setRecipientCityCode((sale.customer as any)?.cityCode || '')
       setRecipientUf(sale.customer?.uf || '')
       setRecipientNeighborhood(sale.customer?.neighborhood || '')
       setRecipientCep(sale.customer?.cep || '')
@@ -259,7 +261,7 @@ export function Fiscal() {
           ibsStateRate: parseFloat(ibsStateRate || '0'),
           ibsMunicipalRate: parseFloat(ibsMunicipalRate || '0'), cbsRate: parseFloat(cbsRate || '0'),
           recipientEmail, recipientAddress, recipientCity, recipientUf,
-          recipientNeighborhood, recipientCep, recipientPhone,
+          recipientNeighborhood, recipientCep, recipientPhone, recipientCityCode,
         } : undefined,
         saleData: emitType === 'nfe' ? {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
@@ -537,6 +539,10 @@ export function Fiscal() {
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Cidade</label>
                     <input className="input" value={recipientCity} onChange={e => setRecipientCity(e.target.value)} placeholder="Contagem" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Código IBGE da cidade</label>
+                    <input className="input" inputMode="numeric" maxLength={7} value={recipientCityCode} onChange={e => setRecipientCityCode(e.target.value.replace(/\D/g, '').slice(0, 7))} placeholder="Ex.: 3118601" />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">UF</label>
