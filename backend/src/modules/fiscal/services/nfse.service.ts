@@ -59,6 +59,26 @@ export class NfseService {
     return `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth() + 1)}-${pad(brDate.getUTCDate())}`;
   }
 
+  private async enrichRecipientFromCep(serviceData: any): Promise<void> {
+    const cep = String(serviceData?.recipientCep || '').replace(/\D/g, '');
+    if (cep.length !== 8) return;
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      if (!response.ok) return;
+      const data = await response.json() as any;
+      if (data?.erro || !/^\d{7}$/.test(String(data?.ibge || ''))) return;
+      // O CEP é a fonte de verdade para o município do tomador. Isso corrige
+      // cadastros antigos com cityCode vazio/incorreto e evita o E0240.
+      serviceData.recipientCityCode = String(data.ibge);
+      if (data.localidade) serviceData.recipientCity = data.localidade;
+      if (data.uf) serviceData.recipientUf = data.uf;
+      if (!serviceData.recipientNeighborhood && data.bairro) serviceData.recipientNeighborhood = data.bairro;
+      if (!serviceData.recipientAddress && data.logradouro) serviceData.recipientAddress = data.logradouro;
+    } catch (error: any) {
+      this.logger.warn(`Não foi possível validar o CEP do tomador ${cep}: ${error?.message || error}`);
+    }
+  }
+
   // URLs editaveis: o tenant (ou o catalogo da plataforma) pode sobrescrever o padrao sem novo deploy.
   private async nacionalUrls(config: FiscalConfig): Promise<{ sefin: string; adn: string }> {
     const production = config.environment === 1;
@@ -115,6 +135,7 @@ export class NfseService {
     const agent = await this.certificateService.getHttpsAgent(certId);
 
     try {
+      await this.enrichRecipientFromCep(serviceData);
       invoice.status = 'processando';
       const reservedNumber = await this.reserveNfseNumber(config.id);
       config.nfseNextNumber = reservedNumber;
@@ -552,7 +573,7 @@ export class NfseService {
     let tomaEndBlock = '';
     if (recipientDoc.length === 14) {
       // Usar código do município do cliente (se disponível via serviceData) ou do emitente como fallback
-      const cMunToma = serviceData?.recipientCMun || serviceData?.recipientCityCode || config.cityCode;
+      const cMunToma = serviceData?.recipientCityCode || serviceData?.recipientCMun || config.cityCode;
       tomaEndBlock = `<end><endNac><cMun>${cMunToma}</cMun><CEP>${tomaCep || '32010000'}</CEP></endNac><xLgr>${this.escapeXml(xLgr)}</xLgr><nro>${this.escapeXml(nro)}</nro><xBairro>${this.escapeXml(tomaNeighborhood)}</xBairro></end>`;
     }
 
