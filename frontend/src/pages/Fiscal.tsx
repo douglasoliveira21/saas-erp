@@ -1384,7 +1384,7 @@ function FiscalConfigForm() {
           <p className="text-xs text-gray-500 mt-2">Deixe em branco para usar os endereços oficiais. Preencha só se a Receita/Prefeitura informar outro endereço.</p>
           <div className="grid grid-cols-1 gap-3 mt-3">
             <input className="input" value={cfg.nfseApiUrl || ''} onChange={e => setCfg({...cfg, nfseApiUrl: e.target.value})} placeholder="Produção — padrão: https://sefin.nfse.gov.br/SefinNacional" />
-            <input className="input" value={cfg.nfseTestUrl || ''} onChange={e => setCfg({...cfg, nfseTestUrl: e.target.value})} placeholder="Homologação — padrão: https://sefin.producaorestrita.nfse.gov.br/SefinNacional" />
+            <input className="input" value={cfg.nfseTestUrl || ''} onChange={e => setCfg({...cfg, nfseTestUrl: e.target.value})} placeholder="Homologação — padrão: https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional" />
           </div>
         </details>
       ) : (<>

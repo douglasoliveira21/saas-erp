@@ -88,7 +88,12 @@ export class NfseService {
     const custom = production
       ? (usable(config.nfseApiUrl) || usable(municipality?.nfseApiUrl))
       : (usable(config.nfseTestUrl) || usable(municipality?.nfseTestUrl));
-    const sefin = (custom || (production ? 'https://sefin.nfse.gov.br/SefinNacional' : 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional')).trim().replace(/\/+$/, '');
+    let sefin = (custom || (production ? 'https://sefin.nfse.gov.br/SefinNacional' : 'https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional')).trim().replace(/\/+$/, '');
+    // A produção restrita publica a API sob /API/SefinNacional. Mantém
+    // compatibilidade com configurações antigas salvas sem esse segmento.
+    if (!production && /sefin\.producaorestrita\.nfse\.gov\.br/i.test(sefin) && !/\/API\/SefinNacional/i.test(sefin)) {
+      sefin = sefin.replace(/\/SefinNacional$/i, '/API/SefinNacional');
+    }
     const adn = production ? 'https://adn.nfse.gov.br' : 'https://adn.producaorestrita.nfse.gov.br';
     return { sefin, adn };
   }
