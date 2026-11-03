@@ -75,6 +75,15 @@ export class NfseService {
       return current;
     });
   }
+
+  private async releaseNfseNumber(configId: string, number: number): Promise<void> {
+    await this.configRepository.manager.transaction(async manager => {
+      const rows = await manager.query(`SELECT nfse_next_number AS "nextNumber" FROM fiscal_config WHERE id=$1 FOR UPDATE`, [configId]);
+      if (rows[0] && Number(rows[0].nextNumber) === number + 1) {
+        await manager.query(`UPDATE fiscal_config SET nfse_next_number=$2, updated_at=NOW() WHERE id=$1`, [configId, number]);
+      }
+    });
+  }
   async emit(invoiceId: string, serviceData: any, certId: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
@@ -92,7 +101,7 @@ export class NfseService {
 
     try {
       invoice.status = 'processando';
-const reservedNumber = await this.reserveNfseNumber(config.id);
+      const reservedNumber = await this.reserveNfseNumber(config.id);
       config.nfseNextNumber = reservedNumber;
       invoice.number = reservedNumber;
       invoice.series = config.nfseSeries;
@@ -101,7 +110,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       const cnpj = (config.cnpj || '').replace(/\D/g, '');
       const now = new Date();
       // Padrao nacional: DPS + cLocEmi(7) + tpInsc(1: 2=CNPJ) + CNPJ(14) + serie(5) + nDPS(15) = 45 caracteres.
-      const dpsId = (nacional ? 'DPS' + String(config.cityCode).padStart(7, '0') + '2' : 'DPS') + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(config.nfseNextNumber).padStart(15, '0');
+      const dpsId = (nacional ? 'DPS' + String(config.cityCode).padStart(7, '0') + '2' : 'DPS') + cnpj.padStart(14, '0') + String(config.nfseSeries).padStart(5, '0') + String(reservedNumber).padStart(15, '0');
 
       if (nacional) {
         // Producao e homologacao do Emissor Nacional nao trocam de leiaute na mesma data: a homologacao ja exige finNFSe
@@ -113,7 +122,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
           this.logger.log('XML assinado (primeiros 500 chars): ' + signed.substring(0, 500));
           // O Emissor Nacional exige a declaracao UTF-8 no XML (E1229); a assinatura nao a inclui.
           const gz = zlib.gzipSync(Buffer.from('<?xml version="1.0" encoding="UTF-8"?>' + signed, 'utf-8')).toString('base64');
-          return this.emitNacional(invoice, baseUrl, gz, agent, dpsId);
+          return this.emitNacional(invoice, baseUrl, gz, agent, dpsId, config.id);
         };
         const firstTry = config.environment !== 1;
         try {
@@ -139,7 +148,7 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       const xmlToSend = nacional ? '<?xml version="1.0" encoding="UTF-8"?>' + signedXml : signedXml;
       const xmlGzipB64 = zlib.gzipSync(Buffer.from(xmlToSend, 'utf-8')).toString('base64');
 
-      if (nacional) return await this.emitNacional(invoice, baseUrl, xmlGzipB64, agent, dpsId);
+      if (nacional) return await this.emitNacional(invoice, baseUrl, xmlGzipB64, agent, dpsId, config.id);
 
       // Montar payload conforme API Cidade360
       const payload = {
@@ -181,19 +190,25 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
         invoice.rejectionReason = JSON.stringify(response);
       }
 
+      // Resposta assíncrona ainda precisa ser consultada pelo job; rejeições e
+      // autorizações síncronas já encerraram o processamento.
+      invoice.queueStatus = invoice.status === 'processando' ? 'pendente' : 'processado';
+      if (invoice.status === 'rejeitada') await this.releaseNfseNumber(config.id, reservedNumber);
+
       await this.invoiceRepository.save(invoice);
 
       return invoice;
     } catch (e) {
       this.logger.error('Falha ao emitir NFS-e (' + (nacional ? 'Emissor Nacional' : 'Cidade360') + '): ' + e.message);
       invoice.status = 'rejeitada';
+      invoice.queueStatus = 'erro';
       invoice.rejectionReason = e.message;
       await this.invoiceRepository.save(invoice);
       throw new BadRequestException('Erro ao emitir NFS-e: ' + e.message);
     }
   }
 
-  private async emitNacional(invoice: Invoice, sefinUrl: string, xmlGzipB64: string, agent: any, dpsId: string): Promise<Invoice> {
+  private async emitNacional(invoice: Invoice, sefinUrl: string, xmlGzipB64: string, agent: any, dpsId: string, configId: string): Promise<Invoice> {
     const response = await this.apiRequest(sefinUrl + '/nfse', 'POST', { dpsXmlGZipB64: xmlGzipB64 }, agent, { label: 'Emissor Nacional' });
     this.logger.log('Resposta Emissor Nacional: ' + JSON.stringify(response).substring(0, 500));
     const erros = Array.isArray(response?.erros) ? response.erros : [];
@@ -209,6 +224,10 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
       invoice.protocolNumber = dpsId;
       invoice.issuedAt = new Date();
       invoice.xmlAuthorized = this.gunzipB64(response.nfseXmlGZipB64) || invoice.xmlAuthorized;
+    }
+    invoice.queueStatus = 'processado';
+    if (invoice.status === 'rejeitada' && invoice.number != null) {
+      await this.releaseNfseNumber(configId, Number(invoice.number));
     }
     await this.invoiceRepository.save(invoice);
     return invoice;
@@ -234,7 +253,14 @@ const reservedNumber = await this.reserveNfseNumber(config.id);
   async queryInvoiceStatus(invoice: Invoice): Promise<any> {
     if (!invoice.certificateId) throw new BadRequestException('Nota sem certificado A1 vinculado');
     if (!invoice.accessKey && !invoice.protocolNumber) {
-      throw new BadRequestException('Nota sem chave de acesso ou protocolo para consulta');
+      // Uma rejeição síncrona não gera chave/protocolo. Ela já foi processada e
+      // deve exibir o motivo original, não ser reenviada ao endpoint de consulta.
+      return {
+        configured: true,
+        status: invoice.status || 'rejeitada',
+        rejectionReason: invoice.rejectionReason || 'Nota rejeitada sem chave de acesso ou protocolo.',
+        message: invoice.rejectionReason || 'Nota rejeitada sem chave de acesso ou protocolo.',
+      };
     }
 
     const response = invoice.accessKey

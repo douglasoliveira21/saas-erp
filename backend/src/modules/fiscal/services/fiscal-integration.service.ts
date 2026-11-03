@@ -21,7 +21,16 @@ export class FiscalIntegrationService {
     }
 
     if (invoice.type === 'nfse') return this.nfseService.queryInvoiceStatus(invoice);
-    if (!invoice.accessKey) throw new BadRequestException('NF-e sem chave de acesso para consulta');
+    if (!invoice.accessKey) {
+      // Rejeições síncronas não possuem chave de acesso. Preserve o motivo já
+      // retornado pela SEFAZ em vez de transformar a nota em erro de consulta.
+      return {
+        configured: true,
+        status: invoice.status || 'rejeitada',
+        rejectionReason: invoice.rejectionReason || 'NF-e rejeitada sem chave de acesso.',
+        message: invoice.rejectionReason || 'NF-e rejeitada sem chave de acesso.',
+      };
+    }
 
     return this.nfeService.consult(invoice.accessKey, invoice.certificateId);
   }

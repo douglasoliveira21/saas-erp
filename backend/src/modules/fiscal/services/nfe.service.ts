@@ -74,7 +74,10 @@ export class NfeService {
       if (!configRows[0]) throw new BadRequestException('Configuração fiscal não encontrada durante a reserva da numeração');
 
       const historyRows = await manager.query(
-        `SELECT COALESCE(MAX(number), 0)::int AS "lastNumber" FROM invoices WHERE type='nfe' AND series=$1`,
+        // Números de documentos rejeitados/erro não foram aceitos pela SEFAZ e
+        // podem ser reutilizados. Documentos autorizados, cancelados ou ainda
+        // em processamento continuam bloqueando a numeração.
+        `SELECT COALESCE(MAX(number), 0)::int AS "lastNumber" FROM invoices WHERE type='nfe' AND series=$1 AND status NOT IN ('rejeitada','erro')`,
         [series],
       );
       const configured = Number(configRows[0].nextNumber);
@@ -86,6 +89,18 @@ export class NfeService {
 
       await manager.query(`UPDATE fiscal_config SET ${column}=$2, updated_at=NOW() WHERE id=$1`, [configId, reserved + 1]);
       return reserved;
+    });
+  }
+
+  private async releaseFiscalNumber(configId: string, number: number, isNfce: boolean): Promise<void> {
+    const column = isNfce ? 'nfce_next_number' : 'nfe_next_number';
+    await this.configRepository.manager.transaction(async manager => {
+      const rows = await manager.query(`SELECT ${column} AS "nextNumber" FROM fiscal_config WHERE id=$1 FOR UPDATE`, [configId]);
+      // Só recua quando este foi o último número reservado. Assim uma emissão
+      // concorrente mais nova nunca é sobrescrita.
+      if (rows[0] && Number(rows[0].nextNumber) === number + 1) {
+        await manager.query(`UPDATE fiscal_config SET ${column}=$2, updated_at=NOW() WHERE id=$1`, [configId, number]);
+      }
     });
   }
   private getEndpoints(config: FiscalConfig, modelo: string) {
@@ -157,6 +172,7 @@ export class NfeService {
       const isNfce = modelo === '65';
       const series = isNfce ? (config.nfceSeries || 1) : config.nfeSeries;
       const number = await this.reserveFiscalNumber(config.id, series, isNfce);
+      let numberCanBeReused = false;
       invoice.number = number;
       invoice.series = series;
 
@@ -225,6 +241,8 @@ export class NfeService {
         } else {
           invoice.status = 'rejeitada';
           invoice.rejectionReason = `${cStatProt}: ${xMotivoProt}`;
+          // Denegação (110/301/302) também consome a numeração legalmente.
+          numberCanBeReused = !['110', '301', '302'].includes(cStatProt);
         }
       } else if (cStatLote === '103') {
         // Lote em processamento - consultar recibo
@@ -255,6 +273,12 @@ export class NfeService {
       } else {
         invoice.status = 'rejeitada';
         invoice.rejectionReason = `${cStatLote}: ${xMotivoLote}`;
+        numberCanBeReused = true;
+      }
+
+      invoice.queueStatus = 'processado';
+      if (invoice.status === 'rejeitada' && numberCanBeReused) {
+        await this.releaseFiscalNumber(config.id, number, isNfce);
       }
 
       await this.invoiceRepository.save(invoice);
@@ -262,6 +286,7 @@ export class NfeService {
       return invoice;
     } catch (e) {
       invoice.status = 'rejeitada';
+      invoice.queueStatus = 'erro';
       invoice.rejectionReason = e.message;
       await this.invoiceRepository.save(invoice);
       throw new BadRequestException('Erro ao emitir NF-e: ' + e.message);
