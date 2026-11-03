@@ -38,10 +38,25 @@ export class NfseService {
 
   // Municipios que aderiram ao Emissor Nacional (ex.: Betim/MG) emitem direto na SEFIN Nacional,
   // com o certificado A1 do tenant (mTLS), sem passar pelo Cidade360.
-  private async isNacional(config: FiscalConfig): Promise<boolean> {
+  private async isNacional(config: FiscalConfig, competence?: string): Promise<boolean> {
     if (!config?.cityCode) return false;
     const municipality = await this.municipalitiesService.findByIbgeCode(config.cityCode);
-    return municipality?.provider === 'nfse_nacional';
+    if (municipality?.provider === 'nfse_nacional') return true;
+
+    // A partir da competência 01/11/2026, ME/EPP do Simples em municípios
+    // que ainda possuem emissor próprio devem usar a SEFIN Nacional. Sem esse
+    // desvio, o Cidade360 devolve a rejeição P3084 para competências de novembro.
+    const value = String(competence || '').slice(0, 10);
+    const effective = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : this.brazilToday();
+    const isSimples = Number(config.taxRegime) !== 3;
+    return isSimples && effective >= '2026-11-01';
+  }
+
+  private brazilToday(): string {
+    const now = new Date();
+    const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth() + 1)}-${pad(brDate.getUTCDate())}`;
   }
 
   // URLs editaveis: o tenant (ou o catalogo da plataforma) pode sobrescrever o padrao sem novo deploy.
@@ -93,7 +108,7 @@ export class NfseService {
     if (!config.cnpj) throw new BadRequestException('CNPJ nao configurado. Acesse Modulo Fiscal > Configuracao.');
     if (!config.cityCode) throw new BadRequestException('Codigo do municipio nao configurado. Acesse Modulo Fiscal > Configuracao.');
 
-    const nacional = await this.isNacional(config);
+    const nacional = await this.isNacional(config, serviceData?.competencia || serviceData?.competence);
     const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);
     if (!baseUrl) throw new BadRequestException(`URL da API NFS-e (${config.environment === 1 ? 'producao' : 'homologacao'}) nao configurada. Acesse Modulo Fiscal > Configuracao e preencha o campo "URL API NFS-e${config.environment !== 1 ? ' Teste' : ''}".`);
 
@@ -233,19 +248,19 @@ export class NfseService {
     return invoice;
   }
 
-  async consultProtocol(protocolo: string, certId: string): Promise<any> {
+  async consultProtocol(protocolo: string, certId: string, competence?: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
     // No Emissor Nacional o "protocolo" guardado e o Id da DPS: a consulta devolve a chave de acesso.
-    if (await this.isNacional(config)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/dps/' + encodeURIComponent(protocolo), 'GET', null, agent, { label: 'Emissor Nacional' });
+    if (await this.isNacional(config, competence)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/dps/' + encodeURIComponent(protocolo), 'GET', null, agent, { label: 'Emissor Nacional' });
     const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarProtocolo/' + encodeURIComponent(protocolo), 'GET', null, agent);
   }
 
-  async consult(chave: string, certId: string): Promise<any> {
+  async consult(chave: string, certId: string, competence?: string): Promise<any> {
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    if (await this.isNacional(config)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/nfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional' });
+    if (await this.isNacional(config, competence)) return this.apiRequest((await this.nacionalUrls(config)).sefin + '/nfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional' });
     const baseUrl = await this.getBaseUrl(config);
     return this.apiRequest(baseUrl + '/ConsultarNFSe/' + encodeURIComponent(chave), 'GET', null, agent);
   }
@@ -263,9 +278,10 @@ export class NfseService {
       };
     }
 
+    const competence = (invoice.taxDetails as any)?.competencia;
     const response = invoice.accessKey
-      ? await this.consult(invoice.accessKey, invoice.certificateId)
-      : await this.consultProtocol(invoice.protocolNumber, invoice.certificateId);
+      ? await this.consult(invoice.accessKey, invoice.certificateId, competence)
+      : await this.consultProtocol(invoice.protocolNumber, invoice.certificateId, competence);
     if (response?.nfseXmlGZipB64 || response?.chaveAcesso) {
       // Emissor Nacional: se a nota existe na consulta ela esta emitida; o cancelamento e tratado pelo evento.
       return {
@@ -284,9 +300,10 @@ export class NfseService {
 
   async downloadPdf(chave: string, certId: string): Promise<Buffer> {
     const config = await this.configRepository.findOne({ where: {} });
+    const invoiceForProvider = await this.invoiceRepository.findOne({ where: { accessKey: chave } });
     const logo = await this.resolveLogo(config);
     const agent = await this.certificateService.getHttpsAgent(certId);
-    if (await this.isNacional(config)) {
+    if (await this.isNacional(config, (invoiceForProvider?.taxDetails as any)?.competencia)) {
       // O DANFSe oficial do portal nem sempre esta no ar (404): nesse caso o PDF e gerado aqui a partir do XML autorizado.
       try {
         const pdf = await this.apiRequest((await this.nacionalUrls(config)).adn + '/danfse/' + encodeURIComponent(chave), 'GET', null, agent, { label: 'Emissor Nacional', binary: true });
@@ -294,9 +311,8 @@ export class NfseService {
       } catch (error: any) {
         this.logger.warn('DANFSe oficial indisponivel, gerando PDF local: ' + error?.message);
       }
-      const invoice = await this.invoiceRepository.findOne({ where: { accessKey: chave } });
-      if (!invoice?.xmlAuthorized) throw new BadRequestException('PDF (DANFSe) nao disponivel: a nota nao tem XML autorizado salvo');
-      return renderDanfseFromXml(invoice.xmlAuthorized, chave, logo);
+      if (!invoiceForProvider?.xmlAuthorized) throw new BadRequestException('PDF (DANFSe) nao disponivel: a nota nao tem XML autorizado salvo');
+      return renderDanfseFromXml(invoiceForProvider.xmlAuthorized, chave, logo);
     }
     const baseUrl = await this.getBaseUrl(config);
     const response = await this.apiRequest(baseUrl + '/DownloadPDFChave/' + encodeURIComponent(chave), 'GET', null, agent);
@@ -330,9 +346,10 @@ export class NfseService {
   }
   async downloadXmlFromApi(chave: string, certId: string): Promise<string> {
     const config = await this.configRepository.findOne({ where: {} });
+    const invoiceForProvider = await this.invoiceRepository.findOne({ where: { accessKey: chave } });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    if (await this.isNacional(config)) {
-      const nacionalXml = this.gunzipB64((await this.consult(chave, certId))?.nfseXmlGZipB64);
+    if (await this.isNacional(config, (invoiceForProvider?.taxDetails as any)?.competencia)) {
+      const nacionalXml = this.gunzipB64((await this.consult(chave, certId, (invoiceForProvider?.taxDetails as any)?.competencia))?.nfseXmlGZipB64);
       if (nacionalXml) return nacionalXml;
       throw new BadRequestException('XML nao disponivel no Emissor Nacional');
     }
@@ -352,7 +369,7 @@ export class NfseService {
 
     const config = await this.configRepository.findOne({ where: {} });
     const agent = await this.certificateService.getHttpsAgent(certId);
-    const nacional = await this.isNacional(config);
+    const nacional = await this.isNacional(config, (invoice.taxDetails as any)?.competencia);
     const baseUrl = nacional ? (await this.nacionalUrls(config)).sefin : await this.getBaseUrl(config);
 
     try {
@@ -478,7 +495,10 @@ export class NfseService {
     const brDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
     const dhEmi = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}T${pad(brDate.getUTCHours())}:${pad(brDate.getUTCMinutes())}:${pad(brDate.getUTCSeconds())}-03:00`;
-    const dCompet = `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}`;
+    const requestedCompetence = String(serviceData?.competencia || serviceData?.competence || '').slice(0, 10);
+    const dCompet = /^\d{4}-\d{2}-\d{2}$/.test(requestedCompetence)
+      ? requestedCompetence
+      : `${brDate.getUTCFullYear()}-${pad(brDate.getUTCMonth()+1)}-${pad(brDate.getUTCDate())}`;
     const valor = Number(invoice.totalValue).toFixed(2);
     const taxDetails = invoice.taxDetails || {};
     const iss = taxDetails.iss || {};

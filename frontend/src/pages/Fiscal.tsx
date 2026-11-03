@@ -55,6 +55,7 @@ export function Fiscal() {
   const [recipientCnpj, setRecipientCnpj] = useState('')
   const [totalValue, setTotalValue] = useState('')
   const [discriminacao, setDiscriminacao] = useState('')
+  const [competencia, setCompetencia] = useState(() => localToday())
   const [itemLista, setItemLista] = useState('010701')
   const [aliquota, setAliquota] = useState('5')
   const [issBase, setIssBase] = useState('')
@@ -246,6 +247,7 @@ export function Fiscal() {
         certId: activeCert.id,
         serviceData: emitType === 'nfse' ? {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
+          competencia,
           discriminacao, codTribNacional: itemLista, aliquota: parseFloat(aliquota),
           issBase: parseFloat(issBase || totalValue), issRetentionType,
           pisCofinsEnabled, pisCofinsCst, pisCofinsBase: parseFloat(pisCofinsBase || totalValue),
@@ -558,6 +560,11 @@ export function Fiscal() {
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Discriminacao do Servico *</label>
                     <textarea className="input" rows={3} value={discriminacao} onChange={e => setDiscriminacao(e.target.value)} placeholder="Descricao detalhada dos servicos prestados..." />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Data de competência *</label>
+                    <input className="input" type="date" value={competencia} onChange={e => setCompetencia(e.target.value)} />
+                    <p className="text-xs text-gray-400 mt-1">Informe o mês em que o serviço foi prestado. A partir de 01/11/2026, empresas do Simples emitem pelo Emissor Nacional.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>

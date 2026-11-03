@@ -394,7 +394,12 @@ export class FiscalController {
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async emitNfse(@Body() body: { saleId: string; certId: string; serviceData?: any }, @Request() req: any) {
     body.serviceData = await this.validateSaleForInvoice(body.saleId, 'nfse', body.serviceData);
-    const taxDetails = this.calculateNfseTaxes(body.serviceData || {});
+    const taxDetails = {
+      ...this.calculateNfseTaxes(body.serviceData || {}),
+      // Persistimos a competência para que consultas, cancelamentos e
+      // downloads posteriores escolham o mesmo provedor usado na emissão.
+      competencia: body.serviceData?.competencia || body.serviceData?.competence || null,
+    };
     const invoice = this.invoiceRepo.create({
       saleId: body.saleId,
       certificateId: body.certId,
