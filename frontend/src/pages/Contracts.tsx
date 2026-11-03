@@ -65,6 +65,7 @@ export function Contracts() {
   const [renewAdjust, setRenewAdjust] = useState('')
   const [renewSaving, setRenewSaving] = useState(false)
   const [billingStatus, setBillingStatus] = useState<Record<string, { hasNf: boolean; hasBoleto: boolean; period: string }>>({})
+  const [selectedContracts, setSelectedContracts] = useState<Set<string>>(new Set())
 
   useEffect(() => { load() }, [])
 
@@ -74,6 +75,7 @@ export function Contracts() {
       const [c, cust] = await Promise.all([api.get('/contracts'), api.get('/customers')])
       list = c.data
       setContracts(c.data); setCustomers(cust.data)
+      setSelectedContracts(new Set())
     } catch { setError('Erro ao carregar contratos'); setLoading(false); return }
     // A lista já aparece aqui; o status de cobrança de cada contrato ativo (uma chamada por
     // contrato) chega depois, em paralelo, sem manter a tela inteira em "carregando".
@@ -294,6 +296,55 @@ export function Contracts() {
     }
   }
 
+  function toggleContractSelection(id: string) {
+    setSelectedContracts(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    const selectableIds = filtered.filter(c => c.status === 'ativo').map(c => c.id)
+    setSelectedContracts(prev => {
+      const allSelected = selectableIds.length > 0 && selectableIds.every(id => prev.has(id))
+      return allSelected ? new Set() : new Set(selectableIds)
+    })
+  }
+
+  async function sendBulkBilling(only: 'nf' | 'boleto' | 'all') {
+    const period = getCurrentPeriod()
+    const selected = contracts.filter(c => selectedContracts.has(c.id) && c.status === 'ativo')
+    const eligible = selected.filter(c => only === 'nf' ? billingStatus[c.id]?.hasNf : only === 'boleto' ? billingStatus[c.id]?.hasBoleto : hasBillingReady(c.id))
+    if (!eligible.length) {
+      setError('Selecione clientes ativos com os documentos já emitidos para a ação escolhida.')
+      return
+    }
+    const label = only === 'nf' ? 'nota fiscal' : only === 'boleto' ? 'boleto' : 'nota fiscal e boleto'
+    if (!confirm(`Enviar ${label} por e-mail para ${eligible.length} cliente(s) selecionado(s)?`)) return
+    setError('')
+    setBillingLoading(true)
+    const endpoint = only === 'nf' ? 'send-nf' : only === 'boleto' ? 'send-boleto' : 'send'
+    let sent = 0
+    const failed: string[] = []
+    try {
+      for (const contract of eligible) {
+        try {
+          await api.post(`/contracts/${contract.id}/billing/${endpoint}`, { billingPeriod: period })
+          sent++
+        } catch {
+          failed.push(contract.customer?.name || contract.title)
+        }
+      }
+      if (failed.length) setError(`${sent} envio(s) concluído(s). Falha em: ${failed.join(', ')}`)
+      else setError(`${sent} envio(s) concluído(s) com sucesso!`)
+      setSelectedContracts(new Set())
+    } finally {
+      setBillingLoading(false)
+    }
+  }
+
   async function sendBillingWhatsapp(id: string) {
     const contract = contracts.find(c => c.id === id)
     const period = getCurrentPeriod()
@@ -356,6 +407,29 @@ export function Contracts() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input className="input pl-10" placeholder="Buscar por titulo ou cliente..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        {canManage && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 dark:border-gray-700 pt-4">
+            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 mr-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="rounded border-gray-300"
+                checked={filtered.filter(c => c.status === 'ativo').length > 0 && filtered.filter(c => c.status === 'ativo').every(c => selectedContracts.has(c.id))}
+                onChange={toggleSelectAll}
+              />
+              Selecionar ativos
+            </label>
+            <span className="text-sm text-gray-500 mr-1">{selectedContracts.size} selecionado(s)</span>
+            <button type="button" className="btn btn-secondary text-sm flex items-center gap-1" disabled={billingLoading || selectedContracts.size === 0} onClick={() => sendBulkBilling('nf')}>
+              <FileText className="w-4 h-4 text-purple-600" /> Enviar notas
+            </button>
+            <button type="button" className="btn btn-secondary text-sm flex items-center gap-1" disabled={billingLoading || selectedContracts.size === 0} onClick={() => sendBulkBilling('boleto')}>
+              <DollarSign className="w-4 h-4 text-orange-600" /> Enviar boletos
+            </button>
+            <button type="button" className="btn btn-secondary text-sm flex items-center gap-1" disabled={billingLoading || selectedContracts.size === 0} onClick={() => sendBulkBilling('all')}>
+              <Send className="w-4 h-4 text-cyan-600" /> Enviar nota + boleto
+            </button>
+          </div>
+        )}
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
@@ -420,6 +494,16 @@ export function Contracts() {
         ) : filtered.map(c => (
           <div key={c.id} className="card p-4">
             <div className="flex items-start gap-4">
+              {canManage && (
+                <input
+                  type="checkbox"
+                  className="mt-3 rounded border-gray-300"
+                  aria-label={`Selecionar contrato de ${c.customer?.name || c.title}`}
+                  checked={selectedContracts.has(c.id)}
+                  disabled={c.status !== 'ativo'}
+                  onChange={() => toggleContractSelection(c.id)}
+                />
+              )}
               <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center flex-shrink-0">
                 <FileText className="w-5 h-5 text-primary-600" />
               </div>
