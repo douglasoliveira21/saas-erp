@@ -62,6 +62,34 @@ export function Customers() {
   }
 
   const [searching, setSearching] = useState(false)
+  const [cepSearching, setCepSearching] = useState(false)
+
+  async function searchCep(value = form.cep) {
+    const cleaned = value.replace(/\D/g, '')
+    if (cleaned.length !== 8) return
+    setCepSearching(true)
+    setError('')
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleaned}/json/`)
+      if (!res.ok) throw new Error('Falha na consulta')
+      const data = await res.json()
+      if (data.erro) { setError('CEP não encontrado'); return }
+      setForm(prev => {
+        const number = prev.address.match(/,\s*([^,]+)$/)?.[1] || ''
+        return {
+          ...prev,
+          cep: cleaned,
+          address: [data.logradouro, number].filter(Boolean).join(', '),
+          neighborhood: data.bairro || prev.neighborhood,
+          city: data.localidade || prev.city,
+          uf: data.uf || prev.uf,
+          cityCode: data.ibge || prev.cityCode,
+        }
+      })
+    } catch {
+      setError('Não foi possível consultar o CEP. Preencha o endereço manualmente.')
+    } finally { setCepSearching(false) }
+  }
 
   async function searchCpfCnpj(value: string) {
     const cleaned = value.replace(/\D/g, '')
@@ -92,6 +120,7 @@ export function Customers() {
             uf: data.uf || prev.uf,
             neighborhood: data.bairro || prev.neighborhood,
             cep: data.cep ? data.cep.replace(/\D/g, '') : prev.cep,
+            cityCode: data.codigo_municipio_ibge || data.codigo_municipio || prev.cityCode,
             stateRegistration: ie || prev.stateRegistration,
           }))
         } else {
@@ -299,7 +328,23 @@ export function Customers() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">CEP</label>
-                  <input className="input" value={form.cep} onChange={e => setForm({ ...form, cep: e.target.value })} placeholder="00000000" />
+                  <div className="flex gap-2">
+                    <input
+                      className="input flex-1"
+                      value={form.cep}
+                      onChange={e => setForm({ ...form, cep: e.target.value.replace(/\D/g, '').slice(0, 8) })}
+                      onBlur={() => searchCep()}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchCep() } }}
+                      placeholder="00000000"
+                      inputMode="numeric"
+                      maxLength={8}
+                    />
+                    <button type="button" onClick={() => searchCep()} disabled={cepSearching || form.cep.replace(/\D/g, '').length !== 8} className="px-3 py-2 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex items-center gap-1" title="Buscar endereço pelo CEP">
+                      {cepSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                      Buscar
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">Ao informar um CEP válido, o endereço e o código IBGE serão preenchidos automaticamente.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cód. IBGE Município</label>
