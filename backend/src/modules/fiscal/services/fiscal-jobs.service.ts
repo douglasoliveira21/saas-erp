@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThanOrEqual, Repository } from 'typeorm';
+import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { Invoice } from '../entities/invoice.entity';
 import { FiscalEvent } from '../entities/fiscal-event.entity';
 import { FiscalIntegrationService } from './fiscal-integration.service';
@@ -33,6 +33,8 @@ export class FiscalJobsService implements OnModuleInit {
       const invoices = await this.invoiceRepo.find({
         where: [
           { queueStatus: In(['pendente', 'retry']) },
+          { queueStatus: 'pendente_integracao', nextRetryAt: LessThanOrEqual(now) },
+          { queueStatus: 'pendente_integracao', nextRetryAt: IsNull() },
           { queueStatus: 'erro', nextRetryAt: LessThanOrEqual(now) },
         ],
         take: Number(process.env.FISCAL_JOBS_BATCH_SIZE || 25),
@@ -48,13 +50,23 @@ export class FiscalJobsService implements OnModuleInit {
         // sequer obter protocolo/chave de acesso, entao nunca vai ter o que consultar) nao pode
         // derrubar o lote inteiro e impedir as outras 24 notas de serem sincronizadas neste ciclo.
         try {
+          // Falha antes de obter chave/protocolo não pode ser "consultada": não há
+          // identificador externo. Mantemos a nota em erro para reemissão manual,
+          // sem transformá-la falsamente em processada/rejeitada pelo job.
+          if (invoice.queueStatus === 'erro' && !invoice.accessKey && !invoice.protocolNumber) {
+            invoice.nextRetryAt = null as any;
+            await this.invoiceRepo.save(invoice);
+            return;
+          }
           const response = await this.integration.queryStatus(invoice);
           invoice.retryCount = Number(invoice.retryCount || 0) + 1;
           if (response.configured === false) {
             invoice.queueStatus = 'pendente_integracao';
             invoice.rejectionReason = response.message;
+            invoice.nextRetryAt = new Date(Date.now() + Math.min(Number(invoice.retryCount || 0) + 1, 24) * 60 * 60 * 1000);
           } else {
             invoice.queueStatus = 'processado';
+            invoice.nextRetryAt = null as any;
             invoice.status = response.status || response.situacao || invoice.status;
             invoice.protocolNumber = response.protocolNumber || response.protocolo || invoice.protocolNumber;
             invoice.accessKey = response.accessKey || invoice.accessKey;

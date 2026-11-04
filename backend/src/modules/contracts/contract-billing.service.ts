@@ -25,12 +25,19 @@ export class ContractBillingService implements OnModuleInit {
     const previous = this.billingLocks.get(key) || Promise.resolve();
     let release!: () => void;
     const next = new Promise<void>(resolve => { release = resolve; });
-    this.billingLocks.set(key, previous.then(() => next));
+    const current = previous.then(() => next);
+    this.billingLocks.set(key, current);
     await previous;
     try {
-      return await fn();
+      // O lock em memória evita duplicidade dentro do processo atual. O advisory
+      // lock do PostgreSQL também cobre múltiplas instâncias/containers.
+      return await this.dataSource.transaction(async manager => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
+        return fn();
+      });
     } finally {
       release();
+      if (this.billingLocks.get(key) === current) this.billingLocks.delete(key);
     }
   }
 
@@ -83,7 +90,7 @@ export class ContractBillingService implements OnModuleInit {
   }
 
   /**
-   * Main billing check: finds contracts that need billing 7 days before due date
+   * Main billing check: finds contracts that reached their configured issue day
    */
   async runBillingCheck(): Promise<{ processed: number; billed: number; errors: number; skipped?: boolean }> {
     // Evita faturar/gerar boleto em duplicidade caso o timer, o startup e um disparo manual
@@ -120,13 +127,14 @@ export class ContractBillingService implements OnModuleInit {
           // Calculate the billing due date for this month
           const dueDate = new Date(currentYear, currentMonth, chargeDay);
           if (dueDate < brToday) {
-            // Due date already passed this month, check next month
-            dueDate.setMonth(dueDate.getMonth() + 1);
+            // Emissão atrasada não pode enviar vencimento já expirado ao banco.
+            dueDate.setTime(new Date(currentYear, currentMonth, currentDay).getTime());
           }
-
-          // Check if today is the issue day for this contract
+          // A cobrança atrasada ainda deve ser processada para a competência
+          // atual. Antes, exigir igualdade exata fazia o servidor perder toda a
+          // emissão do mês se estivesse parado no dia configurado.
           const issueDay = contract.issueDay || 3;
-          if (currentDay !== issueDay) return; // Not the issue day
+          if (currentDay < issueDay) return; // Ainda não chegou o dia de emissão
 
           // Check if already billed for this period — precisa checar o status real da nota/boleto,
           // não apenas se já existe uma linha em contract_billings, senão uma tentativa que falhou
@@ -546,14 +554,14 @@ export class ContractBillingService implements OnModuleInit {
     // (ex.: contrato A de R$1408 fazia o contrato B de R$389 aparecer como "ja emitido").
     const invoices = await this.dataSource.query(
       `SELECT id FROM invoices WHERE recipient_cnpj = $1 AND type = 'nfse' AND status = 'autorizada'
-       AND created_at >= $2 AND created_at < $3 AND ABS(total_value - $4) < 0.01 LIMIT 1`,
+       AND created_at >= $2 AND created_at < $3 AND ABS(total_value - $4) < 0.01${tenantSql('invoices')} LIMIT 1`,
       [customerDoc || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00', monthlyValue]
     ).catch(() => []);
 
     // Mesmo raciocinio para o boleto: filtra pelo valor do contrato, nao so cliente+mes.
     const payments = await this.dataSource.query(
       `SELECT id, codigo_solicitacao FROM payments WHERE customer_id = $1 AND type = 'boleto' AND status != 'cancelado'
-       AND created_at >= $2 AND created_at < $3 AND ABS(value - $4) < 0.01 LIMIT 1`,
+       AND created_at >= $2 AND created_at < $3 AND ABS(value - $4) < 0.01${tenantSql('payments')} LIMIT 1`,
       [contract.customerId || 'NONE', startDate + 'T00:00:00', nextMonthStart + 'T00:00:00', monthlyValue]
     ).catch(() => []);
 
@@ -731,9 +739,12 @@ export class ContractBillingService implements OnModuleInit {
       if (existingDueDate === dueDateStr) {
         throw new Error(`Já existe um boleto emitido para o período ${billingPeriod} com esse mesmo vencimento (${dueDateStr}). Para reemitir, escolha uma data de vencimento diferente.`);
       }
-      await this.interService.cancelBoleto(existingStatus.boletoCode!, 'Reemissão com nova data de vencimento').catch((error: any) => {
-        this.logger.warn(`Não foi possível cancelar o boleto anterior (${existingStatus.boletoCode}) antes de reemitir: ${error.message}`);
-      });
+      try {
+        await this.interService.cancelBoleto(existingStatus.boletoCode!, 'Reemissão com nova data de vencimento');
+      } catch (error: any) {
+        // Não gerar um segundo boleto enquanto o anterior continua ativo.
+        throw new Error(`Não foi possível cancelar o boleto anterior antes da reemissão: ${error.message}`);
+      }
     }
 
     // Calculate boleto value: if ISS is retained by tomador, deduct ISS from boleto
@@ -851,7 +862,7 @@ export class ContractBillingService implements OnModuleInit {
       const invoices = await this.dataSource.query(
         `SELECT id, xml_authorized, xml_sent, number, series, access_key, certificate_id FROM invoices
          WHERE recipient_cnpj = $1 AND type = 'nfse' AND status = 'autorizada'
-         AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC LIMIT 1`,
+         AND created_at >= $2 AND created_at < $3${tenantSql('invoices')} ORDER BY created_at DESC LIMIT 1`,
         [customerDoc, startDate, nextMonthStart]
       ).catch(() => []);
       if (invoices[0]) {
@@ -893,7 +904,7 @@ export class ContractBillingService implements OnModuleInit {
       const nextMonthStart = new Date(year, month, 1).toISOString().split('T')[0] + 'T00:00:00';
       const payments = await this.dataSource.query(
         `SELECT codigo_solicitacao FROM payments WHERE customer_id = $1 AND type = 'boleto' AND status != 'cancelado'
-         AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC LIMIT 1`,
+         AND created_at >= $2 AND created_at < $3${tenantSql('payments')} ORDER BY created_at DESC LIMIT 1`,
         [contract.customerId, startDate, nextMonthStart]
       ).catch(() => []);
       if (payments[0]?.codigo_solicitacao) {

@@ -256,6 +256,8 @@ export class NfseService {
       this.logger.error('Falha ao emitir NFS-e (' + (nacional ? 'Emissor Nacional' : 'Cidade360') + '): ' + e.message);
       invoice.status = 'rejeitada';
       invoice.queueStatus = 'erro';
+      invoice.retryCount = Number(invoice.retryCount || 0) + 1;
+      invoice.nextRetryAt = new Date(Date.now() + Math.min(invoice.retryCount, 24) * 60 * 60 * 1000);
       invoice.rejectionReason = e.message;
       await this.invoiceRepository.save(invoice);
       throw new BadRequestException('Erro ao emitir NFS-e: ' + e.message);

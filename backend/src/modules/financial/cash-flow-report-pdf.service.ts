@@ -158,13 +158,13 @@ export class CashFlowReportPdfService {
               c.title AS contract_title, inv.number AS invoice_number
        FROM payments p
        JOIN contract_billings cb ON cb.boleto_code = p.codigo_solicitacao
-       JOIN contracts c ON c.id = cb.contract_id
-       LEFT JOIN invoices inv ON inv.id = cb.invoice_id
-       WHERE p.status = 'pago' AND p.sale_id IS NULL
+       JOIN contracts c ON c.id = cb.contract_id AND c.tenant_id = $3
+       LEFT JOIN invoices inv ON inv.id = cb.invoice_id AND inv.tenant_id = $3
+       WHERE p.status = 'pago' AND p.sale_id IS NULL AND p.tenant_id = $3
          AND p.paid_at >= $1 AND p.paid_at <= $2
          AND NOT EXISTS (SELECT 1 FROM financial_movements fm WHERE fm.idempotency_key = 'contract:' || p.codigo_solicitacao)
        ORDER BY p.paid_at ASC`,
-      [startDate, endDate + ' 23:59:59'],
+      [startDate, endDate + ' 23:59:59', tenantId],
     );
 
     const contractRows: LedgerRow[] = contractPayments.map((cp: any) => ({

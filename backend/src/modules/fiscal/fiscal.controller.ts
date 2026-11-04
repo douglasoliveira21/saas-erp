@@ -668,6 +668,9 @@ export class FiscalController {
   async retryInvoice(@Param('id') id: string, @Request() req: any) {
     const invoice = await this.invoiceRepo.findOne({ where: { id } });
     if (!invoice) throw new Error('Nota não encontrada');
+    if (!invoice.accessKey && !invoice.protocolNumber) {
+      throw new BadRequestException('Esta nota não possui chave/protocolo para consulta. Corrija os dados e emita uma nova nota pela venda.');
+    }
     invoice.queueStatus = 'pendente';
     invoice.retryCount = Number(invoice.retryCount || 0) + 1;
     invoice.nextRetryAt = null;
@@ -691,8 +694,11 @@ export class FiscalController {
     if (response.configured === false) {
       invoice.queueStatus = 'pendente_integracao';
       invoice.rejectionReason = response.message;
+      invoice.retryCount = Number(invoice.retryCount || 0) + 1;
+      invoice.nextRetryAt = new Date(Date.now() + Math.min(invoice.retryCount, 24) * 60 * 60 * 1000);
     } else {
       invoice.queueStatus = 'processado';
+      invoice.nextRetryAt = null as any;
       invoice.status = response.status || response.situacao || invoice.status;
       invoice.protocolNumber = response.protocolNumber || response.protocolo || invoice.protocolNumber;
       invoice.accessKey = response.accessKey || invoice.accessKey;

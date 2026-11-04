@@ -66,6 +66,7 @@ export class NfeService {
 
   private async reserveFiscalNumber(configId: string, series: number, isNfce: boolean): Promise<number> {
     const column = isNfce ? 'nfce_next_number' : 'nfe_next_number';
+    const modelo = isNfce ? '65' : '55';
     return this.configRepository.manager.transaction(async manager => {
       const configRows = await manager.query(
         `SELECT ${column} AS "nextNumber" FROM fiscal_config WHERE id=$1 FOR UPDATE`,
@@ -79,9 +80,10 @@ export class NfeService {
         // em processamento continuam bloqueando a numeração.
         `SELECT i.number, i.status FROM invoices i
          WHERE i.type='nfe' AND i.series=$1 AND i.number IS NOT NULL
+           AND (substring(i.access_key from 21 for 2) = $3 OR ($3 = '55' AND COALESCE(i.access_key, '') = ''))
            AND (i.tenant_id = (SELECT tenant_id FROM fiscal_config WHERE id=$2) OR i.tenant_id IS NULL)
          ORDER BY i.number`,
-        [series, configId],
+        [series, configId, modelo],
       );
       const configured = Number(configRows[0].nextNumber);
       const start = Number.isSafeInteger(configured) && configured > 0 ? configured : 1;
@@ -274,10 +276,14 @@ export class NfeService {
           } else {
             invoice.status = 'rejeitada';
             invoice.rejectionReason = `${cStatRet}: ${xMotivoRet}`;
+            // Rejeições retornadas após consulta do recibo não foram aceitas pela
+            // SEFAZ e podem devolver a numeração (exceto denegação).
+            numberCanBeReused = !['110', '301', '302'].includes(cStatRet);
           }
         } else {
           invoice.status = 'rejeitada';
           invoice.rejectionReason = `Lote em processamento sem recibo: ${xMotivoLote}`;
+            numberCanBeReused = true;
         }
       } else {
         invoice.status = 'rejeitada';
@@ -296,6 +302,8 @@ export class NfeService {
     } catch (e) {
       invoice.status = 'rejeitada';
       invoice.queueStatus = 'erro';
+      invoice.retryCount = Number(invoice.retryCount || 0) + 1;
+      invoice.nextRetryAt = new Date(Date.now() + Math.min(invoice.retryCount, 24) * 60 * 60 * 1000);
       invoice.rejectionReason = e.message;
       await this.invoiceRepository.save(invoice);
       throw new BadRequestException('Erro ao emitir NF-e: ' + e.message);
