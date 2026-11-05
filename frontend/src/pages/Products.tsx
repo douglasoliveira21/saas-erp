@@ -21,6 +21,7 @@ interface Product {
   unit: string
   active: boolean
 }
+interface XmlImportSummary { imported: number; skipped: number; unchanged: number; importedItems: Product[]; updatedItems: Product[]; unchangedItems: Product[]; errors: any[]; total: number }
 
 const emptyForm = { name: '', code: '', category: '', quantity: 0, purchasePrice: 0, salePrice: 0, taxPercentage: 0, supplier: '', minStock: 5, description: '', ncm: '', cfop: '5102', cest: '', unit: 'UN' }
 
@@ -34,8 +35,32 @@ export function Products() {
   const [form, setForm] = useState<any>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [xmlImportSummary, setXmlImportSummary] = useState<XmlImportSummary | null>(null)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    try {
+      const raw = sessionStorage.getItem('last-xml-import-summary')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        setXmlImportSummary({
+          imported: Number(parsed.imported || 0),
+          skipped: Number(parsed.skipped || 0),
+          unchanged: Number(parsed.unchanged || 0),
+          importedItems: Array.isArray(parsed.importedItems) ? parsed.importedItems : [],
+          updatedItems: Array.isArray(parsed.updatedItems) ? parsed.updatedItems : [],
+          unchangedItems: Array.isArray(parsed.unchangedItems) ? parsed.unchangedItems : [],
+          errors: Array.isArray(parsed.errors) ? parsed.errors : [],
+          total: Number(parsed.total || 0),
+        })
+      }
+    } catch {}
+  }, [])
+
+  function closeXmlImportSummary() {
+    setXmlImportSummary(null)
+    try { sessionStorage.removeItem('last-xml-import-summary') } catch {}
+  }
 
   async function load() {
     try {
@@ -254,6 +279,23 @@ export function Products() {
                 {saving ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Check className="w-4 h-4" />}
                 Salvar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {xmlImportSummary && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div><h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2"><Check className={`w-5 h-5 ${xmlImportSummary.errors.length ? 'text-yellow-600' : 'text-green-600'}`} /> {xmlImportSummary.errors.length ? 'Importação XML com ocorrências' : 'Importação XML concluída'}</h2><p className="text-sm text-gray-500 mt-1">{xmlImportSummary.total} item(ns) processado(s)</p></div>
+              <button onClick={closeXmlImportSummary} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3"><div className="p-3 rounded-lg bg-green-50 border border-green-200"><p className="text-xs text-green-700">Novos</p><p className="text-2xl font-bold text-green-800">{xmlImportSummary.imported}</p></div><div className="p-3 rounded-lg bg-blue-50 border border-blue-200"><p className="text-xs text-blue-700">Atualizados</p><p className="text-2xl font-bold text-blue-800">{xmlImportSummary.skipped}</p></div><div className="p-3 rounded-lg bg-gray-50 border border-gray-200"><p className="text-xs text-gray-700">Já existentes</p><p className="text-2xl font-bold text-gray-800">{xmlImportSummary.unchanged}</p></div><div className="p-3 rounded-lg bg-red-50 border border-red-200"><p className="text-xs text-red-700">Erros</p><p className="text-2xl font-bold text-red-800">{xmlImportSummary.errors.length}</p></div></div>
+              <div className="space-y-2">{[...xmlImportSummary.importedItems, ...xmlImportSummary.updatedItems, ...xmlImportSummary.unchangedItems].map((item, index) => <div key={item.id || `${item.code || item.name}-${index}`} className="text-sm p-2 rounded bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200"><strong>{item.name}</strong>{item.code ? ` — código ${item.code}` : ''} · estoque: {item.quantity}</div>)}</div>
+              {xmlImportSummary.errors.length > 0 && <div><h3 className="text-sm font-semibold text-red-700 mb-2">Itens com erro</h3><div className="space-y-1">{xmlImportSummary.errors.map((item: any, index: number) => <div key={`${item.code || item.name}-${index}`} className="text-sm p-2 rounded bg-red-50 text-red-700"><strong>{item.name}</strong>: {item.message}</div>)}</div></div>}
+              <div className="flex justify-end"><button className="btn btn-primary" onClick={closeXmlImportSummary}>Entendi</button></div>
             </div>
           </div>
         </div>
