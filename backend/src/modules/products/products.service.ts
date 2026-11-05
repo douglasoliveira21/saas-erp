@@ -40,10 +40,12 @@ export class ProductsService {
     return result;
   }
 
-  async importFromXml(products: any[]): Promise<{ imported: number; skipped: number; items: Product[] }> {
+  async importFromXml(products: any[]): Promise<{ imported: number; skipped: number; items: Product[]; importedItems: Product[]; updatedItems: Product[] }> {
     let imported = 0;
     let skipped = 0;
     const items: Product[] = [];
+    const importedItems: Product[] = [];
+    const updatedItems: Product[] = [];
 
     for (const p of products) {
       const code = p.code || p.cProd || `IMP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -62,6 +64,7 @@ export class ProductsService {
         if (p.unit) existing.unit = p.unit;
         await this.productsRepository.save(existing);
         items.push(existing);
+        updatedItems.push(existing);
         skipped++;
         continue;
       }
@@ -88,10 +91,11 @@ export class ProductsService {
       const saved = await this.productsRepository.save(product);
       const result = Array.isArray(saved) ? saved[0] : saved;
       items.push(result);
+      importedItems.push(result);
       imported++;
     }
 
-    return { imported, skipped, items };
+    return { imported, skipped, items, importedItems, updatedItems };
   }
 
   async findAll(): Promise<Product[]> {

@@ -8,6 +8,7 @@ import { localToday } from '../utils/format'
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
 interface Invoice { id: string; type: string; number: number; documentNumber?: string | null; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
 interface Sale { id: string; customer: { name: string; cpfCnpj: string; email: string; address: string; city: string; uf: string; neighborhood: string; cep: string; stateRegistration: string }; totalAmount: number; status: string; paymentMethod: string; items: any[] }
+interface XmlImportSummary { imported: number; skipped: number; importedItems: any[]; updatedItems: any[]; total: number }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', processando: 'Processando', autorizada: 'Autorizada', rejeitada: 'Rejeitada', cancelada: 'Cancelada' }
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', processando: 'bg-blue-100 text-blue-700', autorizada: 'bg-green-100 text-green-700', rejeitada: 'bg-red-100 text-red-700', cancelada: 'bg-gray-100 text-gray-700' }
@@ -40,6 +41,7 @@ export function Fiscal() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [xmlImportSummary, setXmlImportSummary] = useState<XmlImportSummary | null>(null)
   const [fiscalConfig, setFiscalConfig] = useState<any>(null)
 
   // Upload cert
@@ -813,9 +815,9 @@ export function Fiscal() {
                                     supplier: emitName || 'Importação XML',
                                   }))
                                   const importRes = await api.post('/products/import', { products: importPayload })
-                                  const { imported, skipped } = importRes.data
-                                  setSuccess(`XML importado! ${imported} produto(s) cadastrado(s), ${skipped} atualizado(s). Redirecionando para Produtos...`)
-                                  setTimeout(() => { window.location.href = '/products' }, 2000)
+                                  const { imported, skipped, importedItems = [], updatedItems = [] } = importRes.data
+                                  setXmlImportSummary({ imported, skipped, importedItems, updatedItems, total: importedItems.length + updatedItems.length || parsedItems.length })
+                                  setSuccess('')
                                 } catch (importErr) {
                                   setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Erro ao cadastrar produtos automaticamente - faça manualmente.`)
                                   setTimeout(() => setSuccess(''), 5000)
@@ -1052,6 +1054,39 @@ export function Fiscal() {
 
       {/* === CONFIG === */}
       {tab === 'config' && isAdmin && <FiscalConfigForm />}
+
+      {/* === RESULTADO DA IMPORTAÇÃO XML === */}
+      {xmlImportSummary && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2"><Check className="w-5 h-5 text-green-600" /> XML importado com sucesso</h2>
+                <p className="text-sm text-gray-500 mt-1">{xmlImportSummary.total} item(ns) processado(s)</p>
+              </div>
+              <button onClick={() => setXmlImportSummary(null)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-green-50 border border-green-200"><p className="text-xs text-green-700">Novos produtos</p><p className="text-2xl font-bold text-green-800">{xmlImportSummary.imported}</p></div>
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200"><p className="text-xs text-blue-700">Produtos atualizados</p><p className="text-2xl font-bold text-blue-800">{xmlImportSummary.skipped}</p></div>
+              </div>
+              <div className="space-y-3">
+                {xmlImportSummary.importedItems.length > 0 && (
+                  <div><h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Produtos cadastrados</h3><div className="space-y-1">{xmlImportSummary.importedItems.map((item: any, index: number) => <div key={item.id || `${item.code || item.name}-${index}`} className="text-sm p-2 rounded bg-green-50 dark:bg-green-900/20 text-gray-700 dark:text-gray-200"><strong>{item.name}</strong>{item.code ? ` — código ${item.code}` : ''} · quantidade: {item.quantity}</div>)}</div></div>
+                )}
+                {xmlImportSummary.updatedItems.length > 0 && (
+                  <div><h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Produtos atualizados no estoque</h3><div className="space-y-1">{xmlImportSummary.updatedItems.map((item: any, index: number) => <div key={item.id || `${item.code || item.name}-${index}`} className="text-sm p-2 rounded bg-blue-50 dark:bg-blue-900/20 text-gray-700 dark:text-gray-200"><strong>{item.name}</strong>{item.code ? ` — código ${item.code}` : ''} · quantidade total: {item.quantity}</div>)}</div></div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button className="btn btn-secondary" onClick={() => setXmlImportSummary(null)}>Fechar</button>
+                <button className="btn btn-primary" onClick={() => { setXmlImportSummary(null); window.location.href = '/products' }}>Ver produtos</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* === MODAL VISUALIZAR NOTA === */}
       {showView && (
