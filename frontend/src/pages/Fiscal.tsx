@@ -697,60 +697,83 @@ export function Fiscal() {
                         onChange={async (e) => {
                           const file = e.target.files?.[0]
                           if (!file) return
+                          delete (window as any).__nfeImportedItems
                           try {
                             const text = await file.text()
                             // Parse XML da NF-e
                             const parser = new DOMParser()
                             const doc = parser.parseFromString(text, 'text/xml')
 
+                            // NF-e normalmente usa namespace padrão (ou prefixado).
+                            // querySelector('emit')/querySelectorAll('det') não encontra
+                            // essas tags em vários navegadores quando há namespace XML.
+                            const elementsByLocalName = (root: Document | Element, name: string): Element[] =>
+                              Array.from(root.getElementsByTagName('*')).filter((element) =>
+                                element.localName === name || element.tagName.split(':').pop() === name
+                              )
+                            const firstByLocalName = (root: Document | Element, name: string): Element | null =>
+                              elementsByLocalName(root, name)[0] || null
+                            const valueOf = (root: Document | Element, name: string): string =>
+                              firstByLocalName(root, name)?.textContent?.trim() || ''
+                            const numberOf = (root: Document | Element, name: string, fallback = 0): number => {
+                              const value = valueOf(root, name).replace(',', '.')
+                              const parsed = Number(value)
+                              return Number.isFinite(parsed) ? parsed : fallback
+                            }
+
+                            if (doc.getElementsByTagName('parsererror').length > 0 || doc.documentElement?.localName === 'parsererror' || !firstByLocalName(doc, 'NFe')) {
+                              throw new Error('XML inválido ou sem a estrutura NFe')
+                            }
+
                             // Extrair dados do emitente (fornecedor = destinatario na entrada)
-                            const emit = doc.querySelector('emit')
-                            const emitName = emit?.querySelector('xNome')?.textContent || ''
-                            const emitCnpj = emit?.querySelector('CNPJ')?.textContent || emit?.querySelector('CPF')?.textContent || ''
-                            const emitIE = emit?.querySelector('IE')?.textContent || ''
-                            const enderEmit = emit?.querySelector('enderEmit')
-                            const emitAddr = enderEmit?.querySelector('xLgr')?.textContent || ''
-                            const emitNum = enderEmit?.querySelector('nro')?.textContent || ''
-                            const emitBairro = enderEmit?.querySelector('xBairro')?.textContent || ''
-                            const emitCity = enderEmit?.querySelector('xMun')?.textContent || ''
-                            const emitUf = enderEmit?.querySelector('UF')?.textContent || ''
-                            const emitCep = enderEmit?.querySelector('CEP')?.textContent || ''
+                            const emit = firstByLocalName(doc, 'emit')
+                            const emitName = emit ? valueOf(emit, 'xNome') : ''
+                            const emitCnpj = emit ? (valueOf(emit, 'CNPJ') || valueOf(emit, 'CPF')) : ''
+                            const emitIE = emit ? valueOf(emit, 'IE') : ''
+                            const enderEmit = emit ? firstByLocalName(emit, 'enderEmit') : null
+                            const emitAddr = enderEmit ? valueOf(enderEmit, 'xLgr') : ''
+                            const emitNum = enderEmit ? valueOf(enderEmit, 'nro') : ''
+                            const emitBairro = enderEmit ? valueOf(enderEmit, 'xBairro') : ''
+                            const emitCity = enderEmit ? valueOf(enderEmit, 'xMun') : ''
+                            const emitUf = enderEmit ? valueOf(enderEmit, 'UF') : ''
+                            const emitCep = enderEmit ? valueOf(enderEmit, 'CEP') : ''
 
                             // Extrair valor total
-                            const icmsTot = doc.querySelector('ICMSTot')
-                            const vNF = icmsTot?.querySelector('vNF')?.textContent || ''
-                            const nNF = doc.querySelector('ide nNF')?.textContent || ''
-                            const dhEmi = doc.querySelector('ide dhEmi')?.textContent || doc.querySelector('ide dEmi')?.textContent || ''
+                            const icmsTot = firstByLocalName(doc, 'ICMSTot')
+                            const vNF = icmsTot ? valueOf(icmsTot, 'vNF') : ''
+                            const ide = firstByLocalName(doc, 'ide')
+                            const nNF = ide ? valueOf(ide, 'nNF') : ''
+                            const dhEmi = ide ? (valueOf(ide, 'dhEmi') || valueOf(ide, 'dEmi')) : ''
 
                             // Extrair itens
-                            const dets = doc.querySelectorAll('det')
+                            const dets = elementsByLocalName(doc, 'det')
                             const parsedItems: any[] = []
                             dets.forEach(det => {
-                              const prod = det.querySelector('prod')
+                              const prod = firstByLocalName(det, 'prod')
                               if (prod) {
                                 parsedItems.push({
-                                  name: prod.querySelector('xProd')?.textContent || '',
-                                  code: prod.querySelector('cProd')?.textContent || '',
-                                  ncm: prod.querySelector('NCM')?.textContent || '',
-                                  cfop: prod.querySelector('CFOP')?.textContent || '',
-                                  unit: prod.querySelector('uCom')?.textContent || 'UN',
-                                  quantity: parseFloat(prod.querySelector('qCom')?.textContent || '1'),
-                                  unitPrice: parseFloat(prod.querySelector('vUnCom')?.textContent || '0'),
-                                  ean: prod.querySelector('cEAN')?.textContent || '',
-                                  cest: prod.querySelector('CEST')?.textContent || '',
+                                  name: valueOf(prod, 'xProd'),
+                                  code: valueOf(prod, 'cProd'),
+                                  ncm: valueOf(prod, 'NCM'),
+                                  cfop: valueOf(prod, 'CFOP'),
+                                  unit: valueOf(prod, 'uCom') || 'UN',
+                                  quantity: numberOf(prod, 'qCom', 1),
+                                  unitPrice: numberOf(prod, 'vUnCom'),
+                                  ean: valueOf(prod, 'cEAN'),
+                                  cest: valueOf(prod, 'CEST'),
                                 })
                               }
                             })
 
                             // Preencher os campos
                             setRecipientName(emitName)
-                            setRecipientCnpj(emitCnpj)
+                            setRecipientCnpj(emitCnpj.replace(/\D/g, ''))
                             setRecipientIE(emitIE)
                             setRecipientAddress(emitAddr + (emitNum ? ', ' + emitNum : ''))
                             setRecipientNeighborhood(emitBairro)
                             setRecipientCity(emitCity)
                             setRecipientUf(emitUf)
-                            setRecipientCep(emitCep)
+                            setRecipientCep(emitCep.replace(/\D/g, '').padStart(8, '0'))
                             if (vNF) setTotalValue(vNF)
 
                             // Guardar itens parseados para envio
@@ -799,10 +822,12 @@ export function Fiscal() {
                                 }
                               }
                             } else {
+                              delete (window as any).__nfeImportedItems
                               setSuccess(`XML importado! Nenhum item encontrado.`)
                               setTimeout(() => setSuccess(''), 5000)
                             }
                           } catch (err) {
+                            delete (window as any).__nfeImportedItems
                             setError('Erro ao ler o XML. Verifique se é um arquivo XML de NF-e válido.')
                           }
                         }}
