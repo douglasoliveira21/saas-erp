@@ -53,14 +53,14 @@ export class CashFlowReportPdfService {
   ) {}
 
   async generate(tenantId: string, startDate: string, endDate: string, type: CashFlowReportType = 'all'): Promise<Buffer> {
-    const allRows = await this.buildRows(startDate, endDate);
+    const allRows = await this.buildRows(tenantId, startDate, endDate);
     // Só créditos ou só débitos: o saldo corrido passa a somar apenas as linhas mostradas.
     const rows = type === 'credits' ? allRows.filter((r) => r.credit > 0) : type === 'debits' ? allRows.filter((r) => r.debit > 0) : allRows;
     const company = await this.companyProfileRepo.findOne({ where: { tenantId } });
     return this.render(rows, company, startDate, endDate, type);
   }
 
-  private async buildRows(startDate: string, endDate: string): Promise<LedgerRow[]> {
+  private async buildRows(tenantId: string, startDate: string, endDate: string): Promise<LedgerRow[]> {
     // Lado "crédito/débito de vendas" - movimentos financeiros realizados (recebimentos, taxas
     // de cartão). Vem de financial_movements, que já é o "livro-razão" das vendas.
     // Estornos (cancelamento de venda, reversão manual de lançamento, reversão de pagamento de
