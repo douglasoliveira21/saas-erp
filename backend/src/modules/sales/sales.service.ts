@@ -377,6 +377,10 @@ export class SalesService {
       [id],
     );
     (sale as any).activeBoleto = activeBoleto[0] || null;
+    const invoices = await this.dataSource.query(
+      "SELECT id FROM invoices WHERE sale_id = $1 AND status = 'autorizada'", [id],
+    );
+    (sale as any).authorizedInvoiceIds = invoices.map((invoice: { id: string }) => invoice.id);
     return sale;
   }
 
@@ -764,19 +768,27 @@ export class SalesService {
     );
 
     for (const invoice of invoices) {
-      if (!invoice.certificate_id) {
-        throw new BadRequestException(`Nota fiscal ${invoice.id} sem certificado vinculado para cancelamento`);
-      }
+      await this.cancelAuthorizedInvoice(invoice, reason, userId);
+    }
+  }
 
-      if (invoice.type === 'nfse') {
-        await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id, userId);
-      } else {
-        await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id, userId);
-      }
+  private async cancelAuthorizedInvoice(invoice: { id: string; type: string; certificate_id: string | null }, reason: string, userId?: string) {
+    if (!invoice.certificate_id) {
+      throw new BadRequestException(`Nota fiscal ${invoice.id} sem certificado vinculado para cancelamento`);
+    }
+    if (invoice.type === 'nfse') {
+      await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id, userId);
+    } else {
+      await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id, userId);
     }
   }
 
   async update(id: string, updateSaleDto: any, userId?: string, userRole?: string): Promise<Sale> {
+    const { cancelInvoiceIds, ...saleChanges } = updateSaleDto;
+    if (cancelInvoiceIds !== undefined && (!Array.isArray(cancelInvoiceIds) ||
+      cancelInvoiceIds.some(id => typeof id !== 'string'))) {
+      throw new BadRequestException('Seleção de notas fiscais inválida');
+    }
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -790,7 +802,7 @@ export class SalesService {
       const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: tenantId ? { id, tenantId } : { id }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       oldData = { ...sale };
-      const { technician, customer, items, approver, alreadyPaid, technicianId, cancelActiveBoleto, ...allowedDto } = updateSaleDto;
+      const { technician, customer, items, approver, alreadyPaid, technicianId, cancelActiveBoleto, ...allowedDto } = saleChanges;
       safeDto = allowedDto;
       shouldCancelActiveBoleto = Boolean(cancelActiveBoleto);
       const activeBoleto = await queryRunner.query(
@@ -884,10 +896,17 @@ export class SalesService {
     }
     const updated = await this.findOne(id);
     const changedBilling = Number(updated.totalAmount) !== Number(oldData.totalAmount) || updated.paymentMethod !== oldData.paymentMethod;
+    let boletoUpdateFailed = false;
     if (shouldCancelActiveBoleto && changedBilling && oldActiveBoleto) {
-      await this.interService.cancelPaymentsForSale(id, 'Alteração de valor ou forma de pagamento da venda');
-      if (updated.paymentMethod === 'boleto' && updated.paymentStatus !== 'pago' && updated.status !== 'pago') {
-        await this.interService.generateForSale(updated, 'boleto');
+      try {
+        await this.interService.cancelPaymentsForSale(id, 'Alteração de valor ou forma de pagamento da venda');
+        if (updated.paymentMethod === 'boleto' && updated.paymentStatus !== 'pago' && updated.status !== 'pago') {
+          await this.interService.generateForSale(updated, 'boleto');
+        }
+      } catch (error) {
+        if (!cancelInvoiceIds?.length) throw error;
+        boletoUpdateFailed = true;
+        this.logger.warn(`Falha ao atualizar boleto na edição da venda ${id}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, oldData, newData: safeDto });
@@ -901,6 +920,34 @@ export class SalesService {
         newData: { technicianId: reassignedTechnician.toId },
       });
       await this.addEvent(id, 'sale.technician_reassigned', updated.status as any, 'Técnico responsável pela venda alterado pelo administrador', userId, reassignedTechnician);
+    }
+    if (changedBilling && cancelInvoiceIds?.length) {
+      const invoices = await this.dataSource.query(
+        `SELECT id, type, certificate_id, number FROM invoices
+         WHERE sale_id = $1 AND status = 'autorizada' AND id::text = ANY($2::text[])`,
+        [id, cancelInvoiceIds],
+      );
+      const failed: string[] = [];
+      let cancelled = 0;
+      for (const invoice of invoices) {
+        try {
+          await this.cancelAuthorizedInvoice(invoice, 'Alteração de valor ou forma de pagamento da venda', userId);
+          cancelled++;
+        } catch (error) {
+          failed.push(invoice.number || invoice.id);
+          this.logger.warn(`Falha ao cancelar nota ${invoice.id} na edição da venda ${id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (cancelled) {
+        await this.dataSource.query(
+          `UPDATE sales SET fiscal_status = 'cancelada', updated_at = NOW()
+           WHERE id = $1 AND NOT EXISTS (
+             SELECT 1 FROM invoices WHERE sale_id = $1 AND status = 'autorizada'
+           )`, [id],
+        );
+      }
+      const result = await this.findOne(id);
+      return Object.assign(result, { invoiceCancellation: { cancelled, failed }, boletoUpdateFailed });
     }
     return updated;
   }

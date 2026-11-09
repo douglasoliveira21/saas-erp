@@ -39,7 +39,7 @@ export function NewSale() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
-  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; hasActiveBoleto: boolean } | null>(null)
+  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; hasActiveBoleto: boolean; authorizedInvoiceIds: string[] } | null>(null)
   const [discountPct, setDiscountPct] = useState(0)
   const [orderNumber, setOrderNumber] = useState('')
 
@@ -69,7 +69,9 @@ export function NewSale() {
         totalAmount: Number(sale.totalAmount || 0),
         paymentMethod: sale.paymentMethod || 'pix',
         hasActiveBoleto: Boolean(sale.activeBoleto),
+        authorizedInvoiceIds: sale.authorizedInvoiceIds || [],
       })
+      setDiscountPct(Number(sale.subtotal) > 0 ? Number(sale.discountAmount || 0) * 100 / Number(sale.subtotal) : 0)
       setTechnicianId(sale.technician?.id || sale.technicianId || '')
       setCustomerId(sale.customer?.id || '')
       setPaymentMethod(sale.paymentMethod || 'pix')
@@ -174,6 +176,12 @@ export function NewSale() {
       )
     }
 
+    const authorizedInvoiceIds = originalSale?.authorizedInvoiceIds || []
+    const cancelInvoiceIds = billingChanged && authorizedInvoiceIds.length && window.confirm(
+      `Esta venda tem ${authorizedInvoiceIds.length} nota(s) fiscal(is) autorizada(s). Deseja solicitar o cancelamento?` +
+      '\n\nOK solicita o cancelamento. Cancelar mantém as notas atuais. A edição da venda será salva nos dois casos.'
+    ) ? authorizedInvoiceIds : []
+
     setSaving(true)
     try {
       const payload = {
@@ -202,6 +210,7 @@ export function NewSale() {
         commissionPercentage: commissionPct,
         commissionAmount,
         ...(cancelActiveBoleto ? { cancelActiveBoleto: true } : {}),
+        ...(cancelInvoiceIds.length ? { cancelInvoiceIds } : {}),
         items: items.map(i => ({
           ...(i.type === 'product' ? { productId: i.id } : { serviceId: i.id }),
           name: i.name,
@@ -215,7 +224,19 @@ export function NewSale() {
         }))
       }
       if (editingSaleId) {
-        await api.patch('/sales/' + editingSaleId, payload)
+        const { data } = await api.patch('/sales/' + editingSaleId, payload)
+        const cancellation = data.invoiceCancellation
+        if (data.boletoUpdateFailed) {
+          notify('Venda salva. Falha ao atualizar o boleto. Confira o status em Pagamentos.', 'error')
+        }
+        if (cancellation?.failed.length) {
+          notify(`Venda salva. Falha ao cancelar a(s) nota(s) ${cancellation.failed.join(', ')}. Confira o status no Fiscal.`, 'error')
+          navigate('/sales')
+          return
+        }
+        if (cancellation?.cancelled) {
+          notify(`Cancelamento confirmado para ${cancellation.cancelled} nota(s) fiscal(is).`, 'success')
+        }
       } else {
         await api.post('/sales', payload)
       }
