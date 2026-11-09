@@ -368,6 +368,15 @@ export class SalesService {
     if (requesterRole === 'tecnico' && requesterId && sale.technicianId !== requesterId) {
       throw new ForbiddenException('Você não tem acesso a esta venda');
     }
+    const activeBoleto = await this.dataSource.query(
+      `SELECT id, codigo_solicitacao, value, due_date
+       FROM payments
+       WHERE sale_id = $1 AND type = 'boleto'
+         AND status IN ('pendente', 'a_receber', 'vencido')
+       ORDER BY created_at DESC LIMIT 1`,
+      [id],
+    );
+    (sale as any).activeBoleto = activeBoleto[0] || null;
     return sale;
   }
 
@@ -773,14 +782,25 @@ export class SalesService {
     await queryRunner.startTransaction();
     let oldData: any;
     let safeDto: any;
+    let oldActiveBoleto: any = null;
+    let shouldCancelActiveBoleto = false;
     let reassignedTechnician: { fromId: string; toId: string } | null = null;
     try {
       const tenantId = this.tenantContext.getTenantId();
       const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: tenantId ? { id, tenantId } : { id }, lock: { mode: 'pessimistic_write' } });
       if (!sale) throw new NotFoundException('Venda não encontrada');
       oldData = { ...sale };
-      const { technician, customer, items, approver, alreadyPaid, technicianId, ...allowedDto } = updateSaleDto;
+      const { technician, customer, items, approver, alreadyPaid, technicianId, cancelActiveBoleto, ...allowedDto } = updateSaleDto;
       safeDto = allowedDto;
+      shouldCancelActiveBoleto = Boolean(cancelActiveBoleto);
+      const activeBoleto = await queryRunner.query(
+        `SELECT id, codigo_solicitacao, value, due_date, status
+         FROM payments
+         WHERE sale_id = $1 AND type = 'boleto'
+           AND status IN ('pendente', 'a_receber', 'vencido')
+         ORDER BY created_at DESC LIMIT 1`, [id],
+      );
+      oldActiveBoleto = activeBoleto[0] || null;
 
       // Somente administradores podem reatribuir quem realizou a venda.
       // Sem isso, a venda mantém o vendedor original mesmo quando outro usuário a edita.
@@ -816,6 +836,23 @@ export class SalesService {
         const firstPending = await queryRunner.query(`SELECT due_date FROM installments WHERE sale_id=$1 AND status IN ('pendente','vencido') ORDER BY number LIMIT 1`, [id]);
         if (firstPending[0]) await queryRunner.query(`UPDATE accounts_receivable SET due_date=$1 WHERE sale_id=$2 AND status IN ('pendente','parcial')`, [firstPending[0].due_date, id]);
       }
+      // Quando o valor da venda muda, as parcelas pendentes também precisam acompanhar o novo
+      // total; caso contrário a reemissão usaria os valores antigos do financeiro.
+      if (safeDto.paymentMethod === 'boleto' && Number(safeDto.totalAmount) >= 0) {
+        const pendingInstallments = await queryRunner.query(
+          `SELECT id, number FROM installments WHERE sale_id = $1 AND status IN ('pendente', 'vencido') ORDER BY number FOR UPDATE`, [id],
+        );
+        if (pendingInstallments.length) {
+          const totalCents = Math.round(Number(safeDto.totalAmount) * 100);
+          const baseCents = Math.floor(totalCents / pendingInstallments.length);
+          let allocated = 0;
+          for (let index = 0; index < pendingInstallments.length; index++) {
+            const cents = index === pendingInstallments.length - 1 ? totalCents - allocated : baseCents;
+            allocated += cents;
+            await queryRunner.query(`UPDATE installments SET value = $1, updated_at = NOW() WHERE id = $2`, [cents / 100, pendingInstallments[index].id]);
+          }
+        }
+      }
       await queryRunner.manager.getRepository(Sale).save(sale);
       if (Array.isArray(items) && items.length) {
         await this.syncSaleCommission(
@@ -846,6 +883,13 @@ export class SalesService {
       await queryRunner.release();
     }
     const updated = await this.findOne(id);
+    const changedBilling = Number(updated.totalAmount) !== Number(oldData.totalAmount) || updated.paymentMethod !== oldData.paymentMethod;
+    if (shouldCancelActiveBoleto && changedBilling && oldActiveBoleto) {
+      await this.interService.cancelPaymentsForSale(id, 'Alteração de valor ou forma de pagamento da venda');
+      if (updated.paymentMethod === 'boleto' && updated.paymentStatus !== 'pago' && updated.status !== 'pago') {
+        await this.interService.generateForSale(updated, 'boleto');
+      }
+    }
     await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, oldData, newData: safeDto });
     if (reassignedTechnician) {
       await this.auditService.safeCreate({

@@ -39,6 +39,7 @@ export function NewSale() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
+  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; hasActiveBoleto: boolean } | null>(null)
   const [discountPct, setDiscountPct] = useState(0)
   const [orderNumber, setOrderNumber] = useState('')
 
@@ -64,6 +65,11 @@ export function NewSale() {
       const res = await api.get('/sales/' + saleId)
       const sale = res.data
       setEditingSaleId(saleId)
+      setOriginalSale({
+        totalAmount: Number(sale.totalAmount || 0),
+        paymentMethod: sale.paymentMethod || 'pix',
+        hasActiveBoleto: Boolean(sale.activeBoleto),
+      })
       setTechnicianId(sale.technician?.id || sale.technicianId || '')
       setCustomerId(sale.customer?.id || '')
       setPaymentMethod(sale.paymentMethod || 'pix')
@@ -156,6 +162,18 @@ export function NewSale() {
       }
     }
 
+    const billingChanged = Boolean(editingSaleId && originalSale && (
+      Math.abs(Number(totalAmount) - originalSale.totalAmount) > 0.005 || paymentMethod !== originalSale.paymentMethod
+    ))
+    let cancelActiveBoleto = false
+    if (billingChanged && originalSale?.hasActiveBoleto) {
+      cancelActiveBoleto = window.confirm(
+        'Esta venda possui um boleto ativo e o valor ou a forma de pagamento foi alterado.\n\n' +
+        'Clique em OK para cancelar o boleto atual e emitir um novo conforme a alteração.\n' +
+        'Clique em Cancelar para manter o boleto atual e salvar a edição da venda.'
+      )
+    }
+
     setSaving(true)
     try {
       const payload = {
@@ -183,6 +201,7 @@ export function NewSale() {
         netProfit,
         commissionPercentage: commissionPct,
         commissionAmount,
+        ...(cancelActiveBoleto ? { cancelActiveBoleto: true } : {}),
         items: items.map(i => ({
           ...(i.type === 'product' ? { productId: i.id } : { serviceId: i.id }),
           name: i.name,
