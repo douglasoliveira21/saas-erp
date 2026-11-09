@@ -13,7 +13,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { BankCredentialsService, InterCredentials } from './bank-credentials.service';
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
 import { adjustReceivedValue, ReceivedValueAdjustment } from './received-value-adjustment';
-import { BRT_TODAY_SQL } from '../../common/date';
+import { BRT_TODAY_SQL, todayInBrasilia } from '../../common/date';
 
 
 interface TokenCache {
@@ -408,9 +408,7 @@ export class InterService implements OnModuleInit {
     if (!payment.sale_id) throw new HttpException('Este boleto não está vinculado a uma venda', HttpStatus.BAD_REQUEST);
 
     const newDueDateFormatted = this.formatInterDueDate(newDueDate, 'Nova data de vencimento');
-    const today = new Date();
-    const todayLocal = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-    if (newDueDateFormatted < todayLocal) throw new HttpException('A nova data de vencimento não pode estar no passado', HttpStatus.BAD_REQUEST);
+    if (newDueDateFormatted < todayInBrasilia()) throw new HttpException('A nova data de vencimento não pode estar no passado', HttpStatus.BAD_REQUEST);
 
     const sale = await this.saleRepo.findOne({ where: { id: payment.sale_id }, relations: ['customer'] });
     if (!sale?.customer) throw new HttpException('Venda ou cliente não encontrado', HttpStatus.NOT_FOUND);

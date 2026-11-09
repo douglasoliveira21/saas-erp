@@ -5,10 +5,13 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   Download, Search, RefreshCw, CreditCard, XCircle, Trash2, CheckCircle, Undo2, CalendarClock,
   ChevronDown, ChevronLeft, ChevronRight, Plus, Check, X, AlertTriangle, DollarSign, Clock, Edit2, Receipt, Users,
-  TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle, FileDown, FileCode,
+  TrendingUp, Ban, ArrowDownCircle, ArrowUpCircle, FileDown, FileCode, Mail, MessageCircle,
 } from 'lucide-react'
-import { ActionMenu, useFeedback } from '../components/ui'
+import { ActionMenu, Button, Modal, useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
+import { getErrorMessage } from '../services/errors'
+
+type DocumentTarget = { saleId: string; channel: 'email' | 'whatsapp' }
 
 interface Payment {
   id: string
@@ -88,6 +91,10 @@ const categories = [
 const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
 const LEDGER_PAGE_SIZE = 10
 
+function todayForPayment() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+}
+
 function currentMonth() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -117,7 +124,8 @@ function formatDate(d: string) {
 }
 
 export function Payments() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isFinanceiro } = useAuth()
+  const [documentTarget, setDocumentTarget] = useState<DocumentTarget | null>(null)
   const { confirm: confirmAction, runOperation, notify } = useFeedback()
   const { trackAction } = useActionToast()
   const initialParams = new URLSearchParams(window.location.search)
@@ -391,8 +399,11 @@ export function Payments() {
   }
 
   async function confirmReissue() {
-    if (!reissuingPayment) return
-    if (!reissueDueDate) { setError('Informe a nova data de vencimento'); return }
+    if (!reissuingPayment || reissuing) return
+    if (!reissueDueDate || reissueDueDate < todayForPayment()) {
+      setError('Escolha uma nova data de vencimento a partir de hoje')
+      return
+    }
     setReissuing(true)
     setError('')
     try {
@@ -410,6 +421,14 @@ export function Payments() {
     } finally {
       setReissuing(false)
     }
+  }
+
+  function documentActions(saleId?: string) {
+    if (!saleId || (!isAdmin && !isFinanceiro)) return []
+    return [
+      { label: 'Enviar docs por e-mail', icon: <Mail className="w-4 h-4 text-cyan-600" />, onClick: () => setDocumentTarget({ saleId, channel: 'email' }) },
+      { label: 'Enviar docs por WhatsApp', icon: <MessageCircle className="w-4 h-4 text-green-600" />, onClick: () => setDocumentTarget({ saleId, channel: 'whatsapp' }) },
+    ]
   }
 
   function openAdjustModal(payment: Payment) {
@@ -896,7 +915,8 @@ export function Payments() {
                           { label: 'Baixar boleto', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(row.data.codigoSolicitacao), hidden: row.data.type !== 'boleto' },
                           { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
                           { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
-                          { label: 'Mudar data e valor', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
+                          ...documentActions(row.data.status === 'cancelado' ? undefined : row.data.saleId),
+                          { label: 'Reemitir boleto', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !(row.data.saleId && row.data.type === 'boleto' && ['pendente', 'a_receber', 'vencido'].includes(row.data.status)) },
                           { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelPayment(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
                           { label: 'Consultar status', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
                           { label: 'Corrigir valor recebido', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
@@ -1023,7 +1043,10 @@ export function Payments() {
                       <td className="table-cell text-sm text-red-600">{formatDate(inst.dueDate)}</td>
                       <td className="table-cell"><span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{daysOverdue} dias</span></td>
                       <td className="table-cell">
-                        <button onClick={() => openPayInstallment(inst)} className="btn btn-primary px-3 py-1 text-xs flex items-center gap-1"><DollarSign className="w-3 h-3" /> Pagar</button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => openPayInstallment(inst)} className="btn btn-primary px-3 py-1 text-xs flex items-center gap-1"><DollarSign className="w-3 h-3" /> Pagar</button>
+                          <ActionMenu items={documentActions(inst.account?.saleId)} />
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1201,13 +1224,13 @@ export function Payments() {
                 <h2 className="text-lg font-semibold text-gray-900">Reemitir boleto</h2>
                 <p className="text-sm text-gray-500 mt-0.5">{reissuingPayment.customerName} - R$ {Number(reissuingPayment.value).toFixed(2)}</p>
               </div>
-              <button onClick={() => setReissuingPayment(null)} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+              <button disabled={reissuing} aria-label="Fechar reemissão" onClick={() => setReissuingPayment(null)} className="text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600 bg-purple-50 p-3 rounded-lg">O boleto atual será cancelado automaticamente e um novo será gerado com a data (e valor, se alterado) abaixo.</p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nova data de vencimento *</label>
-                <input type="date" className="input" value={reissueDueDate} onChange={e => setReissueDueDate(e.target.value)} />
+                <input type="date" className="input" min={todayForPayment()} value={reissueDueDate} onChange={e => setReissueDueDate(e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Valor (opcional - deixe igual para manter)</label>
@@ -1216,7 +1239,7 @@ export function Payments() {
               {error && <p className="text-sm text-red-600">{error}</p>}
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
-              <button onClick={() => setReissuingPayment(null)} className="btn btn-secondary">Cancelar</button>
+              <button disabled={reissuing} onClick={() => setReissuingPayment(null)} className="btn btn-secondary">Cancelar</button>
               <button onClick={confirmReissue} disabled={reissuing} className="btn btn-primary flex items-center gap-2">
                 {reissuing ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <CalendarClock className="w-4 h-4" />}
                 {reissuing ? 'Reemitindo...' : 'Reemitir boleto'}
@@ -1227,6 +1250,7 @@ export function Payments() {
       )}
 
       {reviewSaleId && <ReviewSaleModal saleId={reviewSaleId} onClose={() => setReviewSaleId(null)} />}
+      {documentTarget && <PaymentDocumentsModal target={documentTarget} onClose={() => setDocumentTarget(null)} />}
 
       {/* ==================== MODAL: NOVA/EDITAR CONTA ==================== */}
       {showBillModal && (
@@ -1529,6 +1553,72 @@ export function Payments() {
         </div>
       )}
     </div>
+  )
+}
+
+function PaymentDocumentsModal({ target, onClose }: { target: DocumentTarget; onClose: () => void }) {
+  const { notify } = useFeedback()
+  const [recipient, setRecipient] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+  const [loadFailed, setLoadFailed] = useState(false)
+  const email = target.channel === 'email'
+  const channel = email ? 'e-mail' : 'WhatsApp'
+
+  useEffect(() => {
+    let active = true
+    api.get(`/sales/${target.saleId}`).then(({ data }) => {
+      if (!active) return
+      if (data.status === 'cancelado') {
+        setLoadFailed(true)
+        setError('A venda está cancelada.')
+        return
+      }
+      setRecipient((email ? data.customer?.email : data.customer?.phone) || '')
+      const observations = data.observations?.trim()
+      setMessage(`Olá ${data.customer?.name || ''},\n\nSeguem em anexo os documentos referentes à sua venda.${observations ? '\n\n' + observations : ''}\n\nAtenciosamente,\nEquipe VGON`)
+    }).catch((err: unknown) => {
+      if (!active) return
+      setLoadFailed(true)
+      setError(getErrorMessage(err, 'Erro ao carregar dados da venda'))
+    }).finally(() => {
+      if (active) setLoading(false)
+    })
+    return () => { active = false }
+  }, [target.saleId, email])
+
+  async function send() {
+    if (sending || loading || loadFailed) return
+    setSending(true)
+    setError('')
+    try {
+      const endpoint = email ? 'send-documents' : 'send-whatsapp'
+      const { data } = await api.post(`/sales/${target.saleId}/${endpoint}`, email ? { body: message } : { phone: recipient.trim() })
+      notify(`Envio por ${channel} concluído com ${data.attachments?.length || 0} anexo(s).${data.warning ? ' ' + data.warning : ''}`, data.warning ? 'info' : 'success')
+      onClose()
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, `Erro ao enviar documentos por ${channel}`))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Modal open title={`Enviar documentos por ${channel}`} description="Envia os boletos e as notas fiscais disponíveis da venda." onClose={() => { if (!sending) onClose() }}
+      footer={<><Button variant="secondary" disabled={sending} onClick={onClose}>Cancelar</Button><Button loading={sending} disabled={loading || loadFailed || (!email && !recipient.trim())} onClick={send}>Enviar</Button></>}>
+      {loading && <p className="text-sm text-gray-500">Carregando dados da venda...</p>}
+      {!loading && !loadFailed && (email ? (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">E-mail principal do cliente: {recipient || 'Não cadastrado'}</p>
+          <label className="block text-sm">Mensagem<textarea className="input mt-1" rows={6} value={message} onChange={e => setMessage(e.target.value)} disabled={sending} /></label>
+        </div>
+      ) : (
+        <label className="block text-sm">Número com DDD<input type="tel" className="input mt-1" value={recipient} onChange={e => setRecipient(e.target.value)} disabled={sending} /></label>
+      ))}
+      {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+    </Modal>
   )
 }
 
