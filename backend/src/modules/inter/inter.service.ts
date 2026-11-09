@@ -57,6 +57,17 @@ export class InterService implements OnModuleInit {
     return agent;
   }
 
+  private credentialsFingerprint(creds: InterCredentials): string {
+    // Inclui o certificado/chave no cache key para que uma troca de credenciais pelo painel
+    // entre em vigor sem exigir reinício do backend.
+    return crypto.createHash('sha256')
+      .update(creds.clientId)
+      .update(creds.cert)
+      .update(creds.key)
+      .digest('hex')
+      .substring(0, 16);
+  }
+
   private formatInterDueDate(value: any, fieldName = 'Data de vencimento'): string {
     const raw = String(value || '').trim();
     const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -132,7 +143,8 @@ export class InterService implements OnModuleInit {
    */
   private async requestToken(tenantId: string | null, scope: string): Promise<{ token: string; creds: InterCredentials }> {
     const creds = await this.bankCredentials.getEffectiveCredentials(tenantId);
-    const cacheKey = `${tenantId || 'env'}::${scope}`;
+    const credentialKey = `${tenantId || 'env'}:${this.credentialsFingerprint(creds)}`;
+    const cacheKey = `${credentialKey}::${scope}`;
     const cached = this.tokenCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt - 60000) {
       return { token: cached.accessToken, creds };
@@ -141,7 +153,7 @@ export class InterService implements OnModuleInit {
     this.logger.log('Solicitando novo access token ao Banco Inter...');
 
     try {
-      const agent = this.getAgentFor(creds, tenantId || 'env');
+      const agent = this.getAgentFor(creds, credentialKey);
       const baseUrl = this.baseUrlFor(creds.environment);
       const params = new URLSearchParams();
       params.append('client_id', creds.clientId);
@@ -153,14 +165,19 @@ export class InterService implements OnModuleInit {
         'Content-Type': 'application/x-www-form-urlencoded',
       }, baseUrl, agent);
 
-      const { access_token, expires_in } = response;
-      this.tokenCache.set(cacheKey, { accessToken: access_token, expiresAt: Date.now() + (expires_in * 1000) });
+      const { access_token, expires_in } = response || {};
+      if (!access_token) {
+        throw new Error(`Banco Inter não retornou access_token (resposta: ${JSON.stringify(response).substring(0, 300)})`);
+      }
+      const ttlSeconds = Number(expires_in) > 0 ? Number(expires_in) : 300;
+      this.tokenCache.set(cacheKey, { accessToken: access_token, expiresAt: Date.now() + (ttlSeconds * 1000) });
       this.logger.log('Access token obtido com sucesso');
       return { token: access_token, creds };
-    } catch (error) {
-      this.logger.error('Erro ao obter access token: ' + (error.response?.data?.message || error.message));
+    } catch (error: any) {
+      const details = error?.data || error?.response?.data || error?.message || error;
+      this.logger.error('Erro ao obter access token: ' + (typeof details === 'string' ? details : JSON.stringify(details)));
       throw new HttpException(
-        'Falha ao autenticar com Banco Inter',
+        'Falha ao autenticar com Banco Inter. Verifique client ID, client secret, certificado, chave privada e ambiente (sandbox/produção) em Financeiro > Banco Inter.',
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
@@ -170,7 +187,7 @@ export class InterService implements OnModuleInit {
   private async callInter(tenantId: string | null, scope: string, method: string, urlPath: string, body?: any, extraHeaders?: Record<string, string>): Promise<any> {
     const { token, creds } = await this.requestToken(tenantId, scope);
     const baseUrl = this.baseUrlFor(creds.environment);
-    const agent = this.getAgentFor(creds, tenantId || 'env');
+    const agent = this.getAgentFor(creds, `${tenantId || 'env'}:${this.credentialsFingerprint(creds)}`);
     return this.httpRequest(method, urlPath, body, { Authorization: `Bearer ${token}`, ...extraHeaders }, baseUrl, agent);
   }
 
@@ -1411,7 +1428,7 @@ export class InterService implements OnModuleInit {
     const tenantId = this.currentTenantId();
     const { token, creds } = await this.requestToken(tenantId, 'boleto-cobranca.write boleto-cobranca.read');
     const baseUrl = this.baseUrlFor(creds.environment);
-    const agent = this.getAgentFor(creds, tenantId || 'env');
+    const agent = this.getAgentFor(creds, `${tenantId || 'env'}:${this.credentialsFingerprint(creds)}`);
 
     this.logger.log(`Obtendo PDF do boleto: ${codigoSolicitacao}`);
 
