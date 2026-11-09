@@ -62,6 +62,8 @@ export class InterService implements OnModuleInit {
     // entre em vigor sem exigir reinício do backend.
     return crypto.createHash('sha256')
       .update(creds.clientId)
+      .update(creds.clientSecret)
+      .update(creds.environment)
       .update(creds.cert)
       .update(creds.key)
       .digest('hex')
@@ -167,15 +169,29 @@ export class InterService implements OnModuleInit {
 
       const { access_token, expires_in } = response || {};
       if (!access_token) {
-        throw new Error(`Banco Inter não retornou access_token (resposta: ${JSON.stringify(response).substring(0, 300)})`);
+        throw Object.assign(new Error('Banco Inter não retornou access_token'), { code: 'MISSING_ACCESS_TOKEN' });
       }
       const ttlSeconds = Number(expires_in) > 0 ? Number(expires_in) : 300;
       this.tokenCache.set(cacheKey, { accessToken: access_token, expiresAt: Date.now() + (ttlSeconds * 1000) });
       this.logger.log('Access token obtido com sucesso');
       return { token: access_token, creds };
     } catch (error: any) {
-      const details = error?.data || error?.response?.data || error?.message || error;
-      this.logger.error('Erro ao obter access token: ' + (typeof details === 'string' ? details : JSON.stringify(details)));
+      const body = error?.data;
+      const description = [body, body?.error_description, body?.message, body?.detail, body?.title]
+        .filter((value): value is string => typeof value === 'string');
+      const scopeRejected = body?.error === 'invalid_scope' ||
+        description.some(value => /no registered scope value|invalid_scope/i.test(value));
+      const context = `escopo=${scope}, ambiente=${creds.environment}, origem=${creds.source}, HTTP=${error?.status || 'sem resposta'}`;
+      if (scopeRejected) {
+        this.logger.warn(`Banco Inter recusou a permissão OAuth (${context})`);
+        const origin = creds.source === 'tenant' ? 'do tenant' : 'do servidor';
+        throw new HttpException(
+          `Banco Inter recusou a permissão ${scope} nas credenciais ${origin}, no ambiente ${creds.environment}. Confira as permissões da integração correspondente no Inter Empresas.`,
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
+      const code = typeof error?.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'indisponível';
+      this.logger.error(`Erro ao obter access token (${context}, código=${code})`);
       throw new HttpException(
         'Falha ao autenticar com Banco Inter. Verifique client ID, client secret, certificado, chave privada e ambiente (sandbox/produção) em Financeiro > Banco Inter.',
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -767,11 +783,10 @@ export class InterService implements OnModuleInit {
     let response: any;
     try {
       this.logger.log(`Criando PIX imediato - valor: ${data.valor.original}`);
-      // A criação da cobrança precisa somente de pix.write. Solicitar pix.read junto fazia o
-      // OAuth rejeitar toda a operação quando o aplicativo do tenant tinha apenas a permissão
-      // de escrita cadastrada no portal do Banco Inter.
+      // Solicita apenas o escopo usado pela operação de criação.
       response = await this.callInter(tenantId, 'pix.write', 'POST', '/pix/v2/cob', data, { 'Content-Type': 'application/json' });
     } catch (error: any) {
+      if (error instanceof HttpException) throw error;
       this.logger.error('Erro ao criar PIX: ' + JSON.stringify(error.data || error));
       if (error instanceof HttpException) throw error;
       throw new HttpException(
