@@ -187,14 +187,20 @@ export class InterController {
    * POST /api/inter/generate/:saleId
    * Gera boleto ou PIX para uma venda.
    */
-  @Post('generate/:saleId')
+  @Post(['generate/:saleId', 'generate/:saleId/:paymentType'])
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   @UseGuards(JwtAuthGuard, RolesGuard, PlanGuard)
   async generate(
     @Param('saleId') saleId: string,
-    @Query('type') type: 'boleto' | 'pix' = 'boleto',
+    @Param('paymentType') paymentType: string | undefined,
+    @Query('type') legacyType: string | undefined,
     @Body('installmentDueDates') installmentDueDates?: Record<string, string>,
   ) {
+    const type = paymentType ?? legacyType ?? 'boleto';
+    if ((type !== 'boleto' && type !== 'pix') ||
+        (paymentType !== undefined && legacyType !== undefined && paymentType !== legacyType)) {
+      throw new HttpException('Tipo de cobrança inválido ou conflitante. Selecione boleto ou Pix.', HttpStatus.BAD_REQUEST);
+    }
     this.logger.log(`Gerando ${type} para venda: ${saleId}`);
 
     const sale = await this.saleRepo.findOne({

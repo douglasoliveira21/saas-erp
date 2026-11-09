@@ -136,7 +136,7 @@ export function Sales() {
     setError('')
     try {
       const res = await runOperation(
-        () => api.post(`/inter/generate/${id}?type=${type}`, installmentDueDates ? { installmentDueDates } : undefined),
+        () => api.post(`/inter/generate/${id}/${type}`, installmentDueDates ? { installmentDueDates } : undefined),
         {
           title: type === 'pix' ? 'Gerando PIX' : 'Emitindo boleto',
           processingMessage: type === 'pix' ? 'Registrando a cobrança PIX no Banco Inter.' : 'Enviando as parcelas e confirmando cada boleto no Banco Inter.',
