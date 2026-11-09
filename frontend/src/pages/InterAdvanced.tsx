@@ -88,10 +88,12 @@ function BankConfigForm() {
         <div className="col-span-2">
           <label className="mb-1 block text-xs text-gray-500">Certificado (.crt/.pem)</label>
           <textarea className="min-h-20 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs" value={form.certificate} onChange={e => setForm({ ...form, certificate: e.target.value })} placeholder={config.hasCertificate ? 'Certificado já cadastrado — cole um novo para substituir' : '-----BEGIN CERTIFICATE-----'} />
+          <p className="mt-1 text-[11px] text-gray-500">Cole o conteúdo PEM do arquivo .crt, começando por <code>-----BEGIN CERTIFICATE-----</code>. Arquivos .pfx/.p12 não são aceitos diretamente.</p>
         </div>
         <div className="col-span-2">
           <label className="mb-1 block text-xs text-gray-500">Chave privada (.key/.pem)</label>
           <textarea className="min-h-20 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs" value={form.privateKey} onChange={e => setForm({ ...form, privateKey: e.target.value })} placeholder={config.hasCertificate ? 'Chave já cadastrada — cole uma nova para substituir' : '-----BEGIN PRIVATE KEY-----'} />
+          <p className="mt-1 text-[11px] text-gray-500">A chave deve começar por <code>-----BEGIN PRIVATE KEY-----</code> ou <code>-----BEGIN RSA PRIVATE KEY-----</code>.</p>
         </div>
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-700">

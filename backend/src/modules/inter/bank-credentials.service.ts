@@ -19,6 +19,24 @@ export interface InterCredentials {
 
 const isMasked = (value: unknown) => typeof value === 'string' && /^\*+$/.test(value);
 
+function normalizePem(value: string, label: string): string {
+  let normalized = String(value || '').replace(/^\uFEFF/, '').trim();
+  // Permite colar no painel valores vindos de variáveis de ambiente/JSON com "\\n" literal.
+  normalized = normalized.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/^['"]|['"]$/g, '').trim();
+  if (normalized.includes('-----BEGIN ')) return normalized;
+
+  // Alguns provedores entregam o PEM inteiro em base64. Aceitamos esse formato somente quando
+  // a decodificação resultar em um PEM reconhecível; PFX/PKCS12 continua exigindo conversão para
+  // CRT/KEY antes do cadastro, pois o mTLS do Inter precisa dos dois materiais separadamente.
+  try {
+    const decoded = Buffer.from(normalized, 'base64').toString('utf8').replace(/^\uFEFF/, '').trim();
+    if (decoded.includes('-----BEGIN ')) return decoded;
+  } catch {
+    // A validação abaixo produz a mensagem amigável.
+  }
+  throw new BadRequestException(`${label} inválido. Informe o conteúdo PEM começando com -----BEGIN ...----- (não use arquivo .pfx/.p12).`);
+}
+
 @Injectable()
 export class BankCredentialsService {
   private readonly logger = new Logger(BankCredentialsService.name);
@@ -38,7 +56,10 @@ export class BankCredentialsService {
     try {
       const certPath = path.resolve(process.env.INTER_CERT_PATH || './certs/inter.crt');
       const keyPath = path.resolve(process.env.INTER_KEY_PATH || './certs/inter.key');
-      this.envCertCache = { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+      this.envCertCache = {
+        cert: Buffer.from(normalizePem(fs.readFileSync(certPath, 'utf8'), 'Certificado'), 'utf8'),
+        key: Buffer.from(normalizePem(fs.readFileSync(keyPath, 'utf8'), 'Chave privada'), 'utf8'),
+      };
     } catch (e: any) {
       this.logger.warn('Certificado Inter (env global) nao encontrado: ' + e.message);
       this.envCertCache = null;
@@ -63,8 +84,8 @@ export class BankCredentialsService {
     if (row && row.clientId && row.clientSecret && row.certificate && row.privateKey) {
       const clientId = isEncryptedField(row.clientId) ? decryptField(row.clientId, [this.credentialKey, this.previousCredentialKey]) : row.clientId;
       const clientSecret = isEncryptedField(row.clientSecret) ? decryptField(row.clientSecret, [this.credentialKey, this.previousCredentialKey]) : row.clientSecret;
-      const certificate = isEncryptedField(row.certificate) ? decryptField(row.certificate, [this.credentialKey, this.previousCredentialKey]) : row.certificate;
-      const privateKey = isEncryptedField(row.privateKey) ? decryptField(row.privateKey, [this.credentialKey, this.previousCredentialKey]) : row.privateKey;
+      const certificate = normalizePem(isEncryptedField(row.certificate) ? decryptField(row.certificate, [this.credentialKey, this.previousCredentialKey]) : row.certificate, 'Certificado');
+      const privateKey = normalizePem(isEncryptedField(row.privateKey) ? decryptField(row.privateKey, [this.credentialKey, this.previousCredentialKey]) : row.privateKey, 'Chave privada');
       return {
         environment: row.environment,
         clientId,
