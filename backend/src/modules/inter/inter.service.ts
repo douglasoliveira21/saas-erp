@@ -767,7 +767,10 @@ export class InterService implements OnModuleInit {
     let response: any;
     try {
       this.logger.log(`Criando PIX imediato - valor: ${data.valor.original}`);
-      response = await this.callInter(tenantId, 'pix.write pix.read', 'POST', '/pix/v2/cob', data, { 'Content-Type': 'application/json' });
+      // A criação da cobrança precisa somente de pix.write. Solicitar pix.read junto fazia o
+      // OAuth rejeitar toda a operação quando o aplicativo do tenant tinha apenas a permissão
+      // de escrita cadastrada no portal do Banco Inter.
+      response = await this.callInter(tenantId, 'pix.write', 'POST', '/pix/v2/cob', data, { 'Content-Type': 'application/json' });
     } catch (error: any) {
       this.logger.error('Erro ao criar PIX: ' + JSON.stringify(error.data || error));
       if (error instanceof HttpException) throw error;
