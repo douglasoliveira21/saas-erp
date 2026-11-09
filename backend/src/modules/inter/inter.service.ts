@@ -424,8 +424,15 @@ export class InterService implements OnModuleInit {
     // total da própria venda - senão a venda ficava mostrando o total antigo enquanto a parcela
     // e o boleto já mostravam o valor novo.
     const delta = finalValue - Number(payment.value);
-    const installmentRow = await this.saleRepo.manager.query(`SELECT id, account_id FROM installments WHERE id = (SELECT installment_id FROM payments WHERE id=$1)`, [paymentId]);
-    const installment = installmentRow[0];
+    const installmentRow = await this.saleRepo.manager.query(
+      `SELECT i.id, i.account_id FROM payments p
+       JOIN accounts_receivable a ON a.sale_id::text = p.sale_id::text AND a.tenant_id IS NOT DISTINCT FROM p.tenant_id
+       JOIN installments i ON i.account_id::text = a.id::text
+       WHERE p.id = $1 AND (i.id = p.installment_id OR (p.installment_id IS NULL AND NOT EXISTS (
+         SELECT 1 FROM installments sibling WHERE sibling.account_id = i.account_id AND sibling.id <> i.id
+       ))) LIMIT 2`, [paymentId],
+    );
+    const installment = installmentRow.length === 1 ? installmentRow[0] : undefined;
     if (installment) {
       await this.saleRepo.manager.query(`UPDATE installments SET due_date=$1, value=$2, updated_at=NOW() WHERE id=$3`, [newDueDateFormatted, finalValue, installment.id]);
       if (delta !== 0 && installment.account_id) {
@@ -470,6 +477,12 @@ export class InterService implements OnModuleInit {
       ],
     );
     const newPaymentId = inserted[0]?.id;
+    if (installment && newDueDateFormatted >= todayInBrasilia()) {
+      await this.saleRepo.manager.query(
+        "UPDATE installments SET status = 'pendente', updated_at = NOW() WHERE id = $1 AND status = 'vencido'",
+        [installment.id],
+      );
+    }
     await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.id=$1 AND a.sale_id=p.sale_id`, [newPaymentId]);
 
     await this.auditInter('inter.payment_reissued', newPaymentId, {

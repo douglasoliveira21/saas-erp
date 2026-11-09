@@ -68,7 +68,10 @@ interface Installment {
   customer?: { id?: string; name: string };
   account?: { saleId?: string };
   invoice?: { id: string; number: number } | null;
+  overdueBoleto?: { id: string; value: number } | null;
 }
+
+type ReissueTarget = Pick<Payment, 'id' | 'value' | 'customerName'>
 
 interface ReportRow {
   supplierId: string; supplierName: string; totalBills: string;
@@ -148,7 +151,7 @@ export function Payments() {
   const [statusFilter, setStatusFilter] = useState('')
   const [error, setError] = useState('')
   const [reconciling, setReconciling] = useState(false)
-  const [reissuingPayment, setReissuingPayment] = useState<Payment | null>(null)
+  const [reissuingPayment, setReissuingPayment] = useState<ReissueTarget | null>(null)
   const [reissueDueDate, setReissueDueDate] = useState('')
   const [reissueValue, setReissueValue] = useState('')
   const [reissuing, setReissuing] = useState(false)
@@ -391,7 +394,7 @@ export function Payments() {
     }
   }
 
-  function openReissueModal(payment: Payment) {
+  function openReissueModal(payment: ReissueTarget) {
     setReissuingPayment(payment)
     setReissueDueDate('')
     setReissueValue(String(payment.value))
@@ -415,7 +418,7 @@ export function Payments() {
       notify('Boleto reemitido com sucesso.', 'success')
       setReviewSaleId(res.data.saleId)
       setReissuingPayment(null)
-      await load()
+      await Promise.all([load(), activeTab === 'inadimplentes' ? loadOverdue() : Promise.resolve()])
     } catch (error: any) {
       setError(error.response?.data?.message || 'Erro ao reemitir boleto')
     } finally {
@@ -916,7 +919,7 @@ export function Payments() {
                           { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
                           { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
                           ...documentActions(row.data.status === 'cancelado' ? undefined : row.data.saleId),
-                          { label: 'Reemitir boleto', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !row.data.saleId || row.data.type !== 'boleto' || row.data.status !== 'vencido' },
+                          { label: 'Reemitir boleto', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !row.data.saleId || row.data.type !== 'boleto' || row.data.status !== 'vencido' || !row.data.dueDate || row.data.dueDate.slice(0, 10) >= todayForPayment() },
                           { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelPayment(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
                           { label: 'Consultar status', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
                           { label: 'Corrigir valor recebido', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
@@ -1026,6 +1029,7 @@ export function Payments() {
                   <tr><td colSpan={7} className="table-cell text-center text-gray-500 py-8">Nenhum inadimplente</td></tr>
                 ) : (overdueCustomerFilter ? overdueInstallments.filter(i => i.customer?.id === overdueCustomerFilter.id) : overdueInstallments).map(inst => {
                   const daysOverdue = Math.floor((new Date().getTime() - new Date(inst.dueDate).getTime()) / (1000 * 60 * 60 * 24))
+                  const boleto = inst.overdueBoleto
                   return (
                     <tr key={inst.id} className="bg-red-50/50 hover:bg-red-50">
                       <td className="table-cell font-medium text-sm">
@@ -1045,6 +1049,11 @@ export function Payments() {
                       <td className="table-cell">
                         <div className="flex items-center gap-2">
                           <button onClick={() => openPayInstallment(inst)} className="btn btn-primary px-3 py-1 text-xs flex items-center gap-1"><DollarSign className="w-3 h-3" /> Pagar</button>
+                          {boleto && (isAdmin || isFinanceiro) && (
+                            <Button size="sm" variant="secondary" onClick={() => openReissueModal({ ...boleto, customerName: inst.customer?.name || 'Cliente' })}>
+                              Reemitir boleto
+                            </Button>
+                          )}
                           <ActionMenu items={documentActions(inst.account?.saleId)} />
                         </div>
                       </td>

@@ -402,10 +402,29 @@ export class FinancialService implements OnModuleInit {
       for (const row of invoiceRows) invoicesBySaleId.set(row.sale_id, { id: row.id, number: row.number });
     }
 
+    const boletos = overdue.length ? await this.dataSource.query(
+      `SELECT DISTINCT ON (i.id) i.id AS "installmentId", p.id, p.value
+       FROM installments i
+       JOIN accounts_receivable a ON a.id::text = i.account_id::text
+       JOIN payments p ON p.sale_id::text = a.sale_id::text AND p.tenant_id IS NOT DISTINCT FROM a.tenant_id
+       WHERE i.id = ANY($1::uuid[]) AND p.type = 'boleto'
+         AND p.status IN ('pendente', 'a_receber', 'vencido')
+         AND p.due_date < $2 AND COALESCE(p.codigo_solicitacao, '') <> ''
+         AND (p.installment_id = i.id OR (p.installment_id IS NULL AND NOT EXISTS (
+           SELECT 1 FROM installments sibling WHERE sibling.account_id = i.account_id AND sibling.id <> i.id
+         )))${tenantSql('p')}
+       ORDER BY i.id, (p.installment_id IS NOT NULL) DESC, p.created_at DESC`,
+      [overdue.map(installment => installment.id), today],
+    ) : [];
+    const boletoByInstallment = new Map<string, { id: string; value: number }>(
+      boletos.map(row => [row.installmentId, { id: row.id, value: row.value }]),
+    );
+
     return overdue.map(installment => ({
       ...installment,
       customer: installment.account?.customer,
       invoice: installment.account?.saleId ? invoicesBySaleId.get(installment.account.saleId) || null : null,
+      overdueBoleto: boletoByInstallment.get(installment.id) || null,
     }));
   }
 
