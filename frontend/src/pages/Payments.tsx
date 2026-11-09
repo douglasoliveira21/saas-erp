@@ -916,7 +916,7 @@ export function Payments() {
                           { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
                           { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
                           ...documentActions(row.data.status === 'cancelado' ? undefined : row.data.saleId),
-                          { label: 'Reemitir boleto', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !(row.data.saleId && row.data.type === 'boleto' && ['pendente', 'a_receber', 'vencido'].includes(row.data.status)) },
+                          { label: 'Reemitir boleto', icon: <CalendarClock className="w-4 h-4 text-purple-600" />, onClick: () => openReissueModal(row.data), hidden: !row.data.saleId || row.data.type !== 'boleto' || row.data.status !== 'vencido' },
                           { label: 'Cancelar', icon: <XCircle className="w-4 h-4" />, danger: true, onClick: () => cancelPayment(row.data), hidden: !(row.data.type === 'boleto' && !['cancelado', 'pago'].includes(row.data.status)) },
                           { label: 'Consultar status', icon: <RefreshCw className="w-4 h-4 text-green-600" />, onClick: () => checkStatus(row.data.codigoSolicitacao) },
                           { label: 'Corrigir valor recebido', icon: <Edit2 className="w-4 h-4 text-sky-600" />, onClick: () => openAdjustModal(row.data), hidden: row.data.status !== 'pago' },
