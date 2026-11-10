@@ -154,6 +154,12 @@ export class SalesController {
     return this.salesService.getEvents(id, req.user.id, req.user.role);
   }
 
+  @Post(':id/replace')
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
+  replace(@Param('id') id: string, @Body() changes: any, @Request() req: any) {
+    return this.salesService.replaceIssuedSale(id, changes, req.user.id, req.user.role);
+  }
+
   @Patch(':id')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   update(@Param('id') id: string, @Body() updateSaleDto: any, @Request() req: any) {

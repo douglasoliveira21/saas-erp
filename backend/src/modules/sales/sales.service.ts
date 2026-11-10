@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, QueryRunner } from 'typeorm';
 import { Sale } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { Product } from '../products/entities/product.entity';
@@ -58,12 +58,14 @@ export class SalesService {
     private tenantContext: TenantContextService,
   ) {}
 
-  async create(createSaleDto: any, userId?: string): Promise<Sale> {
+  async create(createSaleDto: any, userId?: string, replacementTransaction?: QueryRunner): Promise<Sale> {
     const today = new Date(); const todayLocal = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
     if (createSaleDto.dueDate && createSaleDto.dueDate < todayLocal) throw new BadRequestException('Vencimento da venda não pode estar no passado');
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const queryRunner = replacementTransaction ?? this.dataSource.createQueryRunner();
+    if (!replacementTransaction) {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    }
 
     try {
       const { items, alreadyPaid = false, ...saleData } = createSaleDto;
@@ -189,6 +191,7 @@ export class SalesService {
       // A venda e seus registros financeiros devem confirmar ou falhar juntos.
       await this.financialService.createFromSale(savedSale, userId || saleData.technicianId, queryRunner.manager);
 
+      if (replacementTransaction) return savedSale;
       await queryRunner.commitTransaction();
 
       // Notificar financeiro por email
@@ -227,10 +230,10 @@ export class SalesService {
       });
       return created;
     } catch (err) {
-      await queryRunner.rollbackTransaction();
+      if (!replacementTransaction && queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
       throw err;
     } finally {
-      await queryRunner.release();
+      if (!replacementTransaction) await queryRunner.release();
     }
   }
 
@@ -437,7 +440,7 @@ export class SalesService {
     return this.salesRepository.save(sale);
   }
 
-  async cancel(id: string, cancelledBy: string): Promise<Sale> {
+  async cancel(id: string, cancelledBy: string, replacementTransaction?: QueryRunner): Promise<Sale> {
     const preflightSale = await this.salesRepository.findOne({ where: { id } });
     if (!preflightSale) throw new NotFoundException('Venda não encontrada');
     if (preflightSale.status === 'finalizado' as any) throw new BadRequestException('Venda finalizada não pode ser cancelada');
@@ -450,11 +453,13 @@ export class SalesService {
     }
 
     const externalDocumentsCancelled = preflightSale.status !== 'cancelado' as any;
-    if (externalDocumentsCancelled) await this.cancelExternalDocuments(id, cancelledBy);
+    if (externalDocumentsCancelled && !replacementTransaction) await this.cancelExternalDocuments(id, cancelledBy);
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const queryRunner = replacementTransaction ?? this.dataSource.createQueryRunner();
+    if (!replacementTransaction) {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    }
 
     try {
       const sale = await queryRunner.manager.findOne(Sale, {
@@ -517,6 +522,7 @@ export class SalesService {
       sale.status = 'cancelado' as any;
       sale.operationalStatus = 'cancelada';
       sale.billingStatus = 'cancelado';
+      if (sale.fiscalStatus === 'autorizada') sale.fiscalStatus = 'cancelada';
       await queryRunner.manager.save(Sale, sale);
 
       await queryRunner.manager.update(
@@ -544,6 +550,7 @@ export class SalesService {
         [id],
       );
 
+      if (replacementTransaction) return sale;
       await queryRunner.commitTransaction();
       await this.auditService.safeCreate({
         userId: cancelledBy,
@@ -563,14 +570,14 @@ export class SalesService {
       });
       return this.findOne(id);
     } catch (error) {
-      if (queryRunner.isTransactionActive && !queryRunner.isReleased) {
+      if (!replacementTransaction && queryRunner.isTransactionActive && !queryRunner.isReleased) {
         try {
           await queryRunner.rollbackTransaction();
         } catch {}
       }
       throw error;
     } finally {
-      if (!queryRunner.isReleased) {
+      if (!replacementTransaction && !queryRunner.isReleased) {
         await queryRunner.release();
       }
     }
@@ -770,6 +777,101 @@ export class SalesService {
     for (const invoice of invoices) {
       await this.cancelAuthorizedInvoice(invoice, reason, userId);
     }
+  }
+
+  async replaceIssuedSale(id: string, changes: any, userId: string, userRole: string) {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let replacement: Sale;
+    let reissueBoleto = false;
+    try {
+      await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sale-replacement:${id}`]);
+      const original = await this.findOne(id, userId, userRole);
+      const previous = await runner.manager.findOne(SaleEvent, { where: { saleId: id, type: 'sale.replaced' } });
+      if (previous?.metadata?.replacementId) {
+        return { saleId: previous.metadata.replacementId, boletoPending: true };
+      }
+      if (['cancelado', 'finalizado', 'pago'].includes(original.status) ||
+          ['pago', 'parcial'].includes(original.paymentStatus) || changes.alreadyPaid) {
+        throw new BadRequestException('A substituição só está disponível para vendas em aberto sem pagamentos. Confira o financeiro antes de prosseguir.');
+      }
+      const [paid] = await runner.query(
+        `SELECT EXISTS (SELECT 1 FROM installments WHERE sale_id::text = $1 AND (status = 'pago' OR paid_value > 0))
+          OR EXISTS (SELECT 1 FROM payments WHERE sale_id::text = $1 AND status = 'pago') AS paid`, [id],
+      );
+      if (paid?.paid) throw new BadRequestException('Esta venda já tem recebimentos registrados.');
+      if (await runner.manager.findOne(Commission, { where: { saleId: id, status: CommissionStatus.PAGA } })) {
+        throw new BadRequestException('Reverta a comissão paga antes de substituir a venda.');
+      }
+
+      const { customerId, paymentMethod, installments, dueDate, multaPercentage, moraPercentage,
+        saleType, observations, discountAmount, commissionPercentage, items } = changes;
+      if (!customerId || !Array.isArray(items) || !items.length ||
+          items.some(item => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0)) {
+        throw new BadRequestException('Informe o cliente e os itens válidos da nova venda.');
+      }
+      const customer = await runner.manager.getRepository('customers').findOne({ where: { id: customerId } });
+      if (!customer) throw new BadRequestException('Cliente da nova venda não encontrado.');
+      const requiredStock = new Map<string, number>();
+      for (const item of items) {
+        if (item.productId) requiredStock.set(item.productId, (requiredStock.get(item.productId) || 0) + Number(item.quantity));
+      }
+      const movements = await runner.manager.find(StockMovement, { where: { saleId: id, type: StockMovementType.VENDA } });
+      for (const [productId, quantity] of requiredStock) {
+        const product = await runner.manager.findOne(Product, { where: { id: productId } });
+        const returned = movements.filter(movement => movement.productId === productId)
+          .reduce((sum, movement) => sum + Number(movement.quantity), 0);
+        if (!product || Number(product.quantity) + returned < quantity) {
+          throw new BadRequestException(`Estoque insuficiente para substituir a venda (${product?.name || productId}).`);
+        }
+      }
+      if (paymentMethod === 'boleto') {
+        const parsed = typeof dueDate === 'string' ? new Date(dueDate + 'T00:00:00Z') : null;
+        if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dueDate || dueDate < todayInBrasilia()) {
+          throw new BadRequestException('Escolha um vencimento válido para o novo boleto.');
+        }
+      }
+      reissueBoleto = Boolean((original as any).activeBoleto) && paymentMethod === 'boleto';
+
+      await this.cancelExternalDocuments(id, userId);
+      await this.cancel(id, userId, runner);
+      replacement = await this.create({
+        customerId, paymentMethod, installments, multaPercentage, moraPercentage, saleType,
+        observations, discountAmount, commissionPercentage,
+        technicianId: userRole === 'admin' && changes.technicianId ? changes.technicianId : original.technicianId,
+        ...(paymentMethod === 'boleto' ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
+        items: items.map(({ productId, serviceId, name, quantity, unitPrice, taxPercentage, costPrice, taxAmount, netProfit }) =>
+          ({ productId, serviceId, name, quantity, unitPrice, taxPercentage, costPrice, taxAmount, netProfit })),
+      }, userId, runner);
+      await runner.manager.save(SaleEvent, runner.manager.create(SaleEvent, {
+        saleId: id, type: 'sale.replaced', status: 'cancelado', description: 'Venda cancelada e substituída',
+        createdBy: userId, metadata: { replacementId: replacement.id },
+      }));
+      await runner.manager.save(SaleEvent, runner.manager.create(SaleEvent, {
+        saleId: replacement.id, type: 'sale.replacement_created', status: replacement.status,
+        description: 'Venda criada em substituição à venda original',
+        createdBy: userId, metadata: { originalSaleId: id },
+      }));
+      await runner.commitTransaction();
+    } catch (error) {
+      if (runner.isTransactionActive) await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+
+    let boletoPending = false;
+    if (reissueBoleto) {
+      try {
+        const result = await this.interService.generateForSale(await this.findOne(replacement.id), 'boleto');
+        boletoPending = Boolean(result?.puladas?.length);
+      } catch (error) {
+        boletoPending = true;
+        this.logger.warn(`Falha ao emitir boleto da venda substituta ${replacement.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { saleId: replacement.id, boletoPending };
   }
 
   private async cancelAuthorizedInvoice(invoice: { id: string; type: string; certificate_id: string | null }, reason: string, userId?: string) {

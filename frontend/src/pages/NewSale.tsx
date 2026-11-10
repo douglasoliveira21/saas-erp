@@ -149,37 +149,22 @@ export function NewSale() {
   const minimumDueDate = minimumDate.toISOString().slice(0, 10)
   const usesBoleto = paymentMethod === 'boleto' && !alreadyPaid
   const dueDateChanged = usesBoleto && (!originalSale || originalSale.paymentMethod !== 'boleto' || dueDate !== originalSale.dueDate)
+  const replacesIssuedSale = Boolean(editingSaleId && (originalSale?.hasActiveBoleto || originalSale?.authorizedInvoiceIds.length))
 
   async function submit() {
+    if (saving) return
     if (!customerId) { setError('Selecione um cliente'); return }
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
 
-    if (dueDateChanged && (!dueDate || dueDate < minimumDueDate)) {
+    if (usesBoleto && (dueDateChanged || replacesIssuedSale) && (!dueDate || dueDate < minimumDueDate)) {
       setError('Escolha uma data de vencimento com pelo menos 5 dias de antecedência.')
       return
     }
-    if (dueDateChanged && originalSale?.hasActiveBoleto) {
-      setError('Esta venda já tem um boleto ativo. Altere o vencimento pela reemissão do boleto.')
-      return
-    }
-
-    const billingChanged = Boolean(editingSaleId && originalSale && (
-      Math.abs(Number(totalAmount) - originalSale.totalAmount) > 0.005 || paymentMethod !== originalSale.paymentMethod
-    ))
-    let cancelActiveBoleto = false
-    if (billingChanged && originalSale?.hasActiveBoleto) {
-      cancelActiveBoleto = window.confirm(
-        'Esta venda possui um boleto ativo e os dados da cobrança foram alterados.\n\n' +
-        'Clique em OK para cancelar o boleto atual e emitir um novo conforme a alteração.\n' +
-        'Clique em Cancelar para manter o boleto atual e salvar a edição da venda.'
-      )
-    }
-
-    const authorizedInvoiceIds = originalSale?.authorizedInvoiceIds || []
-    const cancelInvoiceIds = billingChanged && authorizedInvoiceIds.length && window.confirm(
-      `Esta venda tem ${authorizedInvoiceIds.length} nota(s) fiscal(is) autorizada(s). Deseja solicitar o cancelamento?` +
-      '\n\nOK solicita o cancelamento. Cancelar mantém as notas atuais. A edição da venda será salva nos dois casos.'
-    ) ? authorizedInvoiceIds : []
+    if (replacesIssuedSale && !window.confirm(
+      'Esta venda já tem boleto ativo ou nota fiscal autorizada. Deseja cancelar a venda original e criar outra com os dados desta edição?\n\n' +
+      'O ERP solicitará o cancelamento dos documentos da venda original. A nova nota fiscal ficará pendente para emissão.\n\n' +
+      'Clique em Cancelar para voltar à edição sem salvar.'
+    )) return
 
     setSaving(true)
     try {
@@ -194,7 +179,7 @@ export function NewSale() {
         paymentMethod,
         alreadyPaid,
         installments: paymentMethod === 'boleto' && !alreadyPaid ? installments : 1,
-        ...(dueDateChanged ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
+        ...(usesBoleto && (dueDateChanged || replacesIssuedSale) ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
         multaPercentage,
         moraPercentage,
         saleType,
@@ -208,8 +193,6 @@ export function NewSale() {
         netProfit,
         commissionPercentage: commissionPct,
         commissionAmount,
-        ...(cancelActiveBoleto ? { cancelActiveBoleto: true } : {}),
-        ...(cancelInvoiceIds.length ? { cancelInvoiceIds } : {}),
         items: items.map(i => ({
           ...(i.type === 'product' ? { productId: i.id } : { serviceId: i.id }),
           name: i.name,
@@ -221,6 +204,14 @@ export function NewSale() {
           costPrice: i.costPrice,
           netProfit: (i.unitPrice - i.costPrice) * i.quantity - (i.unitPrice * i.quantity * i.taxPercentage / 100),
         }))
+      }
+      if (editingSaleId && replacesIssuedSale) {
+        const { data } = await api.post(`/sales/${editingSaleId}/replace`, payload)
+        notify(data.boletoPending
+          ? 'Venda substituta criada. Confira a emissão do boleto em Vendas. A nota fiscal ficou pendente.'
+          : 'Venda substituta criada. A nota fiscal ficou pendente para emissão.', data.boletoPending ? 'info' : 'success')
+        navigate(`/sales?highlight=${data.saleId}`)
+        return
       }
       if (editingSaleId) {
         const { data } = await api.patch('/sales/' + editingSaleId, payload)
@@ -316,10 +307,8 @@ export function NewSale() {
                   <label htmlFor="sale-boleto-due-date" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     {installments > 1 ? 'Vencimento da primeira parcela' : 'Vencimento do boleto'}
                   </label>
-                  <input id="sale-boleto-due-date" type="date" className="input" min={minimumDueDate} value={dueDate} disabled={originalSale?.hasActiveBoleto} onChange={e => setDueDate(e.target.value)} />
-                  <p className="text-xs text-gray-400 mt-1">{originalSale?.hasActiveBoleto
-                    ? 'O vencimento está vinculado ao boleto já emitido.'
-                    : `Mínimo de 5 dias de antecedência.${installments > 1 ? ' As demais parcelas vencem nos meses seguintes.' : ''}`}</p>
+                  <input id="sale-boleto-due-date" type="date" className="input" min={minimumDueDate} value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                  <p className="text-xs text-gray-400 mt-1">Mínimo de 5 dias de antecedência.{installments > 1 ? ' As demais parcelas vencem nos meses seguintes.' : ''}</p>
                 </div>
               </div>
 
