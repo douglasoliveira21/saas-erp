@@ -835,13 +835,25 @@ export class SalesService {
         Object.assign(safeDto, { subtotal, discountAmount, taxAmount, totalAmount, commissionAmount, netProfit: money(totalAmount - totalCost - taxAmount - commissionAmount) });
       }
       const billingScheduleProvided = (safeDto.paymentMethod || sale.paymentMethod) === 'boleto' && safeDto.dueDay !== undefined;
+      const explicitDueDateChanged = (safeDto.paymentMethod || sale.paymentMethod) === 'boleto' &&
+        safeDto.dueDate != null && safeDto.dueDate !== sale.dueDate;
+      if (explicitDueDateChanged) {
+        const date = safeDto.dueDate;
+        const parsed = typeof date === 'string' ? new Date(date + 'T00:00:00Z') : null;
+        if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date || date < todayInBrasilia()) {
+          throw new BadRequestException('Informe uma data de vencimento válida que não esteja no passado');
+        }
+        if (oldActiveBoleto) {
+          throw new BadRequestException('Esta venda já tem um boleto ativo. Altere o vencimento pela reemissão do boleto.');
+        }
+      }
       Object.assign(sale, safeDto);
-      if (billingScheduleProvided && safeDto.dueDay) {
-        const newDueDay = Number(safeDto.dueDay);
+      if (explicitDueDateChanged || (billingScheduleProvided && safeDto.dueDay)) {
+        const newDueDay = explicitDueDateChanged ? Number(sale.dueDate.slice(8, 10)) : Number(safeDto.dueDay);
         if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) throw new BadRequestException('Dia de vencimento inválido');
         const pending = await queryRunner.query(`SELECT id, number, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente','vencido') FOR UPDATE`, [id]);
         for (const installment of pending) {
-          const scheduleSale = Object.assign(new Sale(), sale, { dueDay: newDueDay, dueDate: null });
+          const scheduleSale = Object.assign(new Sale(), sale, { dueDay: newDueDay, dueDate: explicitDueDateChanged ? sale.dueDate : null });
           const date = this.financialService.getBoletoDueDate(scheduleSale, new Date(), Number(installment.number || 1));
           await queryRunner.query(`UPDATE installments SET due_date=$1, status='pendente' WHERE id=$2`, [date, installment.id]);
         }

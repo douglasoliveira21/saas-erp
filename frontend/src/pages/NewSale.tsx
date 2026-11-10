@@ -23,7 +23,7 @@ export function NewSale() {
   const [customerId, setCustomerId] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('pix')
   const [installments, setInstallments] = useState(1)
-  const [dueDay, setDueDay] = useState(10)
+  const [dueDate, setDueDate] = useState('')
   const [multaPercentage, setMultaPercentage] = useState(2.00)
   const [moraPercentage, setMoraPercentage] = useState(0.03)
   const [alreadyPaid, setAlreadyPaid] = useState(false)
@@ -39,7 +39,7 @@ export function NewSale() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
-  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; hasActiveBoleto: boolean; authorizedInvoiceIds: string[] } | null>(null)
+  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; dueDate: string; hasActiveBoleto: boolean; authorizedInvoiceIds: string[] } | null>(null)
   const [discountPct, setDiscountPct] = useState(0)
   const [orderNumber, setOrderNumber] = useState('')
 
@@ -64,10 +64,12 @@ export function NewSale() {
     try {
       const res = await api.get('/sales/' + saleId)
       const sale = res.data
+      const savedDueDate = (sale.activeBoleto?.due_date || sale.dueDate)?.slice(0, 10) || ''
       setEditingSaleId(saleId)
       setOriginalSale({
         totalAmount: Number(sale.totalAmount || 0),
         paymentMethod: sale.paymentMethod || 'pix',
+        dueDate: savedDueDate,
         hasActiveBoleto: Boolean(sale.activeBoleto),
         authorizedInvoiceIds: sale.authorizedInvoiceIds || [],
       })
@@ -76,7 +78,7 @@ export function NewSale() {
       setCustomerId(sale.customer?.id || '')
       setPaymentMethod(sale.paymentMethod || 'pix')
       setInstallments(sale.installments || 1)
-      setDueDay(sale.dueDay || 10)
+      setDueDate(savedDueDate)
       setMultaPercentage(sale.multaPercentage != null ? Number(sale.multaPercentage) : 2.00)
       setMoraPercentage(sale.moraPercentage != null ? Number(sale.moraPercentage) : 0.03)
       const saleIsPaid = sale.paymentStatus === 'pago'
@@ -141,27 +143,24 @@ export function NewSale() {
   const commissionAmount = totalAmount * commissionPct / 100
   const totalCost = items.reduce((s, i) => s + i.costPrice * i.quantity, 0)
   const netProfit = totalAmount - totalCost - taxAmount - commissionAmount
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+  const minimumDate = new Date(today + 'T00:00:00Z')
+  minimumDate.setUTCDate(minimumDate.getUTCDate() + 5)
+  const minimumDueDate = minimumDate.toISOString().slice(0, 10)
+  const usesBoleto = paymentMethod === 'boleto' && !alreadyPaid
+  const dueDateChanged = usesBoleto && (!originalSale || originalSale.paymentMethod !== 'boleto' || dueDate !== originalSale.dueDate)
 
   async function submit() {
     if (!customerId) { setError('Selecione um cliente'); return }
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
 
-    // Validação: data de vencimento não pode ser menor que 5 dias
-    if (paymentMethod === 'boleto' && !alreadyPaid) {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const currentDay = today.getDate()
-      let vencDate: Date
-      if (dueDay > currentDay) {
-        vencDate = new Date(today.getFullYear(), today.getMonth(), dueDay)
-      } else {
-        vencDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay)
-      }
-      const diffDays = Math.ceil((vencDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-      if (diffDays < 5) {
-        setError('A data de vencimento deve ser no mínimo 5 dias a partir de hoje. Escolha outro dia.')
-        return
-      }
+    if (dueDateChanged && (!dueDate || dueDate < minimumDueDate)) {
+      setError('Escolha uma data de vencimento com pelo menos 5 dias de antecedência.')
+      return
+    }
+    if (dueDateChanged && originalSale?.hasActiveBoleto) {
+      setError('Esta venda já tem um boleto ativo. Altere o vencimento pela reemissão do boleto.')
+      return
     }
 
     const billingChanged = Boolean(editingSaleId && originalSale && (
@@ -170,7 +169,7 @@ export function NewSale() {
     let cancelActiveBoleto = false
     if (billingChanged && originalSale?.hasActiveBoleto) {
       cancelActiveBoleto = window.confirm(
-        'Esta venda possui um boleto ativo e o valor ou a forma de pagamento foi alterado.\n\n' +
+        'Esta venda possui um boleto ativo e os dados da cobrança foram alterados.\n\n' +
         'Clique em OK para cancelar o boleto atual e emitir um novo conforme a alteração.\n' +
         'Clique em Cancelar para manter o boleto atual e salvar a edição da venda.'
       )
@@ -195,7 +194,7 @@ export function NewSale() {
         paymentMethod,
         alreadyPaid,
         installments: paymentMethod === 'boleto' && !alreadyPaid ? installments : 1,
-        dueDay: paymentMethod === 'boleto' && !alreadyPaid ? dueDay : null,
+        ...(dueDateChanged ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
         multaPercentage,
         moraPercentage,
         saleType,
@@ -314,38 +313,13 @@ export function NewSale() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Dia do Vencimento</label>
-                  <select className="input" value={dueDay} onChange={e => setDueDay(parseInt(e.target.value))}>
-                    {[5,10,15,20,25,28].map(d => {
-                      const today = new Date()
-                      today.setHours(0,0,0,0)
-                      const currentDay = today.getDate()
-                      
-                      // Calcular a data real de vencimento para este dia
-                      let vencDate: Date
-                      if (d > currentDay) {
-                        // Dia ainda não passou neste mês -> vencimento é neste mês
-                        vencDate = new Date(today.getFullYear(), today.getMonth(), d)
-                      } else {
-                        // Dia já passou -> vencimento é no próximo mês
-                        vencDate = new Date(today.getFullYear(), today.getMonth() + 1, d)
-                      }
-                      
-                      // Regra: mínimo 5 dias de distância
-                      const diffDays = Math.ceil((vencDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-                      const disabled = diffDays < 5
-                      
-                      // Label descritivo
-                      const mesLabel = vencDate.getMonth() === today.getMonth() ? '(este mês)' : '(próx. mês)'
-                      
-                      return (
-                        <option key={d} value={d} disabled={disabled}>
-                          Dia {d} {mesLabel}{disabled ? ' - muito próximo' : ''}
-                        </option>
-                      )
-                    })}
-                  </select>
-                  <p className="text-xs text-gray-400 mt-1">Mínimo 5 dias de antecedência. Dias indisponíveis aparecem bloqueados.</p>
+                  <label htmlFor="sale-boleto-due-date" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {installments > 1 ? 'Vencimento da primeira parcela' : 'Vencimento do boleto'}
+                  </label>
+                  <input id="sale-boleto-due-date" type="date" className="input" min={minimumDueDate} value={dueDate} disabled={originalSale?.hasActiveBoleto} onChange={e => setDueDate(e.target.value)} />
+                  <p className="text-xs text-gray-400 mt-1">{originalSale?.hasActiveBoleto
+                    ? 'O vencimento está vinculado ao boleto já emitido.'
+                    : `Mínimo de 5 dias de antecedência.${installments > 1 ? ' As demais parcelas vencem nos meses seguintes.' : ''}`}</p>
                 </div>
               </div>
 
