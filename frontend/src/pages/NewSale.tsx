@@ -144,9 +144,6 @@ export function NewSale() {
   const totalCost = items.reduce((s, i) => s + i.costPrice * i.quantity, 0)
   const netProfit = totalAmount - totalCost - taxAmount - commissionAmount
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
-  const minimumDate = new Date(today + 'T00:00:00Z')
-  minimumDate.setUTCDate(minimumDate.getUTCDate() + 5)
-  const minimumDueDate = minimumDate.toISOString().slice(0, 10)
   const usesBoleto = paymentMethod === 'boleto' && !alreadyPaid
   const dueDateChanged = usesBoleto && (!originalSale || originalSale.paymentMethod !== 'boleto' || dueDate !== originalSale.dueDate)
   const replacesIssuedSale = Boolean(editingSaleId && (originalSale?.hasActiveBoleto || originalSale?.authorizedInvoiceIds.length))
@@ -156,8 +153,8 @@ export function NewSale() {
     if (!customerId) { setError('Selecione um cliente'); return }
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
 
-    if (usesBoleto && (dueDateChanged || replacesIssuedSale) && (!dueDate || dueDate < minimumDueDate)) {
-      setError('Escolha uma data de vencimento com pelo menos 5 dias de antecedência.')
+    if (usesBoleto && (dueDateChanged || replacesIssuedSale) && (!dueDate || dueDate < today)) {
+      setError('Escolha uma data de vencimento a partir de hoje.')
       return
     }
     if (replacesIssuedSale && !window.confirm(
@@ -307,8 +304,7 @@ export function NewSale() {
                   <label htmlFor="sale-boleto-due-date" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     {installments > 1 ? 'Vencimento da primeira parcela' : 'Vencimento do boleto'}
                   </label>
-                  <input id="sale-boleto-due-date" type="date" className="input" min={minimumDueDate} value={dueDate} onChange={e => setDueDate(e.target.value)} />
-                  <p className="text-xs text-gray-400 mt-1">Mínimo de 5 dias de antecedência.{installments > 1 ? ' As demais parcelas vencem nos meses seguintes.' : ''}</p>
+                  <input id="sale-boleto-due-date" type="date" className="input" min={today} value={dueDate} onChange={e => setDueDate(e.target.value)} />
                 </div>
               </div>
 
