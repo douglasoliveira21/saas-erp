@@ -416,32 +416,25 @@ export class InterService implements OnModuleInit {
     const document = (customer.cpfCnpj || '').replace(/\D/g, '');
     const finalValue = newValue !== undefined && newValue !== null && Number(newValue) > 0 ? Number(newValue) : Number(payment.value);
 
-    // 1. Cancela o boleto atual no Inter (markPaymentCancelledLocally já garante que isso não
-    // mexe nas outras parcelas/boletos da mesma venda).
-    await this.cancelBoleto(payment.codigo_solicitacao, 'Reemissão com nova data de vencimento');
-
-    // 2. Se o valor mudou, propaga a diferença por toda a cadeia - parcela, conta a receber e o
-    // total da própria venda - senão a venda ficava mostrando o total antigo enquanto a parcela
-    // e o boleto já mostravam o valor novo.
     const delta = finalValue - Number(payment.value);
     const installmentRow = await this.saleRepo.manager.query(
-      `SELECT i.id, i.account_id FROM payments p
-       JOIN accounts_receivable a ON a.sale_id::text = p.sale_id::text AND a.tenant_id IS NOT DISTINCT FROM p.tenant_id
-       JOIN installments i ON i.account_id::text = a.id::text
-       WHERE p.id = $1 AND (i.id = p.installment_id OR (p.installment_id IS NULL AND NOT EXISTS (
-         SELECT 1 FROM installments sibling WHERE sibling.account_id = i.account_id AND sibling.id <> i.id
+      `SELECT i.id, i.account_id, i.status FROM payments p
+       JOIN installments i ON i.sale_id::text = p.sale_id::text
+       WHERE p.id = $1 AND (i.id = p.installment_id OR (p.installment_id IS NULL AND (
+         i.due_date = p.due_date OR NOT EXISTS (
+           SELECT 1 FROM installments sibling WHERE sibling.sale_id = i.sale_id AND sibling.id <> i.id
+         )
        ))) LIMIT 2`, [paymentId],
     );
-    const installment = installmentRow.length === 1 ? installmentRow[0] : undefined;
-    if (installment) {
-      await this.saleRepo.manager.query(`UPDATE installments SET due_date=$1, value=$2, updated_at=NOW() WHERE id=$3`, [newDueDateFormatted, finalValue, installment.id]);
-      if (delta !== 0 && installment.account_id) {
-        await this.saleRepo.manager.query(`UPDATE accounts_receivable SET total_value = total_value + $1, pending_value = pending_value + $1, updated_at = NOW() WHERE id=$2`, [delta, installment.account_id]);
-      }
+    if (installmentRow.length !== 1) throw new HttpException(
+      'Não foi possível identificar a parcela deste boleto. Confira o vínculo financeiro antes de reemitir.',
+      HttpStatus.CONFLICT,
+    );
+    const installment = installmentRow[0];
+    if (!['pendente', 'vencido'].includes(installment.status)) {
+      throw new HttpException('A parcela deste boleto não está em aberto para reemissão.', HttpStatus.CONFLICT);
     }
-    if (delta !== 0) {
-      await this.saleRepo.manager.query(`UPDATE sales SET total_amount = total_amount + $1, updated_at = NOW() WHERE id=$2`, [delta, payment.sale_id]);
-    }
+    await this.cancelBoleto(payment.codigo_solicitacao, 'ACERTOS');
 
     // 3. Gera o boleto novo. seuNumero precisa ser inédito - reaproveitar o mesmo faria a API do
     // Inter devolver o codigoSolicitacao do boleto ANTIGO (que acabou de ser cancelado) em vez
@@ -465,25 +458,43 @@ export class InterService implements OnModuleInit {
       mensagem: { linha1: 'Boleto reemitido com nova data de vencimento', linha2: `Venda #${payment.sale_id.substring(0, 8)}` },
     };
     const result = await this.createBoleto(boletoData);
-    const newCodigo = result.codigoSolicitacao || '';
+    const newCodigo = result.codigoSolicitacao;
+    if (!newCodigo) throw new HttpException('O Banco Inter não retornou o código do novo boleto.', HttpStatus.BAD_GATEWAY);
 
-    const inserted = await this.saleRepo.manager.query(
-      `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, installment_id, tenant_id)
-       VALUES ($1,$2,'boleto','a_receber',$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [
-        payment.sale_id, payment.customer_id, finalValue, customer.name, document,
-        newDueDateFormatted, result.linhaDigitavel || '', result.nossoNumero || '',
-        installment?.id || null, tenantId,
-      ],
-    );
-    const newPaymentId = inserted[0]?.id;
-    if (installment && newDueDateFormatted >= todayInBrasilia()) {
-      await this.saleRepo.manager.query(
-        "UPDATE installments SET status = 'pendente', updated_at = NOW() WHERE id = $1 AND status = 'vencido'",
-        [installment.id],
+    const newPaymentId = await this.saleRepo.manager.transaction(async manager => {
+      const [inserted] = await manager.query(
+        `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, installment_id, tenant_id, account_id)
+         VALUES ($1,$2,'boleto','a_receber',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [
+          payment.sale_id, payment.customer_id, finalValue, customer.name, document,
+          newDueDateFormatted, result.linhaDigitavel || '', result.nossoNumero || '',
+          installment.id, tenantId, installment.account_id,
+        ],
       );
-    }
-    await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.id=$1 AND a.sale_id=p.sale_id`, [newPaymentId]);
+      await manager.query(
+        `UPDATE installments SET due_date=$1, value=$2, status=CASE WHEN status='vencido' THEN 'pendente' ELSE status END,
+         updated_at=NOW() WHERE id=$3`,
+        [newDueDateFormatted, finalValue, installment.id],
+      );
+      await manager.query(
+        `UPDATE accounts_receivable a SET total_value=total_value+$1, pending_value=pending_value+$1,
+         due_date=COALESCE((SELECT MIN(i.due_date) FROM installments i WHERE i.account_id::text=a.id::text
+           AND i.status IN ('pendente','vencido','parcial')), a.due_date), updated_at=NOW() WHERE a.id=$2`,
+        [delta, installment.account_id],
+      );
+      await manager.query(
+        `UPDATE sales s SET total_amount=total_amount+$1,
+         due_date=COALESCE(a.due_date, s.due_date),
+         billing_status=CASE WHEN s.billing_status IN ('cancelado','nao_emitido','vencido') THEN 'emitido' ELSE s.billing_status END,
+         payment_status=CASE WHEN s.payment_status='inadimplente' AND a.due_date >= ${BRT_TODAY_SQL}
+           AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.sale_id=s.id
+             AND p.status IN ('pendente','a_receber','vencido') AND p.due_date < ${BRT_TODAY_SQL})
+           THEN 'pendente' ELSE s.payment_status END, updated_at=NOW()
+         FROM accounts_receivable a WHERE s.id=$2 AND a.id=$3`,
+        [delta, payment.sale_id, installment.account_id],
+      );
+      return inserted.id;
+    });
 
     await this.auditInter('inter.payment_reissued', newPaymentId, {
       userId, oldPaymentId: paymentId, oldCodigoSolicitacao: payment.codigo_solicitacao, newCodigoSolicitacao: newCodigo,

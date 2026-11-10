@@ -385,8 +385,11 @@ export class FinancialService implements OnModuleInit {
     // Mark as vencido
     for (const installment of overdue) {
       if (installment.status === 'pendente') {
-        installment.status = 'vencido';
-        await this.installmentRepo.save(installment);
+        const result = await this.installmentRepo.update(
+          { id: installment.id, status: 'pendente', dueDate: LessThan(today) },
+          { status: 'vencido' },
+        );
+        if (result.affected) installment.status = 'vencido';
       }
     }
 
