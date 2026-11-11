@@ -10,6 +10,7 @@ import {
 import { ActionMenu, Button, Modal, useFeedback } from '../components/ui'
 import { useActionToast } from '../components/ActionToast'
 import { getErrorMessage } from '../services/errors'
+import { formatPaymentDueDate, showPaymentInLedger } from '../services/payment-display'
 
 type DocumentTarget = { saleId: string; channel: 'email' | 'whatsapp' }
 
@@ -39,6 +40,7 @@ interface Payment {
   invoiceSeries?: number
   invoiceStatus?: string
   invoiceAccessKey?: string
+  superseded?: boolean
 }
 
 interface Supplier {
@@ -122,8 +124,7 @@ function formatCurrency(v: number) {
   return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 function formatDate(d: string) {
-  if (!d) return '-'
-  return new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('pt-BR')
+  return formatPaymentDueDate(d)
 }
 
 export function Payments() {
@@ -199,6 +200,14 @@ export function Payments() {
   const [payingInstallmentSaving, setPayingInstallmentSaving] = useState(false)
 
   useEffect(() => { load() }, [month])
+  useEffect(() => {
+    const refresh = () => {
+      load()
+      if (activeTab === 'inadimplentes') loadOverdue()
+    }
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [month, activeTab])
   useEffect(() => { loadSuppliersAndAlerts() }, [])
   useEffect(() => { if (activeTab === 'relatorio') loadReport() }, [activeTab, month])
   useEffect(() => { if (activeTab === 'inadimplentes') loadOverdue() }, [activeTab])
@@ -635,6 +644,7 @@ export function Payments() {
   ].sort((a, b) => (a.data.dueDate || '').localeCompare(b.data.dueDate || '')), [payments, billsReceber, billsPagar])
 
   const filteredRows = ledgerRows.filter(row => {
+    if (row.source === 'inter' && !showPaymentInLedger(row.data, statusFilter)) return false
     if (typeFilter && row.kind !== typeFilter) return false
     if (statusFilter && row.data.status !== statusFilter) return false
     if (!search) return true
@@ -903,10 +913,11 @@ export function Payments() {
                       </td>
                       <td className="table-cell text-sm font-medium">{row.data.customerName}</td>
                       <td className="table-cell font-semibold text-green-600">+ {formatCurrency(paymentAmount(row.data))}{row.data.status === 'pago' && row.data.receivedValue && Math.abs(Number(row.data.receivedValue) - Number(row.data.value)) > 0.009 && <p className="text-[10px] font-normal text-gray-500">Original {formatCurrency(Number(row.data.value))} + multa/juros {formatCurrency(Number(row.data.receivedValue) - Number(row.data.value))}</p>}</td>
-                      <td className="table-cell text-sm">{row.data.dueDate ? new Date(row.data.dueDate).toLocaleDateString('pt-BR') : '-'}</td>
+                      <td className="table-cell text-sm">{formatDate(row.data.dueDate)}</td>
                       <td className="table-cell">
                         <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (receivableStatusColors[row.data.status] || 'bg-blue-100 text-blue-700')}>{receivableStatusLabels[row.data.status] || row.data.status}</span>
                         {row.data.settledManually && <p className="text-xs text-gray-500 mt-0.5" title={row.data.paymentNote || ''}>Recebido manualmente{row.data.paymentNote ? ` (${row.data.paymentNote})` : ''}</p>}
+                        {row.data.superseded && <p className="text-xs text-gray-500 mt-0.5">Substituído por novo boleto</p>}
                       </td>
                       <td className="table-cell text-sm">{row.data.invoiceNumber || '-'}</td>
                       <td className="table-cell">
