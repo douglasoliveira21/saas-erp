@@ -276,17 +276,22 @@ export function Payments() {
 
   // ==================== RECEBIMENTOS (créditos) ====================
   async function downloadPdf(codigoSolicitacao: string) {
+    setError('')
     try {
-      const res = await fetch(`/api/inter/pdf/${codigoSolicitacao}`, { credentials: 'include' })
-      if (!res.ok) { setError('Erro ao baixar PDF'); return }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `boleto-${codigoSolicitacao.substring(0, 8)}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch { setError('Erro ao baixar PDF') }
+      const res = await api.get(`/inter/pdf/${encodeURIComponent(codigoSolicitacao)}`, { responseType: 'blob', timeout: 60000 })
+      saveBlob(res.data, `boleto-${codigoSolicitacao.substring(0, 8)}.pdf`)
+    } catch (err: unknown) {
+      let message = getErrorMessage(err, 'Erro ao baixar PDF do boleto')
+      const data = (err as { response?: { data?: unknown } }).response?.data
+      if (data instanceof Blob) {
+        try {
+          const response = JSON.parse(await data.text())
+          message = Array.isArray(response.message) ? response.message.join(', ') : response.message || response.error || message
+        } catch { /* Mantém a mensagem de rede quando a resposta não é JSON. */ }
+      }
+      setError(message)
+      notify(message, 'error')
+    }
   }
 
   function saveBlob(blob: Blob, filename: string) {
@@ -926,7 +931,7 @@ export function Payments() {
                           // (boleto/NF/XML), e só então as ações que alteram o boleto. Consultar status,
                           // reverter e excluir ficam no fim por serem ações de exceção/correção.
                           { label: 'Confirmar pagamento', icon: <CheckCircle className="w-4 h-4 text-emerald-600" />, onClick: () => markAsReceived(row.data), hidden: ['pago', 'cancelado'].includes(row.data.status) },
-                          { label: 'Baixar boleto', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(row.data.codigoSolicitacao), hidden: row.data.type !== 'boleto' },
+                          { label: 'Baixar boleto', icon: <Download className="w-4 h-4 text-orange-600" />, onClick: () => downloadPdf(row.data.codigoSolicitacao), hidden: row.data.type !== 'boleto' || row.data.status === 'cancelado' || !row.data.codigoSolicitacao },
                           { label: 'Baixar nota fiscal', icon: <FileDown className="w-4 h-4 text-indigo-600" />, onClick: () => downloadInvoicePdf(row.data), hidden: !row.data.invoiceId },
                           { label: 'Baixar XML', icon: <FileCode className="w-4 h-4 text-teal-600" />, onClick: () => downloadInvoiceXml(row.data), hidden: !row.data.invoiceId },
                           ...documentActions(row.data.status === 'cancelado' ? undefined : row.data.saleId),

@@ -1447,40 +1447,31 @@ export class InterService implements OnModuleInit {
    * Obtém PDF do boleto (com retry automático caso o banco ainda esteja processando)
    */
   async getBoletoPdf(codigoSolicitacao: string, retries = 2): Promise<Buffer> {
-    // First check if boleto is in a valid state
-    try {
-      const boleto = await this.getBoleto(codigoSolicitacao);
-      const cobranca = boleto?.cobranca || boleto;
-      const situacao = (cobranca?.situacao || boleto?.situacao || '').toUpperCase();
-      if (['CANCELADO', 'CANCELADA', 'BAIXADO'].includes(situacao)) {
-        throw new HttpException('Este boleto foi cancelado e não possui PDF disponível.', HttpStatus.BAD_REQUEST);
-      }
-      if (situacao === 'EM_PROCESSAMENTO') {
-        throw new HttpException('Boleto ainda em processamento no Banco Inter. Aguarde alguns minutos e tente novamente. Se o problema persistir, cancele e gere um novo boleto.', HttpStatus.BAD_REQUEST);
-      }
-    } catch (error: any) {
-      if (error instanceof HttpException) throw error;
-      // Ignore consultation error and try PDF directly
-    }
-
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
+        const boleto = await this.getBoleto(codigoSolicitacao);
+        const cobranca = boleto?.cobranca || boleto;
+        const situacao = String(cobranca?.situacao || boleto?.situacao || '').toUpperCase();
+        if (['CANCELADO', 'CANCELADA', 'BAIXADO'].includes(situacao)) {
+          throw new HttpException('Este boleto foi cancelado. Se houve reemissão, baixe o novo boleto na lista de recebimentos.', HttpStatus.GONE);
+        }
+        if (situacao === 'EM_PROCESSAMENTO') {
+          throw new HttpException('O Banco Inter ainda está processando este boleto. Aguarde a conclusão e tente baixar novamente.', HttpStatus.SERVICE_UNAVAILABLE);
+        }
         return await this._fetchBoletoPdf(codigoSolicitacao);
       } catch (error: any) {
-        const isProcessing = error?.response?.statusCode === 400 || error?.status === 400 ||
-          (error?.message || '').includes('processamento') || (error?.message || '').includes('Falha ao obter PDF');
-        if (isProcessing && attempt < retries) {
-          this.logger.warn(`PDF do boleto ${codigoSolicitacao} indisponível. Tentativa ${attempt}/${retries}. Aguardando 5s...`);
-          await new Promise(r => setTimeout(r, 5000));
+        const status = error instanceof HttpException ? error.getStatus() : Number(error?.status || 503);
+        const retryable = [400, 404, 429, 502, 503, 504].includes(status);
+        if (retryable && attempt < retries) {
+          this.logger.warn(`PDF do boleto ${codigoSolicitacao} ainda indisponível (HTTP ${status}). Tentativa ${attempt}/${retries}.`);
+          await new Promise(resolve => setTimeout(resolve, 5000));
           continue;
         }
-        throw new HttpException(
-          'PDF do boleto não disponível. O boleto pode estar em processamento ou com problema. Tente novamente em instantes ou cancele e gere um novo.',
-          HttpStatus.BAD_REQUEST,
-        );
+        if (error instanceof HttpException) throw error;
+        throw new HttpException('Falha de conexão ao obter o PDF do Banco Inter. Tente novamente.', HttpStatus.SERVICE_UNAVAILABLE);
       }
     }
-    throw new HttpException('PDF do boleto não disponível.', HttpStatus.SERVICE_UNAVAILABLE);
+    throw new HttpException('PDF do boleto ainda indisponível no Banco Inter. Tente novamente.', HttpStatus.SERVICE_UNAVAILABLE);
   }
 
   private async _fetchBoletoPdf(codigoSolicitacao: string): Promise<Buffer> {
@@ -1507,25 +1498,32 @@ export class InterService implements OnModuleInit {
         res.on('end', () => {
           const body = Buffer.concat(chunks);
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            // Verificar se é JSON com base64 ou binário direto
-            const contentType = res.headers['content-type'] || '';
-            if (contentType.includes('application/json')) {
+            let pdf = body;
+            if (body.subarray(0, 5).toString() !== '%PDF-') {
               try {
                 const json = JSON.parse(body.toString());
-                if (json.pdf) {
-                  resolve(Buffer.from(json.pdf, 'base64'));
-                } else {
-                  resolve(body);
-                }
+                pdf = typeof json.pdf === 'string' ? Buffer.from(json.pdf, 'base64') : Buffer.alloc(0);
               } catch {
-                resolve(body);
+                pdf = Buffer.alloc(0);
               }
-            } else {
-              resolve(body);
             }
+            if (pdf.subarray(0, 5).toString() !== '%PDF-') {
+              reject(new HttpException('O Banco Inter ainda não retornou um PDF válido para este boleto. Tente novamente em instantes.', HttpStatus.BAD_GATEWAY));
+              return;
+            }
+            resolve(pdf);
           } else {
-            this.logger.error('Erro PDF - Status: ' + res.statusCode + ' Body: ' + body.toString().substring(0, 200));
-            reject(new HttpException('Falha ao obter PDF do boleto', res.statusCode || HttpStatus.NOT_FOUND));
+            let detail = '';
+            try {
+              const json = JSON.parse(body.toString());
+              detail = [json.detail, json.message, json.title].filter(value => typeof value === 'string').join(' - ').slice(0, 500);
+            } catch { /* Respostas HTML do gateway não são apresentadas como mensagem de erro. */ }
+            const status = res.statusCode || HttpStatus.BAD_GATEWAY;
+            this.logger.warn(`Falha no PDF do boleto ${codigoSolicitacao}: HTTP ${status}${detail ? ' - ' + detail : ''}`);
+            reject(new HttpException(
+              `Banco Inter não disponibilizou o PDF (HTTP ${status}).${detail ? ' ' + detail : ' Aguarde alguns instantes e tente novamente.'}`,
+              status,
+            ));
           }
         });
       });
@@ -1534,6 +1532,7 @@ export class InterService implements OnModuleInit {
         this.logger.error('Erro conexão PDF: ' + e.message);
         reject(new HttpException('Erro de conexão ao obter PDF', HttpStatus.SERVICE_UNAVAILABLE));
       });
+      req.setTimeout(15000, () => req.destroy(new Error('Tempo limite ao obter PDF do Banco Inter')));
       req.end();
     });
   }

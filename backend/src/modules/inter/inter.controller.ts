@@ -415,6 +415,7 @@ export class InterController {
   ) {
     this.logger.log(`Obtendo PDF do boleto: ${codigoSolicitacao}`);
 
+    await this.assertPaymentBelongsToTenant(codigoSolicitacao);
     const pdfBuffer = await this.interService.getBoletoPdf(codigoSolicitacao);
 
     res.set({
