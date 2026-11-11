@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -10,10 +10,16 @@ import { getErrorMessage } from '../services/errors'
 
 interface Customer { id: string; name: string }
 interface TechnicianOption { id: string; name: string; active?: boolean }
+type DocumentAction = 'none' | 'boleto' | 'documents'
+const itemSignature = (items: any[]) => JSON.stringify(items.map(item => [
+  item.productId || (item.type === 'product' ? item.id : null),
+  item.serviceId || (item.type === 'service' ? item.id : null),
+  item.name, Number(item.quantity), Number(item.unitPrice),
+]))
 
 export function NewSale() {
   const navigate = useNavigate()
-  const { notify } = useFeedback()
+  const { notify, confirm, runOperation } = useFeedback()
   const { user, isAdmin, isFinanceiro } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [products, setProducts] = useState<SaleProduct[]>([])
@@ -39,7 +45,10 @@ export function NewSale() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
-  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; paymentMethod: string; dueDate: string; hasActiveBoleto: boolean; authorizedInvoiceIds: string[] } | null>(null)
+  const [originalSale, setOriginalSale] = useState<{ totalAmount: number; installments: number; customerId: string; itemSignature: string; updatedAt: string; paymentMethod: string; dueDate: string; hasActiveBoleto: boolean; authorizedInvoiceIds: string[] } | null>(null)
+  const [pendingAction, setPendingAction] = useState<DocumentAction>('none')
+  const editRequestId = useRef(crypto.randomUUID())
+  const submitting = useRef(false)
   const [discountPct, setDiscountPct] = useState(0)
   const [orderNumber, setOrderNumber] = useState('')
 
@@ -63,11 +72,22 @@ export function NewSale() {
   async function loadSaleForEdit(saleId: string) {
     try {
       const res = await api.get('/sales/' + saleId)
-      const sale = res.data
-      const savedDueDate = (sale.activeBoleto?.due_date || sale.dueDate)?.slice(0, 10) || ''
+      const current = res.data
+      const pending = current.pendingDocumentEdit
+      const sale = pending ? { ...current, ...pending.input, customer: { id: pending.input.customerId } } : current
+      if (pending) {
+        setPendingAction(pending.action)
+        if (pending.requestId) editRequestId.current = pending.requestId
+        setError('Há uma troca de documentos incompleta. Confira os dados e salve para retomar. ' + (pending.error || ''))
+      }
+      const savedDueDate = (pending ? sale.dueDate : sale.activeBoleto?.due_date || sale.dueDate)?.slice(0, 10) || ''
       setEditingSaleId(saleId)
       setOriginalSale({
         totalAmount: Number(sale.totalAmount || 0),
+        installments: Number(sale.installments || 1),
+        customerId: sale.customer?.id || '',
+        itemSignature: itemSignature(sale.items || []),
+        updatedAt: current.updatedAt,
         paymentMethod: sale.paymentMethod || 'pix',
         dueDate: savedDueDate,
         hasActiveBoleto: Boolean(sale.activeBoleto),
@@ -86,7 +106,7 @@ export function NewSale() {
       setOriginallyPaid(saleIsPaid)
       setSaleType(sale.saleType || 'eventual')
       setObservations(sale.observations || '')
-      setCommissionPct(sale.commissionPercentage || 10)
+      setCommissionPct(Number(sale.commissionPercentage ?? 10))
       if (sale.items?.length > 0) {
         setItems(sale.items.map((i: any) => ({
           type: i.productId ? 'product' : 'service',
@@ -146,25 +166,41 @@ export function NewSale() {
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
   const usesBoleto = paymentMethod === 'boleto' && !alreadyPaid
   const dueDateChanged = usesBoleto && (!originalSale || originalSale.paymentMethod !== 'boleto' || dueDate !== originalSale.dueDate)
-  const replacesIssuedSale = Boolean(editingSaleId && (originalSale?.hasActiveBoleto || originalSale?.authorizedInvoiceIds.length))
+  const financialChanged = Boolean(originalSale && (
+    Math.abs(totalAmount - originalSale.totalAmount) > 0.005 ||
+    (usesBoleto ? installments : 1) !== originalSale.installments
+  ))
+  const fiscalChanged = financialChanged || Boolean(originalSale && (
+    paymentMethod !== originalSale.paymentMethod || customerId !== originalSale.customerId ||
+    itemSignature(items) !== originalSale.itemSignature
+  ))
+  const documentAction: DocumentAction = pendingAction !== 'none' ? pendingAction :
+    fiscalChanged && (originalSale?.hasActiveBoleto || originalSale?.authorizedInvoiceIds.length) ? 'documents' :
+      dueDateChanged && originalSale?.hasActiveBoleto ? 'boleto' : 'none'
 
   async function submit() {
-    if (saving) return
+    if (submitting.current) return
     if (!customerId) { setError('Selecione um cliente'); return }
     if (items.length === 0) { setError('Adicione pelo menos um item'); return }
 
-    if (usesBoleto && (dueDateChanged || replacesIssuedSale) && (!dueDate || dueDate < today)) {
+    if (usesBoleto && (dueDateChanged || documentAction !== 'none' || financialChanged) && (!dueDate || dueDate < today)) {
       setError('Escolha uma data de vencimento a partir de hoje.')
       return
     }
-    if (replacesIssuedSale && !window.confirm(
-      'Esta venda já tem boleto ativo ou nota fiscal autorizada. Deseja cancelar a venda original e criar outra com os dados desta edição?\n\n' +
-      'O ERP solicitará o cancelamento dos documentos da venda original. A nova nota fiscal ficará pendente para emissão.\n\n' +
-      'Clique em Cancelar para voltar à edição sem salvar.'
-    )) return
-
+    submitting.current = true
     setSaving(true)
     try {
+      if (documentAction !== 'none') {
+        const accepted = await confirm({
+          title: documentAction === 'boleto' ? 'Alterar vencimento do boleto' : 'Atualizar boleto e nota fiscal',
+          message: documentAction === 'boleto'
+            ? 'O boleto atual será cancelado e um novo será emitido com o vencimento escolhido, vinculado a esta venda. Deseja continuar?'
+            : 'Os boletos ativos e as notas fiscais autorizadas serão cancelados e reemitidos com os dados editados, vinculados a esta mesma venda. Deseja continuar?',
+          confirmLabel: 'Confirmar e reemitir',
+          danger: true,
+        })
+        if (!accepted) return
+      }
       const payload = {
         customerId,
         // Ao criar, o backend atribui o vendedor logado automaticamente.
@@ -176,7 +212,7 @@ export function NewSale() {
         paymentMethod,
         alreadyPaid,
         installments: paymentMethod === 'boleto' && !alreadyPaid ? installments : 1,
-        ...(usesBoleto && (dueDateChanged || replacesIssuedSale) ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
+        ...(usesBoleto && (dueDateChanged || documentAction !== 'none' || financialChanged) ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
         multaPercentage,
         moraPercentage,
         saleType,
@@ -202,35 +238,25 @@ export function NewSale() {
           netProfit: (i.unitPrice - i.costPrice) * i.quantity - (i.unitPrice * i.quantity * i.taxPercentage / 100),
         }))
       }
-      if (editingSaleId && replacesIssuedSale) {
-        const { data } = await api.post(`/sales/${editingSaleId}/replace`, payload)
-        notify(data.boletoPending
-          ? 'Venda substituta criada. Confira a emissão do boleto em Vendas. A nota fiscal ficou pendente.'
-          : 'Venda substituta criada. A nota fiscal ficou pendente para emissão.', data.boletoPending ? 'info' : 'success')
-        navigate(`/sales?highlight=${data.saleId}`)
-        return
-      }
       if (editingSaleId) {
-        const { data } = await api.patch('/sales/' + editingSaleId, payload)
-        const cancellation = data.invoiceCancellation
-        if (data.boletoUpdateFailed) {
-          notify('Venda salva. Falha ao atualizar o boleto. Confira o status em Pagamentos.', 'error')
-        }
-        if (cancellation?.failed.length) {
-          notify(`Venda salva. Falha ao cancelar a(s) nota(s) ${cancellation.failed.join(', ')}. Confira o status no Fiscal.`, 'error')
-          navigate('/sales')
-          return
-        }
-        if (cancellation?.cancelled) {
-          notify(`Cancelamento confirmado para ${cancellation.cancelled} nota(s) fiscal(is).`, 'success')
-        }
+        const save = () => api.patch('/sales/' + editingSaleId, {
+          ...payload, confirmDocumentAction: documentAction, editRequestId: editRequestId.current,
+          expectedUpdatedAt: originalSale?.updatedAt,
+        })
+        if (documentAction === 'none') await save()
+        else await runOperation(save, {
+          title: 'Atualizando documentos da venda',
+          processingMessage: 'Aguarde a confirmação dos cancelamentos e a emissão dos novos documentos.',
+          successMessage: 'Documentos atualizados na mesma venda.',
+          errorMessage: (err: unknown) => getErrorMessage(err, 'Não foi possível concluir a troca dos documentos.'),
+        })
       } else {
         await api.post('/sales', payload)
       }
       notify(editingSaleId ? 'Venda atualizada com sucesso' : 'Venda registrada com sucesso', 'success')
       navigate('/sales')
-    } catch (error: unknown) { setError(getErrorMessage(error, 'Erro ao registrar venda')) }
-    finally { setSaving(false) }
+    } catch (err: unknown) { setError(getErrorMessage(err, 'Erro ao registrar venda')) }
+    finally { setSaving(false); submitting.current = false }
   }
 
   return (

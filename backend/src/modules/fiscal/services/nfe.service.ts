@@ -161,6 +161,8 @@ export class NfeService {
     const invoice = await this.invoiceRepository.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new BadRequestException('Nota nao encontrada');
 
+    invoice.taxDetails = { ...invoice.taxDetails, emissionInput: saleData };
+    await this.invoiceRepository.save(invoice);
     const config = await this.configRepository.findOne({ where: {} });
     if (!config) throw new BadRequestException('Configuracao fiscal nao encontrada');
     if (!config.stateRegistration) throw new BadRequestException('Inscricao Estadual nao configurada');

@@ -211,6 +211,10 @@ export class InterController {
     if (!sale) {
       throw new HttpException('Venda não encontrada', HttpStatus.NOT_FOUND);
     }
+    const [pendingEdit] = await this.saleRepo.manager.query(
+      "SELECT id FROM sale_events WHERE sale_id=$1 AND type='sale.documents_edit' AND status='pendente' LIMIT 1", [saleId],
+    );
+    if (pendingEdit) throw new HttpException('Conclua a atualização dos documentos na edição da venda antes de emitir outra cobrança.', HttpStatus.CONFLICT);
 
     if (!sale.customer) {
       throw new HttpException('Venda sem cliente associado', HttpStatus.BAD_REQUEST);

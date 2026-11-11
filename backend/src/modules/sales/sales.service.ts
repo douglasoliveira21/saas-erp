@@ -24,6 +24,12 @@ import { getCustomerEmailRecipients } from '../../common/customer-emails';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { todayInBrasilia } from '../../common/date';
+import { createHash } from 'crypto';
+import { Invoice } from '../fiscal/entities/invoice.entity';
+import { FiscalReissueService } from '../fiscal/services/fiscal-reissue.service';
+import { AccountReceivable } from '../financial/entities/account-receivable.entity';
+import { Installment } from '../financial/entities/installment.entity';
+import { normalizeSaleEdit, saleEditPlan } from './sale-edit-plan';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -56,16 +62,15 @@ export class SalesService {
     private auditService: AuditService,
     private whatsappService: WhatsappService,
     private tenantContext: TenantContextService,
+    private fiscalReissue: FiscalReissueService,
   ) {}
 
-  async create(createSaleDto: any, userId?: string, replacementTransaction?: QueryRunner): Promise<Sale> {
+  async create(createSaleDto: any, userId?: string): Promise<Sale> {
     const today = new Date(); const todayLocal = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
     if (createSaleDto.dueDate && createSaleDto.dueDate < todayLocal) throw new BadRequestException('Vencimento da venda não pode estar no passado');
-    const queryRunner = replacementTransaction ?? this.dataSource.createQueryRunner();
-    if (!replacementTransaction) {
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-    }
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     try {
       const { items, alreadyPaid = false, ...saleData } = createSaleDto;
@@ -191,7 +196,6 @@ export class SalesService {
       // A venda e seus registros financeiros devem confirmar ou falhar juntos.
       await this.financialService.createFromSale(savedSale, userId || saleData.technicianId, queryRunner.manager);
 
-      if (replacementTransaction) return savedSale;
       await queryRunner.commitTransaction();
 
       // Notificar financeiro por email
@@ -230,10 +234,10 @@ export class SalesService {
       });
       return created;
     } catch (err) {
-      if (!replacementTransaction && queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) await queryRunner.rollbackTransaction();
       throw err;
     } finally {
-      if (!replacementTransaction) await queryRunner.release();
+      await queryRunner.release();
     }
   }
 
@@ -376,7 +380,7 @@ export class SalesService {
        FROM payments
        WHERE sale_id = $1 AND type = 'boleto'
          AND status IN ('pendente', 'a_receber', 'vencido')
-       ORDER BY created_at DESC LIMIT 1`,
+       ORDER BY due_date ASC, created_at DESC LIMIT 1`,
       [id],
     );
     (sale as any).activeBoleto = activeBoleto[0] || null;
@@ -384,6 +388,13 @@ export class SalesService {
       "SELECT id FROM invoices WHERE sale_id = $1 AND status = 'autorizada'", [id],
     );
     (sale as any).authorizedInvoiceIds = invoices.map((invoice: { id: string }) => invoice.id);
+    const pendingEdit = await this.saleEventRepository.findOne({
+      where: { saleId: id, type: 'sale.documents_edit', status: 'pendente' }, order: { createdAt: 'DESC' },
+    });
+    if (pendingEdit) (sale as any).pendingDocumentEdit = {
+      input: pendingEdit.metadata.input, action: pendingEdit.metadata.plan.action,
+      requestId: pendingEdit.metadata.requestId, error: pendingEdit.metadata.lastError,
+    };
     return sale;
   }
 
@@ -440,7 +451,7 @@ export class SalesService {
     return this.salesRepository.save(sale);
   }
 
-  async cancel(id: string, cancelledBy: string, replacementTransaction?: QueryRunner): Promise<Sale> {
+  async cancel(id: string, cancelledBy: string): Promise<Sale> {
     const preflightSale = await this.salesRepository.findOne({ where: { id } });
     if (!preflightSale) throw new NotFoundException('Venda não encontrada');
     if (preflightSale.status === 'finalizado' as any) throw new BadRequestException('Venda finalizada não pode ser cancelada');
@@ -453,13 +464,11 @@ export class SalesService {
     }
 
     const externalDocumentsCancelled = preflightSale.status !== 'cancelado' as any;
-    if (externalDocumentsCancelled && !replacementTransaction) await this.cancelExternalDocuments(id, cancelledBy);
+    if (externalDocumentsCancelled) await this.cancelExternalDocuments(id, cancelledBy);
 
-    const queryRunner = replacementTransaction ?? this.dataSource.createQueryRunner();
-    if (!replacementTransaction) {
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-    }
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     try {
       const sale = await queryRunner.manager.findOne(Sale, {
@@ -483,7 +492,7 @@ export class SalesService {
 
 
       const previousReversal = await queryRunner.manager.findOne(StockMovement, {
-        where: { saleId: id, type: StockMovementType.ESTORNO },
+        where: { saleId: id, type: StockMovementType.ESTORNO, reason: `Estorno da venda #${id}` },
       });
 
       if (!previousReversal) {
@@ -492,23 +501,30 @@ export class SalesService {
           order: { productId: 'ASC' },
         });
 
-        for (const movement of saleMovements) {
+        const editReturns = await queryRunner.manager.find(StockMovement, {
+          where: { saleId: id, type: StockMovementType.ESTORNO, reason: 'Ajuste dos itens na edição da venda' },
+        });
+        const quantities = new Map<string, number>();
+        for (const movement of saleMovements) quantities.set(movement.productId, (quantities.get(movement.productId) || 0) + Number(movement.quantity));
+        for (const movement of editReturns) quantities.set(movement.productId, (quantities.get(movement.productId) || 0) - Number(movement.quantity));
+        for (const [productId, quantity] of [...quantities.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+          if (quantity <= 0) continue;
           const product = await queryRunner.manager.findOne(Product, {
-            where: { id: movement.productId },
+            where: { id: productId },
             lock: { mode: 'pessimistic_write' },
           });
           if (!product) {
-            throw new BadRequestException(`Produto ${movement.productId} não encontrado para estorno do estoque`);
+            throw new BadRequestException(`Produto ${productId} não encontrado para estorno do estoque`);
           }
 
           const previousQuantity = Number(product.quantity);
-          const newQuantity = previousQuantity + Number(movement.quantity);
+          const newQuantity = previousQuantity + quantity;
           await queryRunner.manager.update(Product, product.id, { quantity: newQuantity });
 
           const reversal = queryRunner.manager.create(StockMovement, {
             productId: product.id,
             type: StockMovementType.ESTORNO,
-            quantity: Number(movement.quantity),
+            quantity,
             previousQuantity,
             newQuantity,
             reason: `Estorno da venda #${id}`,
@@ -550,7 +566,6 @@ export class SalesService {
         [id],
       );
 
-      if (replacementTransaction) return sale;
       await queryRunner.commitTransaction();
       await this.auditService.safeCreate({
         userId: cancelledBy,
@@ -570,14 +585,14 @@ export class SalesService {
       });
       return this.findOne(id);
     } catch (error) {
-      if (!replacementTransaction && queryRunner.isTransactionActive && !queryRunner.isReleased) {
+      if (queryRunner.isTransactionActive && !queryRunner.isReleased) {
         try {
           await queryRunner.rollbackTransaction();
         } catch {}
       }
       throw error;
     } finally {
-      if (!replacementTransaction && !queryRunner.isReleased) {
+      if (!queryRunner.isReleased) {
         await queryRunner.release();
       }
     }
@@ -779,291 +794,276 @@ export class SalesService {
     }
   }
 
-  async replaceIssuedSale(id: string, changes: any, userId: string, userRole: string) {
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction();
-    let replacement: Sale;
-    let reissueBoleto = false;
-    try {
-      await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sale-replacement:${id}`]);
-      const original = await this.findOne(id, userId, userRole);
-      const previous = await runner.manager.findOne(SaleEvent, { where: { saleId: id, type: 'sale.replaced' } });
-      if (previous?.metadata?.replacementId) {
-        return { saleId: previous.metadata.replacementId, boletoPending: true };
-      }
-      if (['cancelado', 'finalizado', 'pago'].includes(original.status) ||
-          ['pago', 'parcial'].includes(original.paymentStatus) || changes.alreadyPaid) {
-        throw new BadRequestException('A substituição só está disponível para vendas em aberto sem pagamentos. Confira o financeiro antes de prosseguir.');
-      }
-      const [paid] = await runner.query(
-        `SELECT EXISTS (SELECT 1 FROM installments WHERE sale_id::text = $1 AND (status = 'pago' OR paid_value > 0))
-          OR EXISTS (SELECT 1 FROM payments WHERE sale_id::text = $1 AND status = 'pago') AS paid`, [id],
-      );
-      if (paid?.paid) throw new BadRequestException('Esta venda já tem recebimentos registrados.');
-      if (await runner.manager.findOne(Commission, { where: { saleId: id, status: CommissionStatus.PAGA } })) {
-        throw new BadRequestException('Reverta a comissão paga antes de substituir a venda.');
-      }
-
-      const { customerId, paymentMethod, installments, dueDate, multaPercentage, moraPercentage,
-        saleType, observations, discountAmount, commissionPercentage, items } = changes;
-      if (!customerId || !Array.isArray(items) || !items.length ||
-          items.some(item => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) <= 0)) {
-        throw new BadRequestException('Informe o cliente e os itens válidos da nova venda.');
-      }
-      const customer = await runner.manager.getRepository('customers').findOne({ where: { id: customerId } });
-      if (!customer) throw new BadRequestException('Cliente da nova venda não encontrado.');
-      const requiredStock = new Map<string, number>();
-      for (const item of items) {
-        if (item.productId) requiredStock.set(item.productId, (requiredStock.get(item.productId) || 0) + Number(item.quantity));
-      }
-      const movements = await runner.manager.find(StockMovement, { where: { saleId: id, type: StockMovementType.VENDA } });
-      for (const [productId, quantity] of requiredStock) {
-        const product = await runner.manager.findOne(Product, { where: { id: productId } });
-        const returned = movements.filter(movement => movement.productId === productId)
-          .reduce((sum, movement) => sum + Number(movement.quantity), 0);
-        if (!product || Number(product.quantity) + returned < quantity) {
-          throw new BadRequestException(`Estoque insuficiente para substituir a venda (${product?.name || productId}).`);
-        }
-      }
-      if (paymentMethod === 'boleto') {
-        const parsed = typeof dueDate === 'string' ? new Date(dueDate + 'T00:00:00Z') : null;
-        if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== dueDate || dueDate < todayInBrasilia()) {
-          throw new BadRequestException('Escolha um vencimento válido para o novo boleto.');
-        }
-      }
-      reissueBoleto = Boolean((original as any).activeBoleto) && paymentMethod === 'boleto';
-
-      await this.cancelExternalDocuments(id, userId);
-      await this.cancel(id, userId, runner);
-      replacement = await this.create({
-        customerId, paymentMethod, installments, multaPercentage, moraPercentage, saleType,
-        observations, discountAmount, commissionPercentage,
-        technicianId: userRole === 'admin' && changes.technicianId ? changes.technicianId : original.technicianId,
-        ...(paymentMethod === 'boleto' ? { dueDate, dueDay: Number(dueDate.slice(8, 10)) } : {}),
-        items: items.map(({ productId, serviceId, name, quantity, unitPrice, taxPercentage, costPrice, taxAmount, netProfit }) =>
-          ({ productId, serviceId, name, quantity, unitPrice, taxPercentage, costPrice, taxAmount, netProfit })),
-      }, userId, runner);
-      await runner.manager.save(SaleEvent, runner.manager.create(SaleEvent, {
-        saleId: id, type: 'sale.replaced', status: 'cancelado', description: 'Venda cancelada e substituída',
-        createdBy: userId, metadata: { replacementId: replacement.id },
-      }));
-      await runner.manager.save(SaleEvent, runner.manager.create(SaleEvent, {
-        saleId: replacement.id, type: 'sale.replacement_created', status: replacement.status,
-        description: 'Venda criada em substituição à venda original',
-        createdBy: userId, metadata: { originalSaleId: id },
-      }));
-      await runner.commitTransaction();
-    } catch (error) {
-      if (runner.isTransactionActive) await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
-    }
-
-    let boletoPending = false;
-    if (reissueBoleto) {
-      try {
-        const result = await this.interService.generateForSale(await this.findOne(replacement.id), 'boleto');
-        boletoPending = Boolean(result?.puladas?.length);
-      } catch (error) {
-        boletoPending = true;
-        this.logger.warn(`Falha ao emitir boleto da venda substituta ${replacement.id}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    return { saleId: replacement.id, boletoPending };
+  async replaceIssuedSale(): Promise<never> {
+    throw new BadRequestException('Atualize a página e salve a edição na mesma venda. A criação de venda substituta foi removida.');
   }
 
   private async cancelAuthorizedInvoice(invoice: { id: string; type: string; certificate_id: string | null }, reason: string, userId?: string) {
-    if (!invoice.certificate_id) {
-      throw new BadRequestException(`Nota fiscal ${invoice.id} sem certificado vinculado para cancelamento`);
-    }
-    if (invoice.type === 'nfse') {
-      await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id, userId);
-    } else {
-      await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id, userId);
-    }
+    if (!invoice.certificate_id) throw new BadRequestException('Nota fiscal sem certificado vinculado para cancelamento.');
+    if (invoice.type === 'nfse') await this.nfseService.cancel(invoice.id, reason, invoice.certificate_id, userId);
+    else await this.nfeService.cancel(invoice.id, reason, invoice.certificate_id, userId);
+    await this.dataSource.getRepository(Invoice).update(invoice.id, { queueStatus: 'processado', nextRetryAt: null });
   }
 
-  async update(id: string, updateSaleDto: any, userId?: string, userRole?: string): Promise<Sale> {
-    const { cancelInvoiceIds, ...saleChanges } = updateSaleDto;
-    if (cancelInvoiceIds !== undefined && (!Array.isArray(cancelInvoiceIds) ||
-      cancelInvoiceIds.some(id => typeof id !== 'string'))) {
-      throw new BadRequestException('Seleção de notas fiscais inválida');
-    }
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-    let oldData: any;
-    let safeDto: any;
-    let oldActiveBoleto: any = null;
-    let shouldCancelActiveBoleto = false;
-    let reassignedTechnician: { fromId: string; toId: string } | null = null;
+  async update(id: string, changes: any, userId?: string, userRole?: string): Promise<Sale> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    let locked = false;
+    let operation: SaleEvent | null = null;
     try {
-      const tenantId = this.tenantContext.getTenantId();
-      const sale = await queryRunner.manager.getRepository(Sale).findOne({ where: tenantId ? { id, tenantId } : { id }, lock: { mode: 'pessimistic_write' } });
-      if (!sale) throw new NotFoundException('Venda não encontrada');
-      oldData = { ...sale };
-      const { technician, customer, items, approver, alreadyPaid, technicianId, cancelActiveBoleto, ...allowedDto } = saleChanges;
-      safeDto = allowedDto;
-      shouldCancelActiveBoleto = Boolean(cancelActiveBoleto);
-      const activeBoleto = await queryRunner.query(
-        `SELECT id, codigo_solicitacao, value, due_date, status
-         FROM payments
-         WHERE sale_id = $1 AND type = 'boleto'
-           AND status IN ('pendente', 'a_receber', 'vencido')
-         ORDER BY created_at DESC LIMIT 1`, [id],
+      const [lock] = await runner.query('SELECT pg_try_advisory_lock(hashtext($1)) AS locked', [`sale-edit:${id}`]);
+      locked = Boolean(lock.locked);
+      if (!locked) throw new BadRequestException('Esta venda já está sendo atualizada. Aguarde a conclusão.');
+      const sale = await this.findOne(id, userId, userRole);
+      if (['cancelado', 'finalizado'].includes(sale.status)) throw new BadRequestException('Venda cancelada ou finalizada não pode ser editada.');
+      let input: ReturnType<typeof normalizeSaleEdit>;
+      const effectiveDueDate = (sale as any).activeBoleto?.due_date
+        ? String((sale as any).activeBoleto.due_date).slice(0, 10) : sale.dueDate;
+      try { input = normalizeSaleEdit({ ...sale, dueDate: effectiveDueDate }, changes); }
+      catch (error) { throw new BadRequestException(error.message); }
+      if (input.technicianId !== sale.technicianId && userRole !== 'admin') {
+        throw new ForbiddenException('Somente administradores podem alterar o vendedor.');
+      }
+      if (!Number.isInteger(input.installments) || input.installments < 1 || input.installments > 120 ||
+          !['boleto', 'pix', 'dinheiro', 'cartao_credito', 'cartao_debito', 'transferencia'].includes(input.paymentMethod) ||
+          ![input.multaPercentage, input.moraPercentage].every(value => Number.isFinite(value) && value >= 0)) {
+        throw new BadRequestException('Forma de pagamento, parcelamento, multa ou juros inválidos.');
+      }
+      const hash = createHash('sha256').update(JSON.stringify({ input, alreadyPaid: Boolean(changes.alreadyPaid) })).digest('hex');
+      operation = await this.saleEventRepository.findOne({
+        where: { saleId: id, type: 'sale.documents_edit', status: 'pendente' }, order: { createdAt: 'DESC' },
+      });
+      if (operation && operation.metadata.hash !== hash) {
+        throw new BadRequestException('Há uma troca de documentos incompleta nesta venda. Recarregue a edição para retomar os mesmos dados antes de fazer outra alteração.');
+      }
+      if (!operation && changes.editRequestId) {
+        const completed = await this.saleEventRepository.createQueryBuilder('event')
+          .where('event.saleId = :id', { id }).andWhere('event.type = :type', { type: 'sale.documents_edit' })
+          .andWhere("event.metadata ->> 'requestId' = :requestId", { requestId: changes.editRequestId }).getOne();
+        if (completed) {
+          if (completed.metadata.hash !== hash) throw new BadRequestException('Recarregue a venda antes de fazer outra edição.');
+          return this.findOne(id);
+        }
+      }
+      const boletos = await runner.query(
+        `SELECT id, codigo_solicitacao FROM payments WHERE sale_id=$1 AND type='boleto'
+         AND status IN ('pendente','a_receber','vencido')`, [id],
       );
-      oldActiveBoleto = activeBoleto[0] || null;
-
-      // Somente administradores podem reatribuir quem realizou a venda.
-      // Sem isso, a venda mantém o vendedor original mesmo quando outro usuário a edita.
-      if (technicianId && technicianId !== sale.technicianId) {
-        if (userRole !== 'admin') {
-          throw new BadRequestException('Apenas administradores podem alterar o técnico responsável pela venda');
-        }
-        reassignedTechnician = { fromId: sale.technicianId, toId: technicianId };
-        safeDto.technicianId = technicianId;
+      const invoices = await runner.manager.find(Invoice, { where: { saleId: id, status: 'autorizada' } });
+      const before = { ...sale, dueDate: changes.dueDate === undefined ? input.dueDate : sale.dueDate };
+      // Vendas antigas podem ter o vencimento atualizado só no boleto.
+      if ((sale as any).activeBoleto?.due_date) before.dueDate = String((sale as any).activeBoleto.due_date).slice(0, 10);
+      const plan = operation?.metadata.plan ?? saleEditPlan(before, input, boletos.length > 0, invoices.length > 0);
+      if (!operation && changes.expectedUpdatedAt && new Date(changes.expectedUpdatedAt).getTime() !== new Date(sale.updatedAt).getTime()) {
+        throw new BadRequestException('A venda foi alterada por outra operação. Recarregue antes de salvar.');
       }
-
-      const shouldMarkPaid = Boolean(alreadyPaid) && sale.paymentStatus !== 'pago';
-      if (Array.isArray(items) && items.length) {
-        const subtotal = moneySum(items.map((item: any) => moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0))));
-        const discountAmount = money(safeDto.discountAmount ?? safeDto.discountValue ?? 0);
-        const taxAmount = moneySum(items.map((item: any) => moneyMultiply(moneyMultiply(Number(item.unitPrice || 0), Number(item.quantity || 0)), Number(item.taxPercentage || 0) / 100)));
-        const totalAmount = money(subtotal - discountAmount);
-        const commissionAmount = moneyMultiply(totalAmount, Number(safeDto.commissionPercentage ?? sale.commissionPercentage ?? 0) / 100);
-        const totalCost = moneySum(items.map((item: any) => moneyMultiply(Number(item.costPrice || 0), Number(item.quantity || 0))));
-        Object.assign(safeDto, { subtotal, discountAmount, taxAmount, totalAmount, commissionAmount, netProfit: money(totalAmount - totalCost - taxAmount - commissionAmount) });
-      }
-      const billingScheduleProvided = (safeDto.paymentMethod || sale.paymentMethod) === 'boleto' && safeDto.dueDay !== undefined;
-      const explicitDueDateChanged = (safeDto.paymentMethod || sale.paymentMethod) === 'boleto' &&
-        safeDto.dueDate != null && safeDto.dueDate !== sale.dueDate;
-      if (explicitDueDateChanged) {
-        const date = safeDto.dueDate;
-        const parsed = typeof date === 'string' ? new Date(date + 'T00:00:00Z') : null;
-        if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date || date < todayInBrasilia()) {
-          throw new BadRequestException('Informe uma data de vencimento válida que não esteja no passado');
-        }
-        if (oldActiveBoleto) {
-          throw new BadRequestException('Esta venda já tem um boleto ativo. Altere o vencimento pela reemissão do boleto.');
-        }
-      }
-      Object.assign(sale, safeDto);
-      if (explicitDueDateChanged || (billingScheduleProvided && safeDto.dueDay)) {
-        const newDueDay = explicitDueDateChanged ? Number(sale.dueDate.slice(8, 10)) : Number(safeDto.dueDay);
-        if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) throw new BadRequestException('Dia de vencimento inválido');
-        const pending = await queryRunner.query(`SELECT id, number, due_date FROM installments WHERE sale_id = $1 AND status IN ('pendente','vencido') FOR UPDATE`, [id]);
-        for (const installment of pending) {
-          const scheduleSale = Object.assign(new Sale(), sale, { dueDay: newDueDay, dueDate: explicitDueDateChanged ? sale.dueDate : null });
-          const date = this.financialService.getBoletoDueDate(scheduleSale, new Date(), Number(installment.number || 1));
-          await queryRunner.query(`UPDATE installments SET due_date=$1, status='pendente' WHERE id=$2`, [date, installment.id]);
-        }
-        const firstPending = await queryRunner.query(`SELECT due_date FROM installments WHERE sale_id=$1 AND status IN ('pendente','vencido') ORDER BY number LIMIT 1`, [id]);
-        if (firstPending[0]) await queryRunner.query(`UPDATE accounts_receivable SET due_date=$1 WHERE sale_id=$2 AND status IN ('pendente','parcial')`, [firstPending[0].due_date, id]);
-      }
-      // Quando o valor da venda muda, as parcelas pendentes também precisam acompanhar o novo
-      // total; caso contrário a reemissão usaria os valores antigos do financeiro.
-      if (safeDto.paymentMethod === 'boleto' && Number(safeDto.totalAmount) >= 0) {
-        const pendingInstallments = await queryRunner.query(
-          `SELECT id, number FROM installments WHERE sale_id = $1 AND status IN ('pendente', 'vencido') ORDER BY number FOR UPDATE`, [id],
+      const affectsFinance = plan.financialChanged || plan.dateChanged;
+      if (affectsFinance || plan.action !== 'none') {
+        const [received] = await runner.query(
+          `SELECT EXISTS (SELECT 1 FROM installments WHERE sale_id::text=$1 AND (paid_value>0 OR status='pago'))
+           OR EXISTS (SELECT 1 FROM payments WHERE sale_id::text=$1 AND status='pago') AS paid`, [id],
         );
-        if (pendingInstallments.length) {
-          const totalCents = Math.round(Number(safeDto.totalAmount) * 100);
-          const baseCents = Math.floor(totalCents / pendingInstallments.length);
-          let allocated = 0;
-          for (let index = 0; index < pendingInstallments.length; index++) {
-            const cents = index === pendingInstallments.length - 1 ? totalCents - allocated : baseCents;
-            allocated += cents;
-            await queryRunner.query(`UPDATE installments SET value = $1, updated_at = NOW() WHERE id = $2`, [cents / 100, pendingInstallments[index].id]);
+        if (received.paid || sale.paymentStatus === 'pago' || changes.alreadyPaid) {
+          throw new BadRequestException('Esta venda possui recebimento. Reverta o recebimento no financeiro antes de alterar os documentos.');
+        }
+        if (input.paymentMethod === 'boleto') {
+          const parsed = typeof input.dueDate === 'string' ? new Date(input.dueDate + 'T00:00:00Z') : null;
+          if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== input.dueDate || input.dueDate < todayInBrasilia()) {
+            throw new BadRequestException('Escolha uma data de vencimento válida a partir de hoje.');
           }
         }
       }
-      await queryRunner.manager.getRepository(Sale).save(sale);
-      if (Array.isArray(items) && items.length) {
-        await this.syncSaleCommission(
-          id,
-          { baseValue: Number(sale.totalAmount), percentage: Number(sale.commissionPercentage || 0), amount: Number(sale.commissionAmount) },
-          queryRunner.manager,
-        );
+      if (plan.fiscalChanged && await runner.manager.findOne(Commission, { where: { saleId: id, status: CommissionStatus.PAGA } })) {
+        throw new BadRequestException('Reverta a comissão paga antes de alterar valor, itens ou parcelamento.');
       }
-      if (shouldMarkPaid) {
-        await this.financialService.settleSale(id, safeDto.paymentMethod || sale.paymentMethod, userId, `sale-edit-paid:${id}`, new Date(), undefined, queryRunner.manager);
-        safeDto = { ...safeDto, markedPaid: true };
+      if (plan.action !== 'none' && !operation) {
+        if (changes.confirmDocumentAction !== plan.action) throw new BadRequestException({
+          message: 'Confirme a troca dos documentos antes de salvar.', requiredAction: plan.action,
+        });
+        if (input.totalAmount <= 0) throw new BadRequestException('A nova cobrança deve ter valor positivo.');
+        const customer = await runner.manager.getRepository('customers').findOne({ where: { id: input.customerId } });
+        if (!customer) throw new BadRequestException('Cliente não encontrado.');
+        if (boletos.length && input.paymentMethod === 'boleto') {
+          const document = String(customer['cpfCnpj'] || '').replace(/\D/g, '');
+          if (![11, 14].includes(document.length) || !customer['name'] || !customer['address'] ||
+              !customer['city'] || !customer['uf'] || !/^\d{8}$/.test(String(customer['cep'] || '').replace(/\D/g, ''))) {
+            throw new BadRequestException('Complete CPF/CNPJ, endereço, município, UF e CEP do cliente antes de reemitir.');
+          }
+        }
+        const templates = [];
+        if (plan.action === 'documents') {
+          for (const invoice of invoices) templates.push({ invoiceId: invoice.id, input: await this.fiscalReissue.prepare(invoice) });
+        }
+        operation = await this.saleEventRepository.save(this.saleEventRepository.create({
+          saleId: id, type: 'sale.documents_edit', status: 'pendente', createdBy: userId,
+          description: 'Troca dos documentos na edição da mesma venda',
+          metadata: { hash, requestId: changes.editRequestId, input, plan, applied: false,
+            boletoCodes: boletos.map(row => row.codigo_solicitacao), templates, replacements: {} },
+        }));
       }
-      if (reassignedTechnician) {
-        // Transfere a comissão pendente/aprovada da venda: retira do técnico anterior e credita ao novo.
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(Commission)
-          .set({ technicianId: reassignedTechnician.toId })
-          .where('sale_id = :saleId', { saleId: id })
-          .andWhere('status IN (:...statuses)', { statuses: ['pendente', 'aprovada'] })
-          .execute();
+      if (!operation) {
+        await runner.startTransaction();
+        await this.saveSaleEdit(runner, sale, input, plan, userId);
+        if (changes.alreadyPaid && sale.paymentStatus !== 'pago') {
+          await this.financialService.settleSale(id, input.paymentMethod, userId, `sale-edit-paid:${id}`, new Date(), undefined, runner.manager);
+        }
+        await runner.commitTransaction();
+        await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, newData: input });
+        return this.findOne(id);
       }
-      await queryRunner.commitTransaction();
+
+      const state = operation.metadata;
+      if (!state.applied) {
+        // Autorizações fiscais/bancárias são confirmadas antes de alterar a venda e suas parcelas.
+        for (const template of state.templates) {
+          const invoice = await runner.manager.findOneByOrFail(Invoice, { id: template.invoiceId });
+          if (invoice.status === 'autorizada') {
+            await this.cancelAuthorizedInvoice({ id: invoice.id, type: invoice.type, certificate_id: invoice.certificateId },
+              'Alteração de valor ou parcelamento da venda', userId);
+          } else if (invoice.status !== 'cancelada') {
+            throw new BadRequestException('Confira o cancelamento da nota no módulo Fiscal antes de retomar.');
+          }
+        }
+        for (const code of state.boletoCodes) {
+          const [payment] = await runner.query('SELECT status FROM payments WHERE codigo_solicitacao=$1 AND sale_id=$2', [code, id]);
+          if (payment?.status === 'pago') throw new BadRequestException('O boleto foi pago durante a edição. Confira o financeiro.');
+          if (payment?.status !== 'cancelado') await this.interService.cancelBoleto(code, 'ACERTOS');
+        }
+        await runner.startTransaction();
+        await this.saveSaleEdit(runner, sale, state.input, state.plan, userId);
+        state.applied = true;
+        await runner.manager.save(SaleEvent, operation);
+        await runner.commitTransaction();
+      }
+      // Cada substituto tem identidade própria e está vinculado à mesma venda.
+      for (const template of state.templates) {
+        let replacement: Invoice;
+        if (!state.replacements[template.invoiceId]) {
+          const original = await runner.manager.findOneByOrFail(Invoice, { id: template.invoiceId });
+          // Recupera o registro caso o processo tenha parado depois de criá-lo.
+          replacement = await runner.manager.getRepository(Invoice).createQueryBuilder('invoice')
+            .where('invoice.saleId = :id', { id })
+            .andWhere("invoice.taxDetails ->> 'replacesInvoiceId' = :original", { original: original.id }).getOne();
+          if (!replacement) replacement = await this.fiscalReissue.createReplacement(original, template.input);
+          state.replacements[template.invoiceId] = replacement.id;
+          await this.saleEventRepository.save(operation);
+        } else {
+          replacement = await runner.manager.findOneByOrFail(Invoice, { id: state.replacements[template.invoiceId] });
+        }
+        if (replacement.status !== 'autorizada') {
+          if (replacement.status !== 'pendente' || replacement.queueStatus !== 'aguardando_envio') {
+            throw new BadRequestException('Venda salva. A nova nota está pendente de autorização ou foi recusada. Confira o módulo Fiscal antes de retomar.');
+          }
+          replacement.queueStatus = 'enviando_edicao';
+          await runner.manager.save(Invoice, replacement);
+          await this.fiscalReissue.emitReplacement(replacement);
+        }
+      }
+      if (state.boletoCodes.length && state.input.paymentMethod === 'boleto' && !state.boletoIssued) {
+        const result = await this.interService.generateForSale(await this.findOne(id), 'boleto', undefined, operation.id);
+        if (result?.puladas?.length) throw new BadRequestException('Venda salva. Confira as parcelas sem boleto e retome a emissão.');
+        state.boletoIssued = true;
+        await this.saleEventRepository.save(operation);
+      }
+      if (state.templates.length) {
+        await runner.query("UPDATE sales SET fiscal_status='autorizada', updated_at=NOW() WHERE id=$1", [id]);
+        await runner.query("UPDATE financial_tasks SET status='concluido', completed_at=NOW() WHERE sale_id=$1 AND type='emissao_nf' AND status='pendente'", [id]);
+      }
+      operation.status = 'concluido';
+      await this.saleEventRepository.save(operation);
+      return this.findOne(id);
     } catch (error) {
-      await queryRunner.rollbackTransaction();
+      if (runner.isTransactionActive) {
+        await runner.rollbackTransaction();
+        if (operation) operation.metadata.applied = false;
+      }
+      if (operation?.status === 'pendente') {
+        operation.metadata.lastError = error.message;
+        await this.saleEventRepository.save(operation);
+      }
       throw error;
     } finally {
-      await queryRunner.release();
+      if (locked) await runner.query('SELECT pg_advisory_unlock(hashtext($1))', [`sale-edit:${id}`]);
+      await runner.release();
     }
-    const updated = await this.findOne(id);
-    const changedBilling = Number(updated.totalAmount) !== Number(oldData.totalAmount) || updated.paymentMethod !== oldData.paymentMethod;
-    let boletoUpdateFailed = false;
-    if (shouldCancelActiveBoleto && changedBilling && oldActiveBoleto) {
-      try {
-        await this.interService.cancelPaymentsForSale(id, 'Alteração de valor ou forma de pagamento da venda');
-        if (updated.paymentMethod === 'boleto' && updated.paymentStatus !== 'pago' && updated.status !== 'pago') {
-          await this.interService.generateForSale(updated, 'boleto');
-        }
-      } catch (error) {
-        if (!cancelInvoiceIds?.length) throw error;
-        boletoUpdateFailed = true;
-        this.logger.warn(`Falha ao atualizar boleto na edição da venda ${id}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  private async saveSaleEdit(runner: QueryRunner, sale: Sale, input: ReturnType<typeof normalizeSaleEdit>, plan: ReturnType<typeof saleEditPlan>, userId?: string) {
+    const manager = runner.manager;
+    const { items, ...values } = input;
+    if (plan.itemsChanged) {
+      const quantities = (rows: any[]) => {
+        const result = new Map<string, number>();
+        for (const item of rows) if (item.productId) result.set(item.productId, (result.get(item.productId) || 0) + Number(item.quantity));
+        return result;
+      };
+      const oldQuantities = quantities(sale.items);
+      const newQuantities = quantities(items);
+      for (const productId of [...new Set([...oldQuantities.keys(), ...newQuantities.keys()])].sort()) {
+        const delta = (newQuantities.get(productId) || 0) - (oldQuantities.get(productId) || 0);
+        if (!delta) continue;
+        const product = await manager.findOne(Product, { where: { id: productId }, lock: { mode: 'pessimistic_write' } });
+        if (!product || Number(product.quantity) < delta) throw new BadRequestException('Estoque insuficiente para os itens editados.');
+        const previousQuantity = Number(product.quantity);
+        await manager.update(Product, productId, { quantity: previousQuantity - delta });
+        await manager.save(StockMovement, manager.create(StockMovement, {
+          saleId: sale.id, productId, type: delta > 0 ? StockMovementType.VENDA : StockMovementType.ESTORNO,
+          quantity: Math.abs(delta), previousQuantity, newQuantity: previousQuantity - delta,
+          reason: 'Ajuste dos itens na edição da venda', userId,
+        }));
       }
+      await manager.delete(SaleItem, { saleId: sale.id });
+      await manager.save(SaleItem, items.map(item => manager.create(SaleItem, { ...item, saleId: sale.id })));
     }
-    await this.auditService.safeCreate({ userId, action: 'sale.updated', entity: 'sale', entityId: id, oldData, newData: safeDto });
-    if (reassignedTechnician) {
-      await this.auditService.safeCreate({
-        userId,
-        action: 'sale.technician_reassigned',
-        entity: 'sale',
-        entityId: id,
-        oldData: { technicianId: reassignedTechnician.fromId },
-        newData: { technicianId: reassignedTechnician.toId },
+    await manager.update(Sale, sale.id, values);
+    if (plan.action === 'documents') await manager.update(Sale, sale.id, { fiscalStatus: 'pendente' });
+    if (sale.customerId !== input.customerId) {
+      await manager.update(AccountReceivable, { saleId: sale.id }, { customerId: input.customerId });
+    }
+    if (plan.financialChanged || plan.dateChanged) {
+      const account = await manager.findOne(AccountReceivable, { where: { saleId: sale.id }, lock: { mode: 'pessimistic_write' } });
+      if (!account) throw new BadRequestException('Conta a receber da venda não encontrada.');
+      const scheduledSale = Object.assign(new Sale(), sale, values);
+      if (plan.financialChanged) {
+        await manager.update(Installment, { saleId: sale.id }, { status: 'cancelado' });
+        const count = input.installments;
+        let distributed = 0;
+        for (let number = 1; number <= count; number++) {
+          const value = number === count ? money(input.totalAmount - distributed) : Math.floor(input.totalAmount * 100 / count) / 100;
+          distributed = money(distributed + value);
+          const date = this.financialService.getBoletoDueDate(scheduledSale, new Date(), number);
+          await manager.save(Installment, manager.create(Installment, {
+            saleId: sale.id, accountId: account.id, number, value, paidValue: 0,
+            dueDate: date, status: 'pendente', paymentMethod: input.paymentMethod,
+          }));
+        }
+      } else {
+        const pending = await manager.find(Installment, { where: { saleId: sale.id, status: In(['pendente', 'vencido']) } });
+        for (const installment of pending) {
+          installment.dueDate = this.financialService.getBoletoDueDate(scheduledSale, new Date(), installment.number);
+          installment.status = 'pendente';
+          await manager.save(Installment, installment);
+        }
+      }
+      const [next] = await manager.query("SELECT MIN(due_date) AS due FROM installments WHERE sale_id=$1 AND status IN ('pendente','vencido','parcial')", [sale.id]);
+      await manager.update(AccountReceivable, account.id, {
+        totalValue: input.totalAmount, pendingValue: money(input.totalAmount - Number(account.paidValue)),
+        installments: input.installments, paymentMethod: input.paymentMethod, customerId: input.customerId,
+        dueDate: next?.due || input.dueDate, status: Number(account.paidValue) > 0 ? 'parcial' : 'pendente',
       });
-      await this.addEvent(id, 'sale.technician_reassigned', updated.status as any, 'Técnico responsável pela venda alterado pelo administrador', userId, reassignedTechnician);
+      await manager.update(Sale, sale.id, {
+        paymentStatus: 'pendente', billingStatus: plan.action !== 'none' ? 'nao_emitido' : sale.billingStatus,
+        fiscalStatus: plan.action === 'documents' ? 'pendente' : sale.fiscalStatus,
+      });
     }
-    if (changedBilling && cancelInvoiceIds?.length) {
-      const invoices = await this.dataSource.query(
-        `SELECT id, type, certificate_id, number FROM invoices
-         WHERE sale_id = $1 AND status = 'autorizada' AND id::text = ANY($2::text[])`,
-        [id, cancelInvoiceIds],
-      );
-      const failed: string[] = [];
-      let cancelled = 0;
-      for (const invoice of invoices) {
-        try {
-          await this.cancelAuthorizedInvoice(invoice, 'Alteração de valor ou forma de pagamento da venda', userId);
-          cancelled++;
-        } catch (error) {
-          failed.push(invoice.number || invoice.id);
-          this.logger.warn(`Falha ao cancelar nota ${invoice.id} na edição da venda ${id}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      if (cancelled) {
-        await this.dataSource.query(
-          `UPDATE sales SET fiscal_status = 'cancelada', updated_at = NOW()
-           WHERE id = $1 AND NOT EXISTS (
-             SELECT 1 FROM invoices WHERE sale_id = $1 AND status = 'autorizada'
-           )`, [id],
-        );
-      }
-      const result = await this.findOne(id);
-      return Object.assign(result, { invoiceCancellation: { cancelled, failed }, boletoUpdateFailed });
+    if (Number(sale.commissionAmount) !== input.commissionAmount || sale.technicianId !== input.technicianId) {
+      await this.syncSaleCommission(sale.id, { baseValue: input.totalAmount, percentage: input.commissionPercentage, amount: input.commissionAmount }, manager);
+      await manager.update(Commission, { saleId: sale.id, status: In([CommissionStatus.PENDENTE, CommissionStatus.APROVADA]) }, { technicianId: input.technicianId });
     }
-    return updated;
+    await manager.save(SaleEvent, manager.create(SaleEvent, {
+      saleId: sale.id, type: 'sale.updated', description: 'Venda editada sem alterar sua identificação',
+      createdBy: userId, metadata: { action: plan.action, totalAmount: input.totalAmount, installments: input.installments },
+    }));
   }
 
   async remove(id: string, userId?: string): Promise<void> {

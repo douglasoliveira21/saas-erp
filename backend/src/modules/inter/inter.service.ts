@@ -1157,7 +1157,7 @@ export class InterService implements OnModuleInit {
   /**
    * Gera boleto ou PIX para uma venda existente.
    */
-  private async generateInstallmentBoletos(sale: Sale, document: string, dueDateOverrides?: Record<string, string>): Promise<any> {
+  private async generateInstallmentBoletos(sale: Sale, document: string, dueDateOverrides?: Record<string, string>, generationId?: string): Promise<any> {
     const customer = sale.customer;
     const customerEmails = getCustomerEmailRecipients(customer);
     const installments = await this.saleRepo.manager.query(
@@ -1166,7 +1166,8 @@ export class InterService implements OnModuleInit {
     if (!installments.length) throw new HttpException('Parcelas financeiras da venda não foram encontradas', HttpStatus.BAD_REQUEST);
     const existing = await this.saleRepo.manager.query(
       `SELECT codigo_solicitacao,idempotency_key FROM payments WHERE sale_id=$1 AND type='boleto' AND status IN ('pendente','a_receber','vencido')`, [sale.id]);
-    const expectedKeys = new Set(installments.map((item: any) => `charge:${sale.id}:boleto:${item.number}`));
+    const chargePrefix = generationId ? `charge:${sale.id}:edit:${generationId}` : `charge:${sale.id}:boleto`;
+    const expectedKeys = new Set(installments.map((item: any) => `${chargePrefix}:${item.number}`));
     if (existing.some((payment: any) => !expectedKeys.has(payment.idempotency_key))) throw new HttpException('Já existe um boleto único ativo para esta venda. Cancele-o antes de gerar boletos parcelados.', HttpStatus.CONFLICT);
     const existingKeys = new Set(existing.map((payment: any) => payment.idempotency_key));
     const now = new Date(); const today = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
@@ -1175,7 +1176,7 @@ export class InterService implements OnModuleInit {
     const tipoPessoa = document.length > 11 ? 'JURIDICA' : 'FISICA';
     const results: any[] = []; const puladas: any[] = []; const attachments: Array<{ filename: string; content: Buffer; contentType: string }> = [];
     for (const installment of installments) {
-      const key = `charge:${sale.id}:boleto:${installment.number}`;
+      const key = `${chargePrefix}:${installment.number}`;
       if (existingKeys.has(key)) continue;
       let dueDate = this.formatInterDueDate(installment.due_date, `Vencimento da parcela ${installment.number}`);
       if (dueDate < today) {
@@ -1195,19 +1196,20 @@ export class InterService implements OnModuleInit {
         }
       }
       const data: any = {
-        seuNumero: `${sale.id.replace(/-/g,'').substring(0,11)}${String(installment.number).padStart(2,'0')}`,
+        seuNumero: generationId ? crypto.createHash('sha256').update(key).digest('hex').slice(0, 15) : `${sale.id.replace(/-/g,'').substring(0,11)}${String(installment.number).padStart(2,'0')}`,
         valorNominal: Number(installment.value), dataVencimento: dueDate, numDiasAgenda: 30,
         pagador: { cpfCnpj: document, tipoPessoa, nome: customer.name.substring(0,50), endereco:(customer.address||'Rua nao informada').substring(0,90), cidade:(customer.city||'Contagem').substring(0,60), uf:customer.uf||'MG', cep:(customer.cep||'32000000').replace(/\D/g,'').padEnd(8,'0').substring(0,8) },
         mensagem: { linha1:`Parcela ${installment.number}/${sale.installments} da venda`, linha2:`Venda #${sale.id.substring(0,8)}`, linha3:`Multa: ${multa}% apos vencimento`, linha4:`Juros: ${mora}% a.m. apos vencimento` },
       };
       if (multa>0) data.multa={codigo:'PERCENTUAL',taxa:multa}; if (mora>0) data.mora={codigo:'TAXAMENSAL',taxa:mora};
       const result=await this.createBoleto(data); const codigo=result.codigoSolicitacao||'';
+      if (!codigo) throw new HttpException('Banco Inter não retornou o código da parcela.', HttpStatus.BAD_GATEWAY);
       await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key,installment_id,tenant_id) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key,installment.id,this.currentTenantId()]);
-      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`,[codigo]);
+      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id::text=p.sale_id::text`,[codigo]);
       try { attachments.push({filename:`boleto-parcela-${installment.number}-de-${sale.installments}.pdf`,content:await this.getBoletoPdf(codigo),contentType:'application/pdf'}); } catch(error:any) { this.logger.error(`Boleto ${installment.number} criado, mas PDF indisponível: ${error?.message||error}`); }
       results.push({...result,installmentId:installment.id,installmentNumber:installment.number,value:Number(installment.value),dueDate});
     }
-    if (!results.length && !puladas.length) throw new HttpException('Todos os boletos parcelados desta venda já foram emitidos',HttpStatus.CONFLICT);
+    if (!results.length && !puladas.length && !generationId) throw new HttpException('Todos os boletos parcelados desta venda já foram emitidos',HttpStatus.CONFLICT);
     if (results.length) {
       await this.markBoletoAsIssued(sale.id);
       if (customerEmails && attachments.length) await this.mailService.sendMailWithAttachment(customerEmails,`Boletos parcelados da venda #${sale.id.substring(0,8)} - VGON`,`<div style="font-family:Arial,sans-serif"><h2>Boletos da venda</h2><p>Olá ${customer.name},</p><p>Seguem em anexo os ${attachments.length} boletos correspondentes às parcelas da sua compra.</p><p>Confira o vencimento indicado em cada boleto.</p></div>`,attachments);
@@ -1218,6 +1220,7 @@ export class InterService implements OnModuleInit {
     sale: Sale,
     type: 'boleto' | 'pix' = 'boleto',
     installmentDueDates?: Record<string, string>,
+    generationId?: string,
   ): Promise<any> {
     const customer = sale.customer;
 
@@ -1234,17 +1237,24 @@ export class InterService implements OnModuleInit {
     if (type === 'boleto') {
       const installmentSummary = await this.saleRepo.manager.query(
         `SELECT COUNT(*)::int total, COUNT(*) FILTER (WHERE status IN ('pendente','vencido'))::int pending
-         FROM installments WHERE sale_id=$1`,
+         FROM installments WHERE sale_id=$1 AND status != 'cancelado'`,
         [sale.id],
       );
       const financialInstallments = Number(installmentSummary[0]?.total || 0);
       const configuredInstallments = Number(sale.installments || 1);
       const effectiveInstallments = Math.max(configuredInstallments, financialInstallments);
       this.logger.log(`Parcelamento da venda ${sale.id}: configurado=${configuredInstallments}, financeiro=${financialInstallments}, efetivo=${effectiveInstallments}`);
-      if (effectiveInstallments > 1) return this.generateInstallmentBoletos(sale, document, installmentDueDates);
+      if (effectiveInstallments > 1) return this.generateInstallmentBoletos(sale, document, installmentDueDates, generationId);
     }
     const active = await this.saleRepo.manager.query(`SELECT id, codigo_solicitacao, type, status, due_date FROM payments WHERE sale_id=$1 AND type=$2 AND status IN ('pendente','a_receber','vencido') ORDER BY created_at DESC LIMIT 1`, [sale.id, type]);
-    if (active[0]) throw new HttpException(`Já existe ${type === 'boleto' ? 'boleto' : 'PIX'} ativo para esta venda`, HttpStatus.CONFLICT);
+    const chargeKey = generationId ? `charge:${sale.id}:edit:${generationId}` : 'charge:' + sale.id + ':' + type;
+    if (active[0]) {
+      if (generationId) {
+        const [sameGeneration] = await this.saleRepo.manager.query('SELECT id FROM payments WHERE id=$1 AND idempotency_key=$2', [active[0].id, chargeKey]);
+        if (sameGeneration) return { codigoSolicitacao: active[0].codigo_solicitacao };
+      }
+      throw new HttpException(`Já existe ${type === 'boleto' ? 'boleto' : 'PIX'} ativo para esta venda`, HttpStatus.CONFLICT);
+    }
 
     if (type === 'boleto') {
       // Usar data de vencimento da venda ou calcular +7 dias
@@ -1271,7 +1281,7 @@ export class InterService implements OnModuleInit {
       const moraTaxa = parseFloat(Number((sale as any).moraPercentage ?? 0.03).toFixed(2));
 
       const boletoData: any = {
-        seuNumero: sale.id.substring(0, 15),
+        seuNumero: generationId ? crypto.createHash('sha256').update(chargeKey).digest('hex').slice(0, 15) : sale.id.substring(0, 15),
         valorNominal: Number(sale.totalAmount),
         dataVencimento,
         numDiasAgenda: 30,
@@ -1312,6 +1322,7 @@ export class InterService implements OnModuleInit {
 
       // Salvar pagamento no banco
       const codigoSol = result.codigoSolicitacao || '';
+      if (!codigoSol) throw new HttpException('Banco Inter não retornou o código do boleto.', HttpStatus.BAD_GATEWAY);
       // Check if payment already exists
       const existingPayment = await this.saleRepo.manager.query(
         `SELECT id FROM payments WHERE codigo_solicitacao = $1 LIMIT 1`, [codigoSol]
@@ -1320,11 +1331,19 @@ export class InterService implements OnModuleInit {
         await this.saleRepo.manager.query(
           `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, idempotency_key, tenant_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '', 'charge:' + sale.id + ':boleto', this.currentTenantId()]
+          [sale.id, customer.id || null, 'boleto', codigoSol, 'a_receber', Number(sale.totalAmount), customer.name, (customer.cpfCnpj || '').replace(/\D/g, ''), dataVencimento, result.linhaDigitavel || '', result.nossoNumero || '', chargeKey, this.currentTenantId()]
         );
       }
 
-      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`, [codigoSol]);
+      await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id::text=p.sale_id::text`, [codigoSol]);
+      if (generationId) {
+        await this.saleRepo.manager.query(
+          `UPDATE payments p SET installment_id=i.id FROM installments i
+           WHERE p.codigo_solicitacao=$1 AND i.sale_id::text=p.sale_id::text AND i.status IN ('pendente','vencido')
+             AND NOT EXISTS (SELECT 1 FROM installments sibling WHERE sibling.sale_id=i.sale_id
+               AND sibling.status!='cancelado' AND sibling.id<>i.id)`, [codigoSol],
+        );
+      }
       await this.markBoletoAsIssued(sale.id);
 
       // Enviar email com PDF do boleto ao cliente

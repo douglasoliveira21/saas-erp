@@ -18,11 +18,13 @@ import { AuditModule } from '../audit/audit.module';
 import { Sale } from '../sales/entities/sale.entity';
 import { CompanyProfile } from '../company-profile/entities/company-profile.entity';
 import { PlatformModule } from '../platform/platform.module';
+import { FiscalSaleDataService } from './services/fiscal-sale-data.service';
+import { FiscalReissueService } from './services/fiscal-reissue.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Certificate, Invoice, FiscalConfig, FiscalEvent, FinancialTask, FinancialMovement, Sale, CompanyProfile]), MailModule, AuditModule, PlatformModule],
   controllers: [FiscalController],
-  providers: [CertificateService, NfeService, NfseService, DanfePdfService, FiscalIntegrationService, FiscalJobsService],
-  exports: [CertificateService, NfeService, NfseService, DanfePdfService],
+  providers: [CertificateService, NfeService, NfseService, DanfePdfService, FiscalIntegrationService, FiscalJobsService, FiscalSaleDataService, FiscalReissueService],
+  exports: [CertificateService, NfeService, NfseService, DanfePdfService, FiscalSaleDataService, FiscalReissueService],
 })
 export class FiscalModule {}
