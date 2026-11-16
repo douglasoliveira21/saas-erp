@@ -55,7 +55,7 @@ export function SuperAdminLogin() {
       setResent(true)
     } catch (e: any) {
       setError(e.response?.data?.message || 'Não foi possível reenviar o código - faça login novamente')
-      setPendingToken('')
+      if (e.response?.status === 401) setPendingToken('')
     } finally {
       setResending(false)
     }

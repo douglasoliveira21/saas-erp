@@ -1,4 +1,4 @@
-import { BadRequestException, forwardRef, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -55,18 +55,17 @@ export class SuperAdminAuthService {
   }
 
   private async issueAndSendCode(admin: SuperAdmin): Promise<void> {
-    // Invalida qualquer código anterior ainda válido - só o mais recente pode ser usado, evita
-    // confusão se o admin pedir reenvio ou tentar logar de novo antes de usar o primeiro código.
-    await this.loginCodesRepository.update({ superAdminId: admin.id, used: false }, { used: true });
-
     const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
-    await this.loginCodesRepository.save(this.loginCodesRepository.create({
+    const record = await this.loginCodesRepository.save(this.loginCodesRepository.create({
       superAdminId: admin.id,
       codeHash: hashCode(code),
       expiresAt: new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000),
+      used: true,
     }));
 
-    await this.mailService.sendMail(
+    let sent: boolean;
+    try {
+      sent = await this.mailService.sendPlatformSecurityMail(
       admin.email,
       'Código de acesso - Painel Super Admin',
       `<div style="font-family:Arial,sans-serif">
@@ -76,7 +75,20 @@ export class SuperAdminAuthService {
         <p style="font-size:28px;font-weight:bold;letter-spacing:4px">${code}</p>
         <p>Esse código expira em ${CODE_TTL_MINUTES} minutos. Se você não tentou fazer login, ignore este email.</p>
       </div>`,
-    );
+      );
+    } catch {
+      await this.loginCodesRepository.delete(record.id);
+      throw new ServiceUnavailableException('Não foi possível enviar o código. Confira a configuração de e-mail da plataforma no backend e tente novamente.');
+    }
+    if (!sent) {
+      await this.loginCodesRepository.delete(record.id);
+      throw new ServiceUnavailableException('Não foi possível enviar o código. Confira MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS e MAIL_FROM no backend e tente novamente.');
+    }
+    // O reenvio só invalida o código anterior depois que o servidor de e-mail aceita a mensagem.
+    await this.loginCodesRepository.manager.transaction(async manager => {
+      await manager.update(SuperAdminLoginCode, { superAdminId: admin.id, used: false }, { used: true });
+      await manager.update(SuperAdminLoginCode, record.id, { used: false });
+    });
   }
 
   private verifyPendingToken(pendingToken: string): string {

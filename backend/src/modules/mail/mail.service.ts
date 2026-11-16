@@ -7,7 +7,7 @@ import { ILike, Repository } from 'typeorm';
 import { EmailConfig } from './entities/email-config.entity';
 import { EmailDeliveryLog } from './entities/email-delivery-log.entity';
 import { AuditService } from '../audit/audit.service';
-import { currentTenantId } from '../../common/tenant/tenant-context.service';
+import { currentTenantId, runInTenant } from '../../common/tenant/tenant-context.service';
 
 type MailAttachment = { filename: string; content: Buffer; contentType: string };
 
@@ -130,7 +130,7 @@ export class MailService implements OnModuleInit {
     return Boolean(config.host && config.authUser && config.authPass);
   }
 
-  private createTransporter(config: EmailConfig): nodemailer.Transporter {
+  private createTransporter(config: EmailConfig, securityMail = false): nodemailer.Transporter {
     const port = Number(config.port || 587);
     return nodemailer.createTransport({
       host: config.host,
@@ -145,6 +145,7 @@ export class MailService implements OnModuleInit {
         ciphers: 'SSLv3',
       },
       authMethod: 'LOGIN',
+      ...(securityMail ? { connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000 } : {}),
     } as any);
   }
 
@@ -224,11 +225,18 @@ export class MailService implements OnModuleInit {
     return this.sendMailWithAttachment(to, subject, html, []);
   }
 
-  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = [], options: { isTest?: boolean; userId?: string; throwOnError?: boolean } = {}): Promise<boolean> {
+  async sendPlatformSecurityMail(to: string, subject: string, html: string): Promise<boolean> {
+    return runInTenant(null, () => this.sendMailWithAttachment(to, subject, html, [], { platformSecurity: true }));
+  }
+
+  async sendMailWithAttachment(to: string, subject: string, html: string, attachments: MailAttachment[] = [], options: { isTest?: boolean; userId?: string; throwOnError?: boolean; platformSecurity?: boolean } = {}): Promise<boolean> {
     let provider = 'smtp';
     try {
-      const config = await this.getConfig();
+      const config = options.platformSecurity ? this.getEnvConfig() : await this.getConfig();
       provider = config.provider || 'smtp';
+      if (options.platformSecurity && !this.isConfigured(config)) {
+        throw new Error('E-mail da plataforma não configurado. Confira MAIL_HOST, MAIL_PORT, MAIL_USER, MAIL_PASS e MAIL_FROM no backend.');
+      }
       // Dentro de um tenant só se envia pela conta DELE; sem configuração o envio é recusado e fica
       // registrado no histórico de envios com o motivo.
       if (currentTenantId() && !this.isConfigured(config)) throw new Error(MAIL_NOT_CONFIGURED_MESSAGE);
@@ -237,7 +245,11 @@ export class MailService implements OnModuleInit {
       } else {
         const fromName = config.fromName || 'VGON';
         const fromEmail = config.fromEmail || config.authUser;
-        await this.transporter.sendMail({ from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail, to, cc: config.copyEnabled && config.copyEmail ? config.copyEmail : undefined, subject, html, attachments });
+        const transporter = options.platformSecurity ? this.createTransporter(config, true) : this.transporter;
+        const result = await transporter.sendMail({ from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail, to, cc: !options.platformSecurity && config.copyEnabled && config.copyEmail ? config.copyEmail : undefined, subject, html, attachments });
+        if (options.platformSecurity && Array.isArray(result.rejected) && result.rejected.length) {
+          throw new Error('O servidor de e-mail recusou o destinatário do código de acesso.');
+        }
       }
       this.logger.log(`Email ${provider} enviado para ${to}`);
       await this.saveDeliveryLog(to, subject, provider, 'sent', null, attachments.length, options);
