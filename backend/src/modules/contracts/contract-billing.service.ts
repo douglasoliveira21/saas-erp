@@ -284,7 +284,7 @@ export class ContractBillingService implements OnModuleInit {
         },
       };
 
-      const boletoResult = await this.interService.createBoleto(boletoData);
+      const boletoResult = await this.interService.createBoleto(boletoData, `contract:${contract.id}:${billingPeriod}:due:${dueDateStr}`);
       boletoCode = boletoResult.codigoSolicitacao || '';
 
       this.logger.log(`Boleto gerado: ${boletoCode} - Valor: R$ ${boletoValue.toFixed(2)}`);
@@ -779,7 +779,7 @@ export class ContractBillingService implements OnModuleInit {
       },
     };
 
-    const boletoResult = await this.interService.createBoleto(boletoData);
+    const boletoResult = await this.interService.createBoleto(boletoData, `contract:${contract.id}:${billingPeriod}:due:${dueDateStr}`);
     const boletoCode = boletoResult.codigoSolicitacao || '';
 
     // Save payment record

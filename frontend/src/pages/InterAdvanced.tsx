@@ -2,30 +2,30 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useFeedback } from '../components/ui'
 import { FileSearch, KeyRound, RefreshCw, RotateCw, Trash2 } from 'lucide-react'
+import { BbBankConfigForm } from '../components/BbBankConfigForm'
 
 const emptyBankForm = { environment: 'sandbox', clientId: '', clientSecret: '', certificate: '', privateKey: '', pixKey: '', account: '', active: true }
 
 function BankConfigForm() {
   const [config, setConfig] = useState<any>(null)
-  const [myBank, setMyBank] = useState<{ name: string; provider: string | null; hasIntegration: boolean } | null | undefined>(undefined)
+  const [myBank, setMyBank] = useState<{ code?: string; name: string; provider: string | null; hasIntegration: boolean } | null | undefined>(undefined)
   const [form, setForm] = useState(emptyBankForm)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
   async function load() {
-    const [{ data }, myTenant] = await Promise.all([
-      api.get('/inter/bank-config'),
-      api.get('/catalogs/my-tenant').then(r => r.data).catch(() => null),
-    ])
-    setConfig(data)
+    const { data: myTenant } = await api.get('/catalogs/my-tenant')
     setMyBank(myTenant?.bank || null)
+    if (myTenant?.bank?.code === '001' || myTenant?.bank?.provider === 'bb') return
+    const { data } = await api.get('/inter/bank-config')
+    setConfig(data)
     setForm({
       environment: data.environment || 'sandbox', clientId: data.clientId || '', clientSecret: '',
       certificate: '', privateKey: '', pixKey: data.pixKey || '', account: data.account || '', active: data.active ?? true,
     })
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load().catch(() => setMsg('Não foi possível carregar a configuração bancária. Atualize a página.')) }, [])
 
   async function save() {
     setSaving(true); setMsg('')
@@ -40,7 +40,8 @@ function BankConfigForm() {
     }
   }
 
-  if (!config || myBank === undefined) return null
+  if (myBank?.code === '001' || myBank?.provider === 'bb') return <BbBankConfigForm />
+  if (!config || myBank === undefined) return msg ? <p role="alert" className="text-sm text-red-700">{msg}</p> : null
 
   // Tenant vinculado a um banco sem integração pronta ainda (Santander/Itaú/BB/Caixa) - mostra um
   // aviso claro em vez do formulário do Inter, que não serviria pra nada nesse caso. Sem banco
@@ -49,7 +50,7 @@ function BankConfigForm() {
     return (
       <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-amber-800"><KeyRound className="h-4 w-4" /> Banco {myBank.name}</div>
-        <p className="text-sm text-amber-700">Este cliente está vinculado ao {myBank.name}, mas a integração com esse banco ainda não foi implementada no sistema — só o Banco Inter emite boleto/PIX automaticamente por enquanto. Fale com o suporte pra saber a previsão.</p>
+        <p className="text-sm text-amber-700">Este cliente está vinculado ao {myBank.name}, mas a integração com esse banco ainda não está disponível. As emissões automáticas estão disponíveis para Banco Inter e Banco do Brasil.</p>
       </div>
     )
   }
@@ -149,8 +150,8 @@ export function InterAdvanced() {
   async function cancelBatch(e: React.FormEvent) {
     e.preventDefault()
     const codes = batchCodes.split(/\r?\n|,/).map((c) => c.trim()).filter(Boolean)
-    if (!codes.length || !await confirmAction({ title: 'Cancelar boletos', message: `Confirma o cancelamento de ${codes.length} boleto(s) no Banco Inter?`, confirmLabel: 'Cancelar boletos', danger: true })) return
-    await act(() => api.post('/inter/cancel-batch', { codigoSolicitacoes: codes, reason: 'ACERTOS' }), 'Cancelando boletos', 'Cancelamento confirmado pelo Banco Inter')
+    if (!codes.length || !await confirmAction({ title: 'Cancelar boletos', message: `Confirma o cancelamento de ${codes.length} boleto(s) no banco de origem?`, confirmLabel: 'Cancelar boletos', danger: true })) return
+    await act(() => api.post('/inter/cancel-batch', { codigoSolicitacoes: codes, reason: 'ACERTOS' }), 'Cancelando boletos', 'Solicitações de cancelamento processadas; confira os resultados')
     setBatchCodes('')
   }
 
@@ -163,7 +164,7 @@ export function InterAdvanced() {
     setError('')
     setSuccess('')
     try {
-      await runOperation(request, { title, processingMessage: 'Aguardando a confirmação do Banco Inter.', successMessage, errorMessage: (error: any) => error.response?.data?.message || 'Falha na operação' })
+      await runOperation(request, { title, processingMessage: 'Aguardando a confirmação do banco.', successMessage, errorMessage: (error: any) => error.response?.data?.message || 'Falha na operação' })
       setSuccess(successMessage)
       await loadLogs()
     } catch (err: any) {
@@ -176,7 +177,7 @@ export function InterAdvanced() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{bankName} Avançado</h1>
-          <p className="text-sm text-gray-500">Logs, reprocessamento, comparação, vencidos e cancelamento em lote.</p>
+          <p className="text-sm text-gray-500">Credenciais, consultas, vencidos e cancelamento em lote.</p>
         </div>
         <button onClick={loadLogs} className="inline-flex items-center gap-2 rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white"><RefreshCw className="h-4 w-4" /> Atualizar</button>
       </div>
@@ -188,7 +189,7 @@ export function InterAdvanced() {
 
       <section className="grid gap-6 xl:grid-cols-[1fr_420px]">
         <div className="rounded-lg border border-gray-200 bg-white">
-          <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900"><RotateCw className="h-4 w-4" /> Logs do webhook</div>
+          <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900"><RotateCw className="h-4 w-4" /> Histórico de webhooks do Banco Inter</div>
           <div className="overflow-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50"><tr><th className="px-3 py-2 text-left">Data</th><th className="px-3 py-2 text-left">Ação</th><th className="px-3 py-2 text-left">Entidade</th><th className="px-3 py-2 text-left">Ações</th></tr></thead>
@@ -203,7 +204,7 @@ export function InterAdvanced() {
 
         <div className="space-y-6">
           <form onSubmit={comparePayment} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900"><FileSearch className="h-4 w-4" /> Comparar local x Inter</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900"><FileSearch className="h-4 w-4" /> Comparar sistema e banco de origem</div>
             <input required value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="Código de solicitação" className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
             <button className="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white">Comparar</button>
             {compare && <pre className="max-h-80 overflow-auto rounded-md bg-gray-50 p-3 text-xs text-gray-700">{JSON.stringify(compare, null, 2)}</pre>}

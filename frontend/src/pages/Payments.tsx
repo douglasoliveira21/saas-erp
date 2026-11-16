@@ -350,11 +350,11 @@ export function Payments() {
   }
 
   async function cancelPayment(payment: Payment) {
-    if (!await confirmAction({ title: 'Cancelar boleto', message: 'O cancelamento será solicitado diretamente ao Banco Inter. Deseja continuar?', confirmLabel: 'Cancelar boleto', danger: true })) return
+    if (!await confirmAction({ title: 'Cancelar boleto', message: 'O cancelamento será solicitado diretamente ao banco que emitiu o boleto. Deseja continuar?', confirmLabel: 'Cancelar boleto', danger: true })) return
     try {
       await runOperation(
         () => api.post('/inter/cancel-batch', { codigoSolicitacoes: [payment.codigoSolicitacao], reason: 'ACERTOS' }),
-        { title: 'Cancelando boleto', processingMessage: 'Enviando a solicitação e aguardando a confirmação do Banco Inter.', successMessage: 'Boleto cancelado e confirmado pelo Banco Inter.', errorMessage: (error: any) => error.response?.data?.message || 'O Banco Inter não confirmou o cancelamento.' },
+        { title: 'Cancelando boleto', processingMessage: 'Enviando a solicitação e aguardando a confirmação do banco.', successMessage: 'Boleto cancelado e confirmado pelo banco.', errorMessage: (error: any) => error.response?.data?.message || 'O banco não confirmou o cancelamento.' },
       )
       await load()
     } catch (error: any) {
@@ -1227,7 +1227,7 @@ export function Payments() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Observação (opcional)</label>
                 <input className="input" value={adjustNote} onChange={e => setAdjustNote(e.target.value)} placeholder="Ex.: pago com 5 dias de atraso" />
               </div>
-              <p className="text-xs text-gray-500">Corrige apenas o valor registrado no sistema, para o financeiro (caixa, DRE e relatórios) bater com o que entrou. Nada é alterado no Banco Inter. O valor não pode ser menor que o original.</p>
+              <p className="text-xs text-gray-500">Corrige apenas o valor registrado no sistema, para o financeiro (caixa, DRE e relatórios) bater com o que entrou. Nada é alterado no banco. O valor não pode ser menor que o original.</p>
             </div>
             <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
               <button onClick={() => setAdjustingPayment(null)} className="btn btn-secondary">Cancelar</button>

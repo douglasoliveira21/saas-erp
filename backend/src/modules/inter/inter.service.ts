@@ -14,6 +14,7 @@ import { BankCredentialsService, InterCredentials } from './bank-credentials.ser
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
 import { adjustReceivedValue, ReceivedValueAdjustment } from './received-value-adjustment';
 import { BRT_TODAY_SQL, todayInBrasilia } from '../../common/date';
+import { BancoBrasilService } from './banco-brasil.service';
 
 
 interface TokenCache {
@@ -41,6 +42,7 @@ export class InterService implements OnModuleInit {
     private readonly auditService: AuditService,
     private readonly tenantContext: TenantContextService,
     private readonly bankCredentials: BankCredentialsService,
+    private readonly bb: BancoBrasilService,
   ) {}
 
   private baseUrlFor(environment: 'sandbox' | 'production'): string {
@@ -235,7 +237,8 @@ export class InterService implements OnModuleInit {
       linha4?: string;
       linha5?: string;
     };
-  }) {
+  }, requestKey?: string) {
+    if (await this.bb?.config.isSelected()) return this.bb.createBoleto(data, requestKey);
     const tenantId = this.currentTenantId();
     this.logger.log(`Criando boleto - seuNumero: ${data.seuNumero}, valor: ${data.valorNominal}`);
 
@@ -271,6 +274,7 @@ export class InterService implements OnModuleInit {
    * Consulta boleto via GET /cobranca/v3/cobrancas/{codigoSolicitacao}
    */
   async getBoleto(codigoSolicitacao: string, tenantId?: string | null) {
+    if (codigoSolicitacao.startsWith('bb:')) return this.bb.get(codigoSolicitacao, 'boleto', tenantId);
     const resolvedTenantId = tenantId !== undefined ? tenantId : this.currentTenantId();
     this.logger.log(`Consultando boleto: ${codigoSolicitacao}`);
 
@@ -314,6 +318,12 @@ export class InterService implements OnModuleInit {
    */
   async cancelBoleto(codigoSolicitacao: string, motivoCancelamento = 'ACERTOS'): Promise<any> {
     const tenantId = this.currentTenantId();
+    if (codigoSolicitacao.startsWith('bb:')) {
+      const result = await this.bb.cancel(codigoSolicitacao, 'boleto');
+      await this.markPaymentCancelledLocally(codigoSolicitacao, tenantId);
+      await this.auditInter('bb.boleto_cancelado', null, { codigoSolicitacao });
+      return result;
+    }
     this.logger.log(`Cancelando boleto no Banco Inter: ${codigoSolicitacao}`);
 
     // Retry loop for EM_PROCESSAMENTO state
@@ -382,7 +392,8 @@ export class InterService implements OnModuleInit {
 
   async cancelPix(txid: string): Promise<void> {
     const tenantId = this.currentTenantId();
-    await this.callInter(tenantId, 'pix.write', 'PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { 'Content-Type': 'application/json' });
+    if (txid.startsWith('bb:')) await this.bb.cancel(txid, 'pix');
+    else await this.callInter(tenantId, 'pix.write', 'PATCH', `/pix/v2/cob/${encodeURIComponent(txid)}`, { status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR' }, { 'Content-Type': 'application/json' });
     await this.saleRepo.manager.query(
       `UPDATE payments SET status='cancelado', updated_at=NOW() WHERE codigo_solicitacao=$1${tenantId ? ' AND tenant_id=$2' : ''}`,
       tenantId ? [txid, tenantId] : [txid],
@@ -457,16 +468,16 @@ export class InterService implements OnModuleInit {
       },
       mensagem: { linha1: 'Boleto reemitido com nova data de vencimento', linha2: `Venda #${payment.sale_id.substring(0, 8)}` },
     };
-    const result = await this.createBoleto(boletoData);
+    const result = await this.createBoleto(boletoData, `reissue:${paymentId}:${newDueDateFormatted}:${finalValue}`);
     const newCodigo = result.codigoSolicitacao;
     if (!newCodigo) throw new HttpException('O Banco Inter não retornou o código do novo boleto.', HttpStatus.BAD_GATEWAY);
 
     const newPaymentId = await this.saleRepo.manager.transaction(async manager => {
       const [inserted] = await manager.query(
         `INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, linha_digitavel, nosso_numero, installment_id, tenant_id, account_id)
-         VALUES ($1,$2,'boleto','a_receber',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+         VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [
-          payment.sale_id, payment.customer_id, finalValue, customer.name, document,
+          payment.sale_id, payment.customer_id, newCodigo, finalValue, customer.name, document,
           newDueDateFormatted, result.linhaDigitavel || '', result.nossoNumero || '',
           installment.id, tenantId, installment.account_id,
         ],
@@ -799,7 +810,11 @@ export class InterService implements OnModuleInit {
     chave: string;
     solicitacaoPagador?: string;
     infoAdicionais?: Array<{ nome: string; valor: string }>;
-  }) {
+  }, requestKey?: string) {
+    if (await this.bb?.config.isSelected()) {
+      if (!requestKey) throw new HttpException('Referência da venda obrigatória para emitir Pix BB.', HttpStatus.BAD_REQUEST);
+      return this.bb.createPix(data, requestKey);
+    }
     const tenantId = this.currentTenantId();
     // PIX precisa de token com escopo específico
     let response: any;
@@ -825,6 +840,7 @@ export class InterService implements OnModuleInit {
    * Consulta QR Code PIX via GET /pix/v2/cob/{txid}
    */
   async getPixQrCode(txid: string, tenantId?: string | null) {
+    if (txid.startsWith('bb:')) return this.bb.get(txid, 'pix', tenantId);
     const resolvedTenantId = tenantId !== undefined ? tenantId : this.currentTenantId();
     this.logger.log(`Consultando PIX QR Code: ${txid}`);
 
@@ -1202,7 +1218,7 @@ export class InterService implements OnModuleInit {
         mensagem: { linha1:`Parcela ${installment.number}/${sale.installments} da venda`, linha2:`Venda #${sale.id.substring(0,8)}`, linha3:`Multa: ${multa}% apos vencimento`, linha4:`Juros: ${mora}% a.m. apos vencimento` },
       };
       if (multa>0) data.multa={codigo:'PERCENTUAL',taxa:multa}; if (mora>0) data.mora={codigo:'TAXAMENSAL',taxa:mora};
-      const result=await this.createBoleto(data); const codigo=result.codigoSolicitacao||'';
+      const result=await this.createBoleto(data, key); const codigo=result.codigoSolicitacao||'';
       if (!codigo) throw new HttpException('Banco Inter não retornou o código da parcela.', HttpStatus.BAD_GATEWAY);
       await this.saleRepo.manager.query(`INSERT INTO payments (sale_id,customer_id,type,codigo_solicitacao,status,value,customer_name,customer_doc,due_date,linha_digitavel,nosso_numero,idempotency_key,installment_id,tenant_id) VALUES ($1,$2,'boleto',$3,'a_receber',$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`,[sale.id,customer.id||null,codigo,Number(installment.value),customer.name,document,dueDate,result.linhaDigitavel||'',result.nossoNumero||'',key,installment.id,this.currentTenantId()]);
       await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id::text=p.sale_id::text`,[codigo]);
@@ -1318,7 +1334,7 @@ export class InterService implements OnModuleInit {
 
       this.logger.log('Solicitação de boleto preparada - venda: ' + sale.id + ', vencimento: ' + dataVencimento + ', valor: ' + Number(sale.totalAmount).toFixed(2));
 
-      const result = await this.createBoleto(boletoData);
+      const result = await this.createBoleto(boletoData, chargeKey);
 
       // Salvar pagamento no banco
       const codigoSol = result.codigoSolicitacao || '';
@@ -1390,7 +1406,8 @@ export class InterService implements OnModuleInit {
     } else {
       // PIX imediato
       const tenantId = this.currentTenantId();
-      const creds = await this.bankCredentials.getEffectiveCredentials(tenantId);
+      const isBb = await this.bb?.config.isSelected();
+      const creds = isBb ? { pixKey: (await this.bb.config.resolve()).row.settings.pixKey } : await this.bankCredentials.getEffectiveCredentials(tenantId);
       const pixData = {
         calendario: { expiracao: 3600 }, // 1 hora
         valor: { original: Number(sale.totalAmount).toFixed(2) },
@@ -1402,10 +1419,10 @@ export class InterService implements OnModuleInit {
         ],
       };
 
-      const result = await this.createPixImmediate(pixData);
+      const result = await this.createPixImmediate(pixData, chargeKey);
       const pixCode = result.txid || result.codigoSolicitacao || result.loc?.id;
       if (!pixCode) throw new HttpException('Banco Inter não retornou identificador do PIX', HttpStatus.BAD_GATEWAY);
-      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, pix_copia_e_cola, idempotency_key, tenant_id) VALUES ($1,$2,'pix',$3,'a_receber',$4,$5,$6,CURRENT_DATE,$7,$8,$9)`, [sale.id, customer.id || null, pixCode, Number(sale.totalAmount), customer.name, document, result.pixCopiaECola || result.pixCopiaEColaBase64 || '', `charge:${sale.id}:pix`, this.currentTenantId()]);
+      await this.saleRepo.manager.query(`INSERT INTO payments (sale_id, customer_id, type, codigo_solicitacao, status, value, customer_name, customer_doc, due_date, pix_copia_e_cola, idempotency_key, tenant_id) VALUES ($1,$2,'pix',$3,'a_receber',$4,$5,$6,CURRENT_DATE,$7,$8,$9)`, [sale.id, customer.id || null, pixCode, Number(sale.totalAmount), customer.name, document, result.pixCopiaECola || result.pixCopiaEColaBase64 || '', chargeKey, this.currentTenantId()]);
       await this.saleRepo.manager.query(`UPDATE payments p SET account_id=a.id FROM accounts_receivable a WHERE p.codigo_solicitacao=$1 AND a.sale_id=p.sale_id`, [pixCode]);
       await this.saleRepo.manager.query(`UPDATE sales SET billing_status='emitido', updated_at=NOW() WHERE id=$1`, [sale.id]);
 
@@ -1428,6 +1445,7 @@ export class InterService implements OnModuleInit {
    * GET /banking/v2/extrato?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD
    */
   async getExtrato(dataInicio: string, dataFim: string): Promise<any> {
+    if (await this.bb?.config.isSelected()) throw new HttpException('A consulta de extratos do Banco do Brasil ainda não está disponível. Esta integração contempla boletos e Pix.', HttpStatus.BAD_REQUEST);
     const tenantId = this.currentTenantId();
     this.logger.log(`Buscando extrato Inter: ${dataInicio} a ${dataFim}`);
 
@@ -1447,6 +1465,7 @@ export class InterService implements OnModuleInit {
    * Obtém PDF do boleto (com retry automático caso o banco ainda esteja processando)
    */
   async getBoletoPdf(codigoSolicitacao: string, retries = 2): Promise<Buffer> {
+    if (codigoSolicitacao.startsWith('bb:')) return this.bb.pdf(codigoSolicitacao);
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const boleto = await this.getBoleto(codigoSolicitacao);

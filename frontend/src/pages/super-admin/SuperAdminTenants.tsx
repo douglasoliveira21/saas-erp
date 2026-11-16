@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Plus, X, Copy, Users, Trash2, KeyRound, Ban, CheckCircle2 } from 'lucide-react'
 import { superAdminApi } from '../../services/superAdminApi'
+import { BbBankConfigForm } from '../../components/BbBankConfigForm'
 
 interface Plan { id: string; name: string }
-interface Bank { id: string; name: string; hasIntegration: boolean; status: 'suportado' | 'em_teste' | 'nao_suportado' }
+interface Bank { id: string; name: string; code?: string; provider?: string; hasIntegration: boolean; status: 'suportado' | 'em_teste' | 'nao_suportado' }
 interface Municipality { id: string; name: string; uf: string; status: 'suportado' | 'em_teste' | 'nao_suportado' }
 interface Tenant {
   id: string; name: string; slug: string; document: string | null; status: string
@@ -174,6 +175,7 @@ export function SuperAdminTenants() {
   const [saving, setSaving] = useState(false)
   const [created, setCreated] = useState<{ adminEmail: string; tempPassword: string } | null>(null)
   const [usersModalTenant, setUsersModalTenant] = useState<Tenant | null>(null)
+  const [bankTenant, setBankTenant] = useState<Tenant | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null)
 
   async function load() {
@@ -311,6 +313,7 @@ export function SuperAdminTenants() {
                   <td className="p-3">
                     <div className="flex justify-end gap-1">
                       <button title="Gerenciar usuários" onClick={() => setUsersModalTenant(tenant)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"><Users className="h-4 w-4" /></button>
+                      {(tenant.bank?.code === '001' || tenant.bank?.provider === 'bb') && <button title="Configurar Banco do Brasil" onClick={() => setBankTenant(tenant)} className="rounded p-1.5 text-amber-400 hover:bg-gray-800"><KeyRound className="h-4 w-4" /></button>}
                       <button title="Excluir cliente" onClick={() => setDeleteTarget(tenant)} className="rounded p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   </td>
@@ -385,6 +388,7 @@ export function SuperAdminTenants() {
       )}
 
       {usersModalTenant && <TenantUsersModal tenant={usersModalTenant} onClose={() => setUsersModalTenant(null)} />}
+      {bankTenant && <div role="dialog" aria-modal="true" aria-label={`Banco do Brasil de ${bankTenant.name}`} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-gray-900 p-5"><div className="mb-4 flex items-center justify-between text-white"><h2 className="font-semibold">Banco do Brasil — {bankTenant.name}</h2><button aria-label="Fechar" onClick={() => setBankTenant(null)}><X className="h-5 w-5" /></button></div><BbBankConfigForm tenantId={bankTenant.id} /></div></div>}
       {deleteTarget && (
         <DeleteTenantModal
           tenant={deleteTarget}

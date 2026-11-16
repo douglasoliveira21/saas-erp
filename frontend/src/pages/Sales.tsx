@@ -139,7 +139,7 @@ export function Sales() {
         () => api.post(`/inter/generate/${id}/${type}`, installmentDueDates ? { installmentDueDates } : undefined),
         {
           title: type === 'pix' ? 'Gerando PIX' : 'Emitindo boleto',
-          processingMessage: type === 'pix' ? 'Registrando a cobrança PIX no Banco Inter.' : 'Enviando as parcelas e confirmando cada boleto no Banco Inter.',
+          processingMessage: type === 'pix' ? 'Registrando a cobrança PIX no banco da empresa.' : 'Enviando as parcelas e confirmando cada boleto no banco da empresa.',
           successMessage: (res: any) => {
             const quantity = Number(res.data?.data?.quantidade || 0)
             return quantity > 1 ? `${quantity} boletos foram emitidos e confirmados com sucesso.` : `${type === 'pix' ? 'PIX' : 'Boleto'} emitido e confirmado com sucesso.`

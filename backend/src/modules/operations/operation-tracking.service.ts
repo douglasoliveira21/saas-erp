@@ -12,7 +12,7 @@ export class OperationTrackingService {
     if (Array.isArray(value)) return value.slice(0, 50).map(item => this.sanitize(item, depth + 1));
     if (!value || typeof value !== 'object') return typeof value === 'string' && value.length > 2000 ? value.slice(0, 2000) + '…' : value;
     return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [key,
-      /password|senha|token|secret|certificate|certificado|authorization|cookie|pfx|private.?key|client.?secret/i.test(key) ? '***' : this.sanitize(item, depth + 1),
+      /password|senha|token|secret|certificate|certificado|authorization|cookie|pfx|private.?key|client.?secret|app.?key|client.?id/i.test(key) ? '***' : this.sanitize(item, depth + 1),
     ]));
   }
 
