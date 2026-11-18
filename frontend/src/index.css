@@ -16,6 +16,9 @@
   }
 
   html {
+    /* Mantém os controles nativos e a página na paleta do ERP e evita
+       a conversão automática de cores feita por alguns navegadores. */
+    color-scheme: only light;
     scroll-behavior: smooth;
   }
 }

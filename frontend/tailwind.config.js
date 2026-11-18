@@ -1,5 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // O ERP usa uma paleta clara. Variantes antigas dark: só devem ser ativadas
+  // por um tema explícito, nunca parcialmente pela preferência do navegador.
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
