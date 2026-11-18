@@ -4,16 +4,24 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install once, with bounded retries for temporary registry connection failures.
+RUN npm install --include=dev --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-factor=2 \
+    --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000 \
+    --fetch-timeout=180000
 
 # Copy source code
 COPY . .
 
 # Build the application
 RUN npm run build
+
+# Reuse the packages already downloaded and built on the same Alpine image.
+# Pruning is offline and does not rerun native dependency install scripts.
+FROM builder AS production-deps
+RUN npm prune --omit=dev --offline --ignore-scripts --no-audit --no-fund
 
 # Production stage
 FROM node:20-alpine AS production
@@ -26,8 +34,8 @@ RUN apk add --no-cache postgresql-client
 # Copy package files
 COPY package.json ./
 
-# Install production dependencies only
-RUN npm install --omit=dev
+# Copy production dependencies without downloading them a second time.
+COPY --from=production-deps /app/node_modules ./node_modules
 
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist

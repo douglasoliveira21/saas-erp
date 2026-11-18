@@ -1,13 +1,17 @@
 # Frontend Dockerfile - React + Vite + Nginx
-FROM node:20-alpine AS builder
+# Debian/glibc avoids the native Rollup parser failure seen on Alpine/musl.
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json package-lock.json ./
 
-# Install dependencies
-RUN npm install
+# Install the locked build toolchain, including platform-specific native packages.
+RUN npm ci --include=dev --include=optional --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-factor=2 \
+    --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000 \
+    --fetch-timeout=180000
 
 # Copy source code
 COPY . .
@@ -21,8 +25,8 @@ ENV VITE_API_URL=$VITE_API_URL
 ARG VITE_TURNSTILE_SITE_KEY=
 ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
 
-# Build the application (skip tsc strict checking for production build)
-RUN npx vite build
+# Validate TypeScript and build using the locally installed Vite.
+RUN npm run build
 
 # Production stage - Nginx
 FROM nginx:alpine AS production
