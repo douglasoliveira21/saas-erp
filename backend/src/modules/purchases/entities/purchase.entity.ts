@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { PurchaseItem } from './purchase-item.entity';
@@ -14,6 +15,7 @@ import { PurchaseQuote } from './purchase-quote.entity';
 import { PurchaseAttachment } from './purchase-attachment.entity';
 
 @Entity('purchases')
+@Index('purchase_xml_access_key', ['tenantId','xmlAccessKey'], {unique:true, where:'"xml_access_key" IS NOT NULL'})
 export class Purchase {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -66,6 +68,12 @@ export class Purchase {
 
   @Column({ name: 'invoice_number', length: 100, nullable: true })
   invoiceNumber: string;
+
+  @Column({ name: 'xml_access_key', length: 44, nullable: true })
+  xmlAccessKey: string;
+
+  @Column({ name: 'imported_xml', type: 'text', nullable: true, select: false })
+  importedXml: string;
 
   @Column({ name: 'selected_quote_id', type: 'uuid', nullable: true })
   selectedQuoteId: string;

@@ -4,11 +4,12 @@ import { useAuth } from '../contexts/AuthContext'
 import { ActionMenu, useFeedback } from '../components/ui'
 import { Upload, Shield, FileText, XCircle, AlertTriangle, Settings, RefreshCw, Plus, Check, X, Send, Download, Eye } from 'lucide-react'
 import { localToday } from '../utils/format'
+import { XmlEntryImport, xmlEntryPaymentLabels } from '../components/XmlEntryImport'
 
 interface Certificate { id: string; name: string; companyName: string; cnpj: string; validFrom: string; validUntil: string; isActive: boolean }
 interface Invoice { id: string; type: string; number: number; documentNumber?: string | null; series: number; accessKey: string; protocolNumber: string; verificationCode: string; status: string; recipientName: string; recipientCnpj: string; totalValue: number; taxDetails?: any; rejectionReason: string; cancelReason: string; issuedAt: string; createdAt: string; xmlSent: string; xmlAuthorized: string; observations: string; sale?: any }
 interface Sale { id: string; customer: { name: string; cpfCnpj: string; email: string; address: string; city: string; uf: string; neighborhood: string; cep: string; stateRegistration: string }; totalAmount: number; status: string; paymentMethod: string; items: any[] }
-interface XmlImportSummary { imported: number; skipped: number; unchanged: number; importedItems: any[]; updatedItems: any[]; unchangedItems: any[]; errors: any[]; total: number }
+interface XmlImportSummary { imported: number; skipped: number; unchanged: number; importedItems: any[]; updatedItems: any[]; unchangedItems: any[]; errors: any[]; total: number; destination?: string; invoiceNumber?: string; supplierName?: string; paymentMethod?: string; totalValue?: number; installments?: Array<{id:string;number:number;dueDate:string;value:number}> }
 
 const statusLabels: Record<string, string> = { pendente: 'Pendente', processando: 'Processando', autorizada: 'Autorizada', rejeitada: 'Rejeitada', cancelada: 'Cancelada' }
 const statusColors: Record<string, string> = { pendente: 'bg-yellow-100 text-yellow-700', processando: 'bg-blue-100 text-blue-700', autorizada: 'bg-green-100 text-green-700', rejeitada: 'bg-red-100 text-red-700', cancelada: 'bg-gray-100 text-gray-700' }
@@ -27,7 +28,7 @@ const SERVICE_CODES: Array<[string, string]> = [
 export function Fiscal() {
   const { isAdmin } = useAuth()
   const { runOperation } = useFeedback()
-  const [tab, setTab] = useState<'invoices' | 'emit' | 'certificates' | 'config'>('invoices')
+  const [tab, setTab] = useState<'invoices' | 'emit' | 'import' | 'certificates' | 'config'>('invoices')
   const [nfseProviderLabel, setNfseProviderLabel] = useState('')
   useEffect(() => {
     api.get('/catalogs/my-tenant').then(r => {
@@ -43,6 +44,26 @@ export function Fiscal() {
   const [success, setSuccess] = useState('')
   const [xmlImportSummary, setXmlImportSummary] = useState<XmlImportSummary | null>(null)
   const [fiscalConfig, setFiscalConfig] = useState<any>(null)
+
+  function handleXmlImported(result: any, preview: any) {
+    setXmlImportSummary(result)
+    if (tab === 'emit') {
+      setRecipientName(preview.supplierName)
+      setRecipientCnpj(preview.supplierDocument)
+      setRecipientAddress(preview.supplierAddress)
+      setRecipientCity(preview.supplierCity)
+      setRecipientUf(preview.supplierUf)
+      setRecipientCep(preview.supplierCep)
+      setTotalValue(String(preview.totalValue))
+      const importedWindow = window as any
+      importedWindow.__nfeImportedItems = preview.items
+    }
+    setSuccess('')
+    setError('')
+    if (result.destination === 'product') {
+      try { sessionStorage.setItem('last-xml-import-summary', JSON.stringify(result)) } catch {}
+    }
+  }
 
   // Upload cert
   const [uploading, setUploading] = useState(false)
@@ -166,6 +187,7 @@ export function Fiscal() {
 
   // Ao selecionar venda, preencher dados
   function onSelectSale(saleId: string) {
+    delete (window as any).__nfeImportedItems
     setSelectedSaleId(saleId)
     const sale = sales.find(s => s.id === saleId)
     if (sale) {
@@ -437,8 +459,9 @@ export function Fiscal() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex flex-wrap gap-2 mb-6">
         <button onClick={() => setTab('invoices')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (tab === 'invoices' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Notas Emitidas</button>
+        <button onClick={() => setTab('import')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (tab === 'import' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Importar XML</button>
         <button onClick={() => setTab('emit')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (tab === 'emit' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Emitir Nota</button>
         <button onClick={() => setTab('certificates')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (tab === 'certificates' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Certificados</button>
         {isAdmin && <button onClick={() => setTab('config')} className={'px-4 py-2 rounded-lg text-sm font-medium ' + (tab === 'config' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700')}>Configuracao</button>}
@@ -447,7 +470,7 @@ export function Fiscal() {
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">{error}</div>}
       {success && <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg flex items-center gap-2"><Check className="w-4 h-4" /> {success}</div>}
 
-      {!loading && !activeCert && (
+      {!loading && !activeCert && tab !== 'import' && (
         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
           <div>
@@ -459,6 +482,12 @@ export function Fiscal() {
       )}
 
       {/* === EMITIR NOTA === */}
+      {tab === 'import' && <div className="card space-y-4">
+        <div><h2 className="text-lg font-semibold text-gray-900">Importar XML de compra</h2><p className="text-sm text-gray-500">Confira a nota e as condições de pagamento antes de incluir no financeiro.</p></div>
+        <label className="block text-sm text-gray-700">Destino dos itens<select className="input mt-1" value={entryDestination} onChange={e=>setEntryDestination(e.target.value as 'product'|'expense')}><option value="product">Entrada em estoque e contas a pagar</option><option value="expense">Somente despesa e contas a pagar</option></select></label>
+        <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} />
+      </div>}
+
       {tab === 'emit' && (
         <div className="card">
           {!activeCert ? (
@@ -681,161 +710,18 @@ export function Fiscal() {
                           <input type="radio" name="entryDestination" className="mt-1" checked={entryDestination === 'product'} onChange={() => setEntryDestination('product')} />
                           <span>
                             <span className="font-medium text-gray-700">Converter em produto interno para revenda</span>
-                            <span className="block text-xs text-gray-500">Cadastra/atualiza os itens no estoque de produtos</span>
+                            <span className="block text-xs text-gray-500">Cadastra/atualiza o estoque e gera os débitos no financeiro</span>
                           </span>
                         </label>
                         <label className="flex items-start gap-2 text-sm cursor-pointer">
                           <input type="radio" name="entryDestination" className="mt-1" checked={entryDestination === 'expense'} onChange={() => setEntryDestination('expense')} />
                           <span>
                             <span className="font-medium text-gray-700">Lançar somente como despesa</span>
-                            <span className="block text-xs text-gray-500">Não mexe no estoque, só registra o valor total como despesa no financeiro</span>
+                            <span className="block text-xs text-gray-500">Registra contas a pagar por parcela, sem movimentar estoque</span>
                           </span>
                         </label>
                       </div>
-                      <input
-                        type="file"
-                        accept=".xml"
-                        className="input text-sm"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0]
-                          if (!file) return
-                          delete (window as any).__nfeImportedItems
-                          try {
-                            const text = await file.text()
-                            // Parse XML da NF-e
-                            const parser = new DOMParser()
-                            const doc = parser.parseFromString(text, 'text/xml')
-
-                            // NF-e normalmente usa namespace padrão (ou prefixado).
-                            // querySelector('emit')/querySelectorAll('det') não encontra
-                            // essas tags em vários navegadores quando há namespace XML.
-                            const elementsByLocalName = (root: Document | Element, name: string): Element[] =>
-                              Array.from(root.getElementsByTagName('*')).filter((element) =>
-                                element.localName === name || element.tagName.split(':').pop() === name
-                              )
-                            const firstByLocalName = (root: Document | Element, name: string): Element | null =>
-                              elementsByLocalName(root, name)[0] || null
-                            const valueOf = (root: Document | Element, name: string): string =>
-                              firstByLocalName(root, name)?.textContent?.trim() || ''
-                            const numberOf = (root: Document | Element, name: string, fallback = 0): number => {
-                              const value = valueOf(root, name).replace(',', '.')
-                              const parsed = Number(value)
-                              return Number.isFinite(parsed) ? parsed : fallback
-                            }
-
-                            if (doc.getElementsByTagName('parsererror').length > 0 || doc.documentElement?.localName === 'parsererror' || !firstByLocalName(doc, 'NFe')) {
-                              throw new Error('XML inválido ou sem a estrutura NFe')
-                            }
-
-                            // Extrair dados do emitente (fornecedor = destinatario na entrada)
-                            const emit = firstByLocalName(doc, 'emit')
-                            const emitName = emit ? valueOf(emit, 'xNome') : ''
-                            const emitCnpj = emit ? (valueOf(emit, 'CNPJ') || valueOf(emit, 'CPF')) : ''
-                            const emitIE = emit ? valueOf(emit, 'IE') : ''
-                            const enderEmit = emit ? firstByLocalName(emit, 'enderEmit') : null
-                            const emitAddr = enderEmit ? valueOf(enderEmit, 'xLgr') : ''
-                            const emitNum = enderEmit ? valueOf(enderEmit, 'nro') : ''
-                            const emitBairro = enderEmit ? valueOf(enderEmit, 'xBairro') : ''
-                            const emitCity = enderEmit ? valueOf(enderEmit, 'xMun') : ''
-                            const emitUf = enderEmit ? valueOf(enderEmit, 'UF') : ''
-                            const emitCep = enderEmit ? valueOf(enderEmit, 'CEP') : ''
-
-                            // Extrair valor total
-                            const icmsTot = firstByLocalName(doc, 'ICMSTot')
-                            const vNF = icmsTot ? valueOf(icmsTot, 'vNF') : ''
-                            const ide = firstByLocalName(doc, 'ide')
-                            const nNF = ide ? valueOf(ide, 'nNF') : ''
-                            const dhEmi = ide ? (valueOf(ide, 'dhEmi') || valueOf(ide, 'dEmi')) : ''
-
-                            // Extrair itens
-                            const dets = elementsByLocalName(doc, 'det')
-                            const parsedItems: any[] = []
-                            dets.forEach(det => {
-                              const prod = firstByLocalName(det, 'prod')
-                              if (prod) {
-                                parsedItems.push({
-                                  name: valueOf(prod, 'xProd'),
-                                  code: valueOf(prod, 'cProd'),
-                                  ncm: valueOf(prod, 'NCM'),
-                                  cfop: valueOf(prod, 'CFOP'),
-                                  unit: valueOf(prod, 'uCom') || 'UN',
-                                  quantity: numberOf(prod, 'qCom', 1),
-                                  unitPrice: numberOf(prod, 'vUnCom'),
-                                  ean: valueOf(prod, 'cEAN'),
-                                  cest: valueOf(prod, 'CEST'),
-                                })
-                              }
-                            })
-
-                            // Preencher os campos
-                            setRecipientName(emitName)
-                            setRecipientCnpj(emitCnpj.replace(/\D/g, ''))
-                            setRecipientIE(emitIE)
-                            setRecipientAddress(emitAddr + (emitNum ? ', ' + emitNum : ''))
-                            setRecipientNeighborhood(emitBairro)
-                            setRecipientCity(emitCity)
-                            setRecipientUf(emitUf)
-                            setRecipientCep(emitCep.replace(/\D/g, '').padStart(8, '0'))
-                            if (vNF) setTotalValue(vNF)
-
-                            // Guardar itens parseados para envio
-                            if (parsedItems.length > 0) {
-                              (window as any).__nfeImportedItems = parsedItems
-
-                              if (entryDestination === 'expense') {
-                                // Não mexe no estoque: só registra o valor total como despesa
-                                try {
-                                  const emissionDate = dhEmi ? dhEmi.slice(0, 10) : new Date().toISOString().split('T')[0]
-                                  await api.post('/financial/movements', {
-                                    type: 'despesa',
-                                    category: 'compra_mercadoria',
-                                    description: `NF-e${nNF ? ' nº ' + nNF : ''} de ${emitName || 'fornecedor'} (${parsedItems.length} ite${parsedItems.length === 1 ? 'm' : 'ns'})`,
-                                    value: parseFloat(vNF || '0'),
-                                    date: emissionDate,
-                                    isForecast: false,
-                                  })
-                                  setSuccess(`XML importado! Despesa de R$ ${parseFloat(vNF || '0').toFixed(2)} lançada no financeiro.`)
-                                  setTimeout(() => { window.location.href = '/financial' }, 2000)
-                                } catch (expenseErr) {
-                                  setSuccess(`XML importado! Erro ao lançar a despesa automaticamente - faça manualmente em Financeiro.`)
-                                  setTimeout(() => setSuccess(''), 5000)
-                                }
-                              } else {
-                                // Importar produtos automaticamente no cadastro
-                                try {
-                                  const importPayload = parsedItems.map((item: any) => ({
-                                    name: item.name,
-                                    code: item.code,
-                                    quantity: item.quantity || 1,
-                                    purchasePrice: item.unitPrice || 0,
-                                    ncm: item.ncm || null,
-                                    cfop: item.cfop || null,
-                                    cest: item.cest || null,
-                                    unit: item.unit || 'UN',
-                                    supplier: emitName || 'Importação XML',
-                                  }))
-                                  const importRes = await api.post('/products/import', { products: importPayload })
-                                  const { imported, skipped, unchanged = 0, importedItems = [], updatedItems = [], unchangedItems = [], errors = [] } = importRes.data
-                                  const summary = { imported, skipped, unchanged, importedItems, updatedItems, unchangedItems, errors, total: importedItems.length + updatedItems.length + unchangedItems.length + errors.length || parsedItems.length }
-                                  try { sessionStorage.setItem('last-xml-import-summary', JSON.stringify(summary)) } catch {}
-                                  setXmlImportSummary(summary)
-                                  setSuccess('')
-                                } catch (importErr) {
-                                  setSuccess(`XML importado! ${parsedItems.length} item(ns) encontrado(s). Erro ao cadastrar produtos automaticamente - faça manualmente.`)
-                                  setTimeout(() => setSuccess(''), 5000)
-                                }
-                              }
-                            } else {
-                              delete (window as any).__nfeImportedItems
-                              setSuccess(`XML importado! Nenhum item encontrado.`)
-                              setTimeout(() => setSuccess(''), 5000)
-                            }
-                          } catch (err) {
-                            delete (window as any).__nfeImportedItems
-                            setError('Erro ao ler o XML. Verifique se é um arquivo XML de NF-e válido.')
-                          }
-                        }}
-                      />
+                      <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} />
                       <p className="text-xs text-gray-400 mt-2">Aceita XML de NF-e (procNFe ou NFe). Os dados do emitente serão usados como fornecedor/remetente.</p>
                     </div>
                   )}
@@ -1069,6 +955,13 @@ export function Fiscal() {
               <button onClick={() => setXmlImportSummary(null)} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5 text-gray-500" /></button>
             </div>
             <div className="p-6 space-y-4">
+              {xmlImportSummary.installments && <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                <h3 className="font-semibold">Contas a pagar criadas</h3>
+                <p>NF-e {xmlImportSummary.invoiceNumber} · {xmlImportSummary.supplierName}</p>
+                <p>{xmlEntryPaymentLabels[xmlImportSummary.paymentMethod || ''] || 'Outros'} · {xmlImportSummary.installments.length} parcela(s) · R$ {Number(xmlImportSummary.totalValue).toFixed(2)}</p>
+                <ul className="mt-2 space-y-1">{xmlImportSummary.installments.map(row=><li key={row.id}>{row.number}/{xmlImportSummary.installments?.length} — vencimento {row.dueDate.split('-').reverse().join('/')} — R$ {Number(row.value).toFixed(2)}</li>)}</ul>
+                <p className="mt-2 text-xs">Disponíveis em Contas a Pagar e Receber, em Lançamentos e no Relatório por Fornecedor. As parcelas aguardam pagamento.</p>
+              </div>}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="p-3 rounded-lg bg-green-50 border border-green-200"><p className="text-xs text-green-700">Novos produtos</p><p className="text-2xl font-bold text-green-800">{xmlImportSummary.imported}</p></div>
                 <div className="p-3 rounded-lg bg-blue-50 border border-blue-200"><p className="text-xs text-blue-700">Produtos atualizados</p><p className="text-2xl font-bold text-blue-800">{xmlImportSummary.skipped}</p></div>
@@ -1091,7 +984,8 @@ export function Fiscal() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button className="btn btn-secondary" onClick={() => setXmlImportSummary(null)}>Fechar</button>
-                <button className="btn btn-primary" onClick={() => { setXmlImportSummary(null); window.location.href = '/products' }}>Ver produtos</button>
+                {xmlImportSummary.destination !== 'expense' && <button className="btn btn-secondary" onClick={() => { setXmlImportSummary(null); window.location.href = '/products' }}>Ver produtos</button>}
+                <button className="btn btn-primary" onClick={() => { setXmlImportSummary(null); window.location.href = '/contas-pagar' }}>Ver contas a pagar</button>
               </div>
             </div>
           </div>

@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual, In, DataSource } from 'typeorm';
+import { Repository, LessThanOrEqual, In, DataSource, EntityManager } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { Bill } from './entities/bill.entity';
 import { insertWithTenant } from '../../common/tenant/tenant-scope';
 import { todayInBrasilia } from '../../common/date';
+import { FinancialMovement } from '../financial/entities/financial-movement.entity';
+import { Purchase } from '../purchases/entities/purchase.entity';
 
 @Injectable()
 export class SuppliersService {
@@ -133,11 +135,33 @@ export class SuppliersService {
   }
 
   async updateBill(id: string, dto: any): Promise<Bill> {
-    const b = await this.findOneBill(id);
-    if ('supplierId' in dto && !dto.supplierId) dto.supplierId = null;
-    if ('customerId' in dto && !dto.customerId) dto.customerId = null;
-    Object.assign(b, dto);
-    return this.billRepo.save(b);
+    return this.dataSource.transaction(async manager => {
+      const repo = manager.getRepository(Bill);
+      const bill = await repo.findOne({where:{id},lock:{mode:'pessimistic_write'}});
+      if (!bill) throw new NotFoundException('Conta não encontrada');
+      if ('supplierId' in dto && !dto.supplierId) dto.supplierId = null;
+      if ('customerId' in dto && !dto.customerId) dto.customerId = null;
+      Object.assign(bill, dto);
+      const saved = await repo.save(bill);
+      await this.syncPurchaseForecast(manager, saved);
+      return saved;
+    });
+  }
+
+  private async syncPurchaseForecast(manager: EntityManager, bill: Bill) {
+    if (!bill.purchaseId || bill.type === 'receber') return;
+    const repo = manager.getRepository(FinancialMovement);
+    const forecasts = await repo.find({where:{billId:bill.id,isForecast:true},order:{createdAt:'ASC'}});
+    const remaining = Math.round((Number(bill.value)-Number(bill.paidValue || 0))*100)/100;
+    if (remaining <= 0 || ['pago','cancelado'].includes(bill.status)) { if (forecasts.length) await repo.remove(forecasts); return; }
+    const forecast = forecasts[0] || repo.create({tenantId:bill.tenantId,type:'despesa',category:bill.category || 'compra_mercadoria',
+      billId:bill.id,referenceId:bill.purchaseId,referenceType:'purchase',isForecast:true,
+      competenceDate:(await manager.getRepository(Purchase).findOne({where:{id:bill.purchaseId}}))?.competenceDate,
+      idempotencyKey:`purchase-bill-forecast-${bill.purchaseId}-${bill.installmentNumber}`,createdBy:bill.createdBy});
+    forecast.description=bill.description; forecast.value=remaining; forecast.date=bill.dueDate;
+    forecast.dueDate=bill.dueDate; forecast.paymentMethod=bill.paymentMethod;
+    await repo.save(forecast);
+    if (forecasts.length>1) await repo.remove(forecasts.slice(1));
   }
 
   async payBill(id: string, paymentData?: { paymentMethod?: string; paidValue?: number }, idempotencyKey?: string): Promise<Bill> {
@@ -158,11 +182,12 @@ export class SuppliersService {
       bill.status = Number(bill.paidValue) >= Number(bill.value) ? 'pago' : 'parcial';
       if (paymentData?.paymentMethod) bill.paymentMethod = paymentData.paymentMethod;
       const saved = await repo.save(bill);
+      await this.syncPurchaseForecast(manager, saved);
 
       // Insert bill_payment record
       const paymentResult = await manager.query(
         'INSERT INTO bill_payments (bill_id,value,payment_method,idempotency_key,paid_at) VALUES ($1,$2,$3,$4,now()) RETURNING id',
-        [id, paidValue, paymentData?.paymentMethod || null, idempotencyKey || null]
+        [id, paidValue, paymentData?.paymentMethod || bill.paymentMethod || null, idempotencyKey || null]
       );
       const billPaymentId = paymentResult[0]?.id;
 
@@ -182,7 +207,7 @@ export class SuppliersService {
             today,
             id,
             billPaymentId,
-            paymentData?.paymentMethod || null,
+            paymentData?.paymentMethod || bill.paymentMethod || null,
             movIdempotencyKey,
             null,
           ]
@@ -228,6 +253,7 @@ export class SuppliersService {
       const saved = await repo.save(bill);
 
       await manager.query(`DELETE FROM bill_payments WHERE id=$1`, [lastPayment[0].id]);
+      await this.syncPurchaseForecast(manager, saved);
 
       const movement = await manager.query(
         `SELECT id, category, payment_method FROM financial_movements WHERE reference_type='bill_payment' AND reference_id=$1 LIMIT 1`,
@@ -262,14 +288,17 @@ export class SuppliersService {
   }
 
   async cancelBill(id: string): Promise<Bill> {
-    const bill = await this.findOneBill(id);
-    bill.status = 'cancelado';
-    return this.billRepo.save(bill);
+    return this.updateBill(id, {status:'cancelado'});
   }
 
   async removeBill(id: string): Promise<void> {
-    const bill = await this.findOneBill(id);
-    await this.billRepo.softRemove(bill);
+    await this.dataSource.transaction(async manager => {
+      const repo = manager.getRepository(Bill);
+      const bill = await repo.findOne({where:{id},lock:{mode:'pessimistic_write'}});
+      if (!bill) throw new NotFoundException('Conta não encontrada');
+      await manager.getRepository(FinancialMovement).delete({billId:bill.id,isForecast:true});
+      await repo.softRemove(bill);
+    });
   }
 
   // Alerts: bills due in next N days
@@ -314,8 +343,8 @@ export class SuppliersService {
       .addSelect('supplier.name', 'supplierName')
       .addSelect('COUNT(bill.id)', 'totalBills')
       .addSelect('SUM(bill.value)', 'totalValue')
-      .addSelect('SUM(CASE WHEN bill.status = \'pago\' THEN bill.value ELSE 0 END)', 'totalPaid')
-      .addSelect('SUM(CASE WHEN bill.status IN (\'pendente\', \'vencido\') THEN bill.value ELSE 0 END)', 'totalPending')
+      .addSelect('SUM(CASE WHEN bill.status = \'pago\' THEN bill.value WHEN bill.status = \'parcial\' THEN bill.paid_value ELSE 0 END)', 'totalPaid')
+      .addSelect('SUM(CASE WHEN bill.status IN (\'pendente\', \'vencido\', \'parcial\') THEN bill.value - bill.paid_value ELSE 0 END)', 'totalPending')
       .groupBy('supplier.id')
       .addGroupBy('supplier.name')
       .orderBy('SUM(bill.value)', 'DESC');

@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { FinancialService } from '../financial/financial.service';
+import { currentTenantId } from '../../common/tenant/tenant-context.service';
 
 @Injectable()
 export class ProductsService {
@@ -40,7 +41,10 @@ export class ProductsService {
     return result;
   }
 
-  async importFromXml(products: any[]): Promise<{ imported: number; skipped: number; unchanged: number; items: Product[]; importedItems: Product[]; updatedItems: Product[]; unchangedItems: any[]; errors: any[] }> {
+  async importFromXml(products: any[], manager?: EntityManager): Promise<{ imported: number; skipped: number; unchanged: number; items: Product[]; importedItems: Product[]; updatedItems: Product[]; unchangedItems: any[]; errors: any[] }> {
+    const repository = manager ? manager.getRepository(Product) : this.productsRepository;
+    const tenantId = manager ? currentTenantId() : null;
+    if (manager && !tenantId) throw new BadRequestException('Empresa não identificada para importar produtos.');
     let imported = 0;
     let skipped = 0;
     let unchanged = 0;
@@ -55,7 +59,7 @@ export class ProductsService {
       const code = String(p.code || p.cProd || '').trim();
       try {
         if (!name) throw new Error('Produto sem nome no XML');
-        const existing = code ? await this.productsRepository.findOne({ where: { code } }) : null;
+        const existing = code ? await repository.findOne({ where: { code, ...(tenantId ? { tenantId } : {}) }, ...(manager ? { lock: { mode: 'pessimistic_write' as const } } : {}) }) : null;
         if (existing) {
           const incomingPrice = Number(p.purchasePrice || p.unitPrice) || 0;
           const incomingQuantity = Number(p.quantity) || 0;
@@ -78,7 +82,7 @@ export class ProductsService {
           if (p.cfop) existing.cfop = p.cfop;
           if (p.cest) existing.cest = p.cest;
           if (p.unit) existing.unit = p.unit;
-          const saved = await this.productsRepository.save(existing);
+          const saved = await repository.save(existing);
           const result = Array.isArray(saved) ? saved[0] : saved;
           items.push(result);
           updatedItems.push(result);
@@ -86,7 +90,8 @@ export class ProductsService {
           continue;
         }
 
-        const product = this.productsRepository.create({
+        const product = repository.create({
+          ...(tenantId ? {tenantId} : {}),
           name,
           code: code || `IMP-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           category: p.category || 'Importado',
@@ -103,12 +108,13 @@ export class ProductsService {
           description: p.description || null,
           active: true,
         });
-        const saved = await this.productsRepository.save(product);
+        const saved = await repository.save(product);
         const result = Array.isArray(saved) ? saved[0] : saved;
         items.push(result);
         importedItems.push(result);
         imported++;
       } catch (error: any) {
+        if (manager) throw new BadRequestException(`Não foi possível importar ${name || code}: ${error?.message || 'dados inválidos'}`);
         errors.push({ name: name || 'Produto sem nome', code: code || null, message: error?.message || 'Erro ao importar produto' });
       }
     }

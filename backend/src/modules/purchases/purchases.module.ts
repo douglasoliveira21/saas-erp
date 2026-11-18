@@ -12,6 +12,9 @@ import { StockMovement } from '../stock/entities/stock-movement.entity';
 import { FinancialModule } from '../financial/financial.module';
 import { AuditModule } from '../audit/audit.module';
 import { PlatformModule } from '../platform/platform.module';
+import { ProductsModule } from '../products/products.module';
+import { XmlEntryService } from './xml-entry.service';
+import { XmlEntryController } from './xml-entry.controller';
 
 @Module({
   imports: [
@@ -19,9 +22,10 @@ import { PlatformModule } from '../platform/platform.module';
     FinancialModule,
     AuditModule,
     PlatformModule,
+    ProductsModule,
   ],
-  controllers: [PurchasesController],
-  providers: [PurchasesService],
+  controllers: [PurchasesController, XmlEntryController],
+  providers: [PurchasesService, XmlEntryService],
   exports: [PurchasesService],
 })
 export class PurchasesModule {}
