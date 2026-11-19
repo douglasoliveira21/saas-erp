@@ -68,6 +68,15 @@ test('rejeita XML malformado, DTD, nota sem chave e parcelas inconsistentes ante
   assert.throws(()=>validateXmlEntryPayments(100.01,'boleto',[{dueDate:'2099-01-01',value:100.011}]),/duas casas/);
   assert.throws(()=>validateXmlEntryPayments(100.01,'invalido',[]),/pagamento válida/);
 });
+
+test('informa o motivo específico para XML ausente, vazio, grande, HTML ou com DTD',()=>{
+  assert.throws(()=>parseXmlEntry(undefined),/não foi recebido corretamente/);
+  assert.throws(()=>parseXmlEntry({xml:xml()}),/não foi recebido corretamente/);
+  assert.throws(()=>parseXmlEntry('  '),/está vazio/);
+  assert.throws(()=>parseXmlEntry('a'.repeat(2_000_001)),/excede o limite de 2 MB/);
+  assert.throws(()=>parseXmlEntry('<!DOCTYPE html><html><body>Consulta NF-e</body></html>'),/página HTML/);
+  assert.throws(()=>parseXmlEntry('<!DOCTYPE NFe>'+xml()),/declaração DTD ou ENTITY/);
+});
 test('conferência não altera dados, e destinatário de outro tenant é recusado',()=>inTenant(async()=>{
   const f=fixture();await f.service.preview(xml());assert.equal(f.transactions,0);assert.equal(f.rows(Bill).length,0);
   await assert.rejects(f.service.preview(xml({document:'99999999000199'})),/destinatário/);

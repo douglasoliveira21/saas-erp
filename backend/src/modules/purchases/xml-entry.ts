@@ -27,7 +27,11 @@ export function validateXmlEntryPayments(total: number, method: string, rows: an
 }
 
 export function parseXmlEntry(xml: unknown) {
-  if (typeof xml !== 'string' || !xml.trim() || Buffer.byteLength(xml) > 2_000_000 || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw new BadRequestException('Envie um XML de NF-e válido, sem DTD, com até 2 MB.');
+  if (typeof xml !== 'string') throw new BadRequestException('O conteúdo do XML não foi recebido corretamente. Selecione o arquivo XML da NF-e novamente.');
+  if (!xml.trim()) throw new BadRequestException('O arquivo XML está vazio. Baixe novamente o XML da NF-e do fornecedor.');
+  if (Buffer.byteLength(xml) > 2_000_000) throw new BadRequestException('O conteúdo do XML excede o limite de 2 MB. Envie somente o XML de uma NF-e.');
+  if (/^\s*(?:<\?xml[^>]*>\s*)?(?:<!doctype\s+html\b|<html\b)/i.test(xml)) throw new BadRequestException('O arquivo contém uma página HTML. Baixe o XML original da NF-e; salvar a página do navegador como .xml não gera o XML da nota.');
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new BadRequestException('O arquivo contém uma declaração DTD ou ENTITY, não permitida nesta importação. Solicite ao fornecedor o XML original da NF-e.');
   let malformed = false;
   let doc: any;
   try {
