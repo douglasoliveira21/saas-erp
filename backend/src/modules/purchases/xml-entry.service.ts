@@ -23,6 +23,14 @@ export class XmlEntryService {
     const tenant = await this.source.getRepository(Tenant).findOne({ where: { id: this.context.requireTenantId() } });
     const document = String(tenant?.document || '').replace(/\D/g,'');
     if (document && entry.recipientDocument !== document) throw new BadRequestException('O destinatário desta NF-e não corresponde ao documento cadastrado para esta empresa.');
+    const tenantId = this.context.requireTenantId();
+    const purchase = await this.source.getRepository(Purchase).findOne({where:{tenantId,xmlAccessKey:entry.accessKey}});
+    if (purchase) {
+      if (purchase.status !== 'recebido' || !['generated','partially_paid','paid'].includes(purchase.financialStatus)) throw new BadRequestException('Este XML já foi importado, mas a compra ou o financeiro não está ativo. Confira a compra antes de emitir.');
+      const bills = await this.source.getRepository(Bill).find({where:{tenantId,purchaseId:purchase.id,type:'pagar'},order:{installmentNumber:'ASC'}});
+      return {...entry,purchaseId:purchase.id,paymentMethod:purchase.paymentMethod,
+        installments:bills.filter(row=>row.status !== 'cancelado').map(row=>({number:row.installmentNumber,dueDate:row.dueDate,value:Number(row.value)}))};
+    }
     return entry;
   }
 

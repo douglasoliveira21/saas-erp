@@ -27,6 +27,7 @@ function fixture(failEntity) {
   const table = entity => tables[entity.name] || (tables[entity.name]=[]);
   const repo = entity => ({
     create: value => ({...value}),
+    find:async ({where}) => table(entity).filter(row=>Object.entries(where).every(([k,v])=>row[k]===v)),
     findOne:async ({where}) => table(entity).find(row=>Object.entries(where).every(([k,v])=>row[k]===v)) || null,
     save:async value => {
       if(entity.name===failEntity) throw new Error('Falha de gravação simulada');
@@ -111,3 +112,16 @@ test('previsão de compra acompanha pagamento parcial, baixa integral, reversão
   await svc.syncPurchaseForecast(manager,{...bill,paidValue:0,status:'pendente'});assert.equal(forecasts[0].value,100);assert.equal(forecasts[0].isForecast,true);
   await svc.syncPurchaseForecast(manager,{...bill,status:'cancelado'});assert.equal(forecasts.length,0);
 });
+
+
+test('reabrir XML importado recupera compra e parcelas sem duplicar estoque ou financeiro',async()=>inTenant(async()=>{
+  const f=fixture();
+  const imported=await f.service.import(request(),'user');
+  const before=f.rows(Bill).length,stock=f.rows(StockMovement).length;
+  const preview=await f.service.preview(xml());
+  assert.equal(preview.purchaseId,imported.purchaseId);
+  assert.equal(preview.paymentMethod,'boleto');
+  assert.equal(preview.installments.length,2);
+  assert.equal(preview.installments[1].dueDate,'2099-02-28');
+  assert.equal(f.rows(Bill).length,before);assert.equal(f.rows(StockMovement).length,stock);
+}));

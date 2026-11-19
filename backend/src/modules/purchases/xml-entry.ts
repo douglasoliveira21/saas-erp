@@ -64,6 +64,9 @@ export function parseXmlEntry(xml: unknown) {
   return { accessKey, invoiceNumber: text(ide,'nNF'), emissionDate, supplierName, supplierDocument,
     recipientDocument: (text(dest,'CNPJ') || text(dest,'CPF')).replace(/\D/g,''), totalValue, items, paymentMethod,
     installments: installments.length ? installments : [{number:1,dueDate:'',value:totalValue}],
-    supplierAddress: [text(address,'xLgr'),text(address,'nro'),text(address,'xBairro')].filter(Boolean).join(', '),
+    supplierAddress: [text(address,'xLgr'),text(address,'nro')].filter(Boolean).join(', '),
+    supplierStreet: text(address,'xLgr'), supplierNumber: text(address,'nro'),
+    supplierNeighborhood: text(address,'xBairro'), supplierIE: text(emit,'IE'),
+    supplierEmail: text(emit,'email'), supplierPhone: text(address,'fone'), supplierCityCode: text(address,'cMun'),
     supplierCity: text(address,'xMun'), supplierUf:text(address,'UF'), supplierCep:text(address,'CEP') };
 }

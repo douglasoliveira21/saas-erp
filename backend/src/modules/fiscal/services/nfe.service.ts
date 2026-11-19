@@ -504,11 +504,13 @@ export class NfeService {
     const tpNF = saleData?.tpNF || '1'; // 0=entrada, 1=saida
     const natOp = saleData?.natOp || (tpNF === '0' ? 'COMPRA' : 'VENDA');
     const isNfce = modelo === '65';
+    const idDest = tpNF === '0' && /^\d{7}$/.test(String(saleData?.recipientCMun || ''))
+      ? (String(saleData.recipientCMun).slice(0,2) === config.ufCode ? '1' : '2') : saleData?.idDest || '1';
 
     // IDE
     let ide = `<ide><cUF>${config.ufCode}</cUF><cNF>${accessKey.slice(35, 43)}</cNF><natOp>${this.escXml(natOp, 60)}</natOp><mod>${modelo}</mod><serie>${invoice.series}</serie><nNF>${invoice.number}</nNF><dhEmi>${dhEmi}</dhEmi>`;
     if (!isNfce) ide += `<dhSaiEnt>${dhEmi}</dhSaiEnt>`;
-    ide += `<tpNF>${tpNF}</tpNF><idDest>${saleData?.idDest || '1'}</idDest><cMunFG>${config.cityCode}</cMunFG><tpImp>${isNfce ? '4' : '1'}</tpImp><tpEmis>1</tpEmis><cDV>${accessKey.slice(43)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>${saleData?.finNFe || '1'}</finNFe><indFinal>1</indFinal><indPres>${isNfce ? '1' : (saleData?.indPres || '1')}</indPres><procEmi>0</procEmi><verProc>VGON-ERP-1.0</verProc></ide>`;
+    ide += `<tpNF>${tpNF}</tpNF><idDest>${idDest}</idDest><cMunFG>${config.cityCode}</cMunFG><tpImp>${isNfce ? '4' : '1'}</tpImp><tpEmis>1</tpEmis><cDV>${accessKey.slice(43)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>${saleData?.finNFe || '1'}</finNFe><indFinal>1</indFinal><indPres>${isNfce ? '1' : (saleData?.indPres || '1')}</indPres><procEmi>0</procEmi><verProc>VGON-ERP-1.0</verProc></ide>`;
 
     // EMIT
     const emitCep = (config.emitCep || '').replace(/\D/g, '');

@@ -29,14 +29,14 @@ export class DanfePdfService {
   async generate(invoiceId: string): Promise<Buffer> {
     const invoice = await this.invoiceRepo.findOne({ where: { id: invoiceId }, relations: ['sale', 'sale.customer', 'sale.items', 'sale.items.product', 'sale.items.service'] });
     if (!invoice || invoice.type !== 'nfe') throw new NotFoundException('NF-e não encontrada para gerar DANFE');
-    return this.render(invoice, await this.configWithLogo(await this.configRepo.findOne({ where: {} })), await this.installments(invoice.saleId), false);
+    return this.render({...invoice, previewData:invoice.taxDetails?.emissionInput}, await this.configWithLogo(await this.configRepo.findOne({ where: {} })), await this.installments(invoice.saleId), false);
   }
 
   async generatePreview(saleId: string, data: any = {}): Promise<Buffer> {
-    const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer', 'items', 'items.product', 'items.service'] });
-    if (!sale) throw new NotFoundException('Venda não encontrada para pré-visualizar DANFE');
+    const sale = saleId ? await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer', 'items', 'items.product', 'items.service'] }) : null;
+    if (!sale && !(data.tpNF === '0' && Array.isArray(data.items) && data.items.length)) throw new NotFoundException('Venda ou itens da nota de entrada não encontrados para pré-visualizar DANFE');
     const config = await this.configRepo.findOne({ where: {} });
-    return this.render({ type: 'nfe', number: null, series: config?.nfeSeries || 1, issuedAt: new Date(), recipientName: data.recipientName || sale.customer?.name, recipientCnpj: data.recipientCnpj || sale.customer?.cpfCnpj, totalValue: Number(data.totalValue || sale.totalAmount), observations: sale.observations, sale, previewData: data }, await this.configWithLogo(config), await this.installments(saleId), true);
+    return this.render({ type: 'nfe', number: null, series: config?.nfeSeries || 1, issuedAt: new Date(), recipientName: data.recipientName || sale?.customer?.name, recipientCnpj: data.recipientCnpj || sale?.customer?.cpfCnpj, totalValue: Number(data.totalValue || sale?.totalAmount), observations: sale?.observations, sale, previewData: data }, await this.configWithLogo(config), await this.installments(saleId), true);
   }
 
   private async installments(saleId?: string): Promise<any[]> {
@@ -56,7 +56,7 @@ export class DanfePdfService {
   }
   private saleItems(invoice: any): DanfeItem[] {
     const submitted = invoice.previewData?.items || [];
-    return (invoice.sale?.items || []).map((i: any, n: number) => { const f = submitted[n] || i.product || i.service || {}; return { code: i.product?.code || i.service?.code || (f.code && f.code !== i.productId && f.code !== i.serviceId ? f.code : '') || String(n + 1), description: i.name || '-', ncm: f.ncm || '', cst: f.csosn || f.cst || '0102', cfop: f.cfop || '5102', unit: f.unit || 'UN', quantity: Number(i.quantity || 0), unitPrice: Number(i.unitPrice || 0), discount: 0, total: Number(i.totalPrice || 0), bcIcms: 0, icms: 0, ipi: 0, icmsRate: 0, ipiRate: 0 }; });
+    return (invoice.sale?.items || submitted).map((i: any, n: number) => { const f = submitted[n] || i.product || i.service || {}; return { code: i.product?.code || i.service?.code || (f.code && f.code !== i.productId && f.code !== i.serviceId ? f.code : '') || String(n + 1), description: i.name || '-', ncm: f.ncm || '', cst: f.csosn || f.cst || '0102', cfop: f.cfop || '5102', unit: f.unit || 'UN', quantity: Number(i.quantity || 0), unitPrice: Number(i.unitPrice || 0), discount: 0, total: Number(i.totalPrice ?? Number(i.quantity)*Number(i.unitPrice)), bcIcms: 0, icms: 0, ipi: 0, icmsRate: 0, ipiRate: 0 }; });
   }
 
   async render(invoice: any, config: any, installments: any[] = [], preview = false): Promise<Buffer> {
@@ -89,16 +89,16 @@ export class DanfePdfService {
     text(config?.emitNeighborhood || '', L + 8, y + 54, iw - 16, 6.3, false, 'center');
     text(`CEP ${config?.emitCep || ''}  TELEFONE: ${config?.emitPhone || ''}`, L + 8, y + 65, iw - 16, 6.3, false, 'center');
     text(`CNPJ: ${document(config?.cnpj)}  IE: ${config?.stateRegistration || ''}`, L + 8, y + 77, iw - 16, 6.3, false, 'center');
-    box(L + iw, y, dw, ih); text('DANFE', L + iw + 2, y + 5, dw - 4, 13, true, 'center'); text('DOCUMENTO AUXILIAR\nDA NOTA FISCAL\nELETRÔNICA', L + iw + 3, y + 22, dw - 6, 5.4, false, 'center'); text('0 - ENTRADA', L + iw + 8, y + 51, 70, 6.2); text('1 - SAÍDA', L + iw + 8, y + 62, 70, 6.2); box(L + iw + 78, y + 50, 16, 20, '', key[22] === '0' ? '0' : '1', { size: 10, bold: true, align: 'center' }); text(`Nº ${preview ? 'NÃO RESERVADO' : String(number || 0).padStart(9, '0')}`, L + iw + 2, y + 74, dw - 4, 7.2, true, 'center'); text(`SÉRIE ${String(series).padStart(3, '0')}  PÁGINA 1 de 1`, L + iw + 2, y + 86, dw - 4, 5.2, true, 'center');
+    box(L + iw, y, dw, ih); text('DANFE', L + iw + 2, y + 5, dw - 4, 13, true, 'center'); text('DOCUMENTO AUXILIAR\nDA NOTA FISCAL\nELETRÔNICA', L + iw + 3, y + 22, dw - 6, 5.4, false, 'center'); text('0 - ENTRADA', L + iw + 8, y + 51, 70, 6.2); text('1 - SAÍDA', L + iw + 8, y + 62, 70, 6.2); box(L + iw + 78, y + 50, 16, 20, '', this.xv(xml, 'tpNF') || invoice.previewData?.tpNF || '1', { size: 10, bold: true, align: 'center' }); text(`Nº ${preview ? 'NÃO RESERVADO' : String(number || 0).padStart(9, '0')}`, L + iw + 2, y + 74, dw - 4, 7.2, true, 'center'); text(`SÉRIE ${String(series).padStart(3, '0')}  PÁGINA 1 de 1`, L + iw + 2, y + 86, dw - 4, 5.2, true, 'center');
     box(L + iw + dw, y, fw, ih); text('CONTROLE DO FISCO', L + iw + dw + 2, y + 2, fw - 4, 5.2, true, 'center');
     if (key.length === 44) { try { const barcode = await new Promise<Buffer>((resolve, reject) => bwipjs.toBuffer({ bcid: 'code128', text: key, scale: 1.35, height: 9, includetext: false }, (e, png) => e ? reject(e) : resolve(png))); doc.image(barcode, L + iw + dw + 8, y + 14, { fit: [fw - 16, 30] }); } catch {} }
     text('CHAVE DE ACESSO', L + iw + dw + 3, y + 47, fw - 6, 4.7, true, 'center'); text(keyText || (preview ? 'CHAVE GERADA APÓS A AUTORIZAÇÃO' : '-'), L + iw + dw + 3, y + 56, fw - 6, 6.1, true, 'center'); text('Consulta de autenticidade no portal nacional da NF-e\nwww.nfe.fazenda.gov.br/portal ou no site da Sefaz autorizadora', L + iw + dw + 5, y + 71, fw - 10, 5.1, false, 'center'); y += ih;
 
-    box(L, y, 340, 26, 'Natureza da operação', this.xv(xml, 'natOp') || 'Venda de mercadoria adquirida ou recebida de terceiros'); box(L + 340, y, 219, 26, 'Protocolo de autorização de uso', preview ? 'SEM VALOR FISCAL' : `${invoice.protocolNumber || this.xv(xml, 'nProt') || '-'} ${date(this.xv(xml, 'dhRecbto'), true)}`, { size: 6.2 }); y += 26;
+    box(L, y, 340, 26, 'Natureza da operação', this.xv(xml, 'natOp') || (invoice.previewData?.tpNF === '0' ? 'COMPRA' : 'Venda de mercadoria adquirida ou recebida de terceiros')); box(L + 340, y, 219, 26, 'Protocolo de autorização de uso', preview ? 'SEM VALOR FISCAL' : `${invoice.protocolNumber || this.xv(xml, 'nProt') || '-'} ${date(this.xv(xml, 'dhRecbto'), true)}`, { size: 6.2 }); y += 26;
     box(L, y, 185, 24, 'Inscrição estadual', config?.stateRegistration || this.xv(xml, 'IE')); box(L + 185, y, 190, 24, 'Insc. estadual do subst. tributário', this.xv(xml, 'IEST')); box(L + 375, y, 184, 24, 'CNPJ', document(config?.cnpj || invoice.issuerCnpj)); y += 28;
 
     section('DESTINATÁRIO/REMETENTE'); box(L, y, 343, 25, 'Nome/Razão social', invoice.recipientName || customer.name || '-'); box(L + 343, y, 126, 25, 'CNPJ/CPF', document(invoice.recipientCnpj || customer.cpfCnpj)); box(L + 469, y, 90, 25, 'Data emissão', date(issued)); y += 25;
-    box(L, y, 287, 25, 'Endereço', invoice.previewData?.recipientAddress || customer.address || '-'); box(L + 287, y, 132, 25, 'Bairro/Distrito', invoice.previewData?.recipientNeighborhood || customer.neighborhood || '-'); box(L + 419, y, 70, 25, 'CEP', invoice.previewData?.recipientCep || customer.cep || '-'); box(L + 489, y, 70, 25, 'Data entrada/saída', date(issued)); y += 25;
+    box(L, y, 287, 25, 'Endereço', [invoice.previewData?.recipientAddress, invoice.previewData?.recipientNumber].filter(Boolean).join(', ') || customer.address || '-'); box(L + 287, y, 132, 25, 'Bairro/Distrito', invoice.previewData?.recipientNeighborhood || customer.neighborhood || '-'); box(L + 419, y, 70, 25, 'CEP', invoice.previewData?.recipientCep || customer.cep || '-'); box(L + 489, y, 70, 25, 'Data entrada/saída', date(issued)); y += 25;
     box(L, y, 232, 25, 'Município', invoice.previewData?.recipientCity || customer.city || '-'); box(L + 232, y, 102, 25, 'Fone/Fax', invoice.previewData?.recipientPhone || customer.phone || '-'); box(L + 334, y, 35, 25, 'UF', invoice.previewData?.recipientUf || customer.uf || '-'); box(L + 369, y, 120, 25, 'Inscrição estadual', invoice.previewData?.recipientIE || customer.stateRegistration || '-'); box(L + 489, y, 70, 25, 'Hora entrada/saída', issued ? new Date(issued).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '-'); y += 29;
 
     section('FATURA/DUPLICATAS'); const dups = installments.length ? installments : invoice.previewData?.paymentInstallments || [];

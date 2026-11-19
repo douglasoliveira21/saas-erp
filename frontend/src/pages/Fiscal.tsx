@@ -45,21 +45,33 @@ export function Fiscal() {
   const [xmlImportSummary, setXmlImportSummary] = useState<XmlImportSummary | null>(null)
   const [fiscalConfig, setFiscalConfig] = useState<any>(null)
 
+  function prepareXmlEntry(preview: any, result?: any) {
+    const paymentCodes: Record<string,string> = { dinheiro:'01', cheque:'02', cartao_credito:'03', cartao_debito:'04', boleto:'15', pix:'17', transferencia:'18' }
+    setSelectedSaleId('')
+    setEmitType('nfe'); setNfeModelo('55'); setNfeTpNF('0')
+    setRecipientName(preview.supplierName || '')
+    setRecipientCnpj(preview.supplierDocument || '')
+    setRecipientAddress(preview.supplierStreet || preview.supplierAddress || '')
+    setRecipientNumber(preview.supplierNumber || '')
+    setRecipientNeighborhood(preview.supplierNeighborhood || '')
+    setRecipientCity(preview.supplierCity || '')
+    setRecipientCityCode(preview.supplierCityCode || '')
+    setRecipientUf(preview.supplierUf || '')
+    setRecipientCep(preview.supplierCep || '')
+    setRecipientIE(preview.supplierIE || '')
+    setRecipientPhone(preview.supplierPhone || '')
+    setRecipientEmail(preview.supplierEmail || '')
+    setTotalValue(String(preview.totalValue))
+    const paymentMethod = result?.paymentMethod || preview.paymentMethod
+    setNfeTpPag(paymentCodes[paymentMethod] || '99')
+    setImportedEntry((current:any)=>({ ...preview, items:result && current?.accessKey===preview.accessKey ? current.items : preview.items, purchaseId:result?.purchaseId || preview.purchaseId, paymentMethod, installments:result?.installments || preview.installments }))
+    setError('')
+  }
+
   function handleXmlImported(result: any, preview: any) {
     setXmlImportSummary(result)
-    if (tab === 'emit') {
-      setRecipientName(preview.supplierName)
-      setRecipientCnpj(preview.supplierDocument)
-      setRecipientAddress(preview.supplierAddress)
-      setRecipientCity(preview.supplierCity)
-      setRecipientUf(preview.supplierUf)
-      setRecipientCep(preview.supplierCep)
-      setTotalValue(String(preview.totalValue))
-      const importedWindow = window as any
-      importedWindow.__nfeImportedItems = preview.items
-    }
-    setSuccess('')
-    setError('')
+    prepareXmlEntry(preview, result)
+    setSuccess(''); setError('')
     if (result.destination === 'product') {
       try { sessionStorage.setItem('last-xml-import-summary', JSON.stringify(result)) } catch {}
     }
@@ -104,6 +116,7 @@ export function Fiscal() {
   const [showPreview, setShowPreview] = useState(false)
   const [previewInstallments, setPreviewInstallments] = useState<any[]>([])
   const [recipientEmail, setRecipientEmail] = useState('')
+  const [recipientNumber, setRecipientNumber] = useState('')
   const [recipientAddress, setRecipientAddress] = useState('')
   const [recipientCity, setRecipientCity] = useState('')
   const [recipientCityCode, setRecipientCityCode] = useState('')
@@ -115,6 +128,8 @@ export function Fiscal() {
   const [nfeModelo, setNfeModelo] = useState('55')
   const [nfeTpNF, setNfeTpNF] = useState('1')
   const [nfeTpPag, setNfeTpPag] = useState('01')
+  const [importedEntry, setImportedEntry] = useState<any>(null)
+  const entry = emitType === 'nfe' && nfeTpNF === '0' ? importedEntry : null
   const [entryDestination, setEntryDestination] = useState<'product' | 'expense'>('product')
   const [nfeAmbiente, setNfeAmbiente] = useState(1)
 
@@ -187,7 +202,8 @@ export function Fiscal() {
 
   // Ao selecionar venda, preencher dados
   function onSelectSale(saleId: string) {
-    delete (window as any).__nfeImportedItems
+    setImportedEntry(null)
+    setNfeTpNF('1'); setRecipientNumber('')
     setSelectedSaleId(saleId)
     const sale = sales.find(s => s.id === saleId)
     if (sale) {
@@ -233,7 +249,7 @@ export function Fiscal() {
   }
 
   async function openFiscalPreview() {
-    if (!selectedSaleId || !recipientName || !totalValue) { setError('Selecione uma venda para visualizar'); return }
+    if ((!selectedSaleId && !entry) || !recipientName || !totalValue) { setError('Selecione uma venda ou importe o XML da nota de entrada para visualizar'); return }
     if (emitType === 'nfe') {
       const previewWindow = window.open('', '_blank')
       try {
@@ -241,9 +257,10 @@ export function Fiscal() {
         const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' }
         const saleData = {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue), modelo: nfeModelo, tpNF: nfeTpNF, tPag: nfeTpPag,
-          paymentMethodLabel: paymentLabels[sale?.paymentMethod] || sale?.paymentMethod || '-',
-          installments: Number(sale?.installments || 1), recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientPhone, recipientIE,
-          items: (window as any).__nfeImportedItems || (sale?.items || []).map((item: any) => ({ name: item.name, quantity: item.quantity, unitPrice: item.unitPrice || item.unit_price, code: item.productId || item.code || '1', ncm: item.ncm || '', cfop: item.cfop || '', unit: item.unit || 'UN', cest: item.cest || '' })),
+          paymentMethodLabel: xmlEntryPaymentLabels[entry?.paymentMethod] || paymentLabels[sale?.paymentMethod] || sale?.paymentMethod || '-',
+          purchaseId: entry?.purchaseId, paymentInstallments: entry?.installments,
+          installments: entry?.installments?.length || Number(sale?.installments || 1), recipientCMun:recipientCityCode, recipientNumber, recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientPhone, recipientIE,
+          items: entry?.items || (sale?.items || []).map((item: any) => ({ name: item.name, quantity: item.quantity, unitPrice: item.unitPrice || item.unit_price, code: item.productId || item.code || '1', ncm: item.ncm || '', cfop: item.cfop || '', unit: item.unit || 'UN', cest: item.cest || '' })),
         }
         const response = await api.post('/fiscal/nfe/preview-pdf', { saleId: selectedSaleId, saleData }, { responseType: 'blob' })
         const url = URL.createObjectURL(response.data)
@@ -265,6 +282,9 @@ export function Fiscal() {
   async function emitNote() {
     if (!activeCert) { setError('Nenhum certificado ativo'); return }
     if (!recipientName || !totalValue) { setError('Preencha destinatario e valor'); return }
+    if (emitType === 'nfe' && nfeTpNF === '0' && !entry) { setError('Importe e confira o XML para emitir a nota de entrada.'); return }
+    if (entry && entry.items.some((item:any)=>!/^\d{8}$/.test(item.ncm || '') || !/^[123]\d{3}$/.test(item.cfop || ''))) { setError('Confira o NCM e informe o CFOP de entrada de cada item.'); return }
+    if (entry && !entry.purchaseId) { setError('Confirme a importação do XML e as contas a pagar antes de emitir a nota de entrada.'); return }
     if (emitType === 'nfse' && !/^\d{6}$/.test(itemLista)) { setError('Informe o Codigo de Tributacao Nacional com 6 digitos (ex.: 140101)'); return }
     setEmitting(true); setError(''); setSuccess('')
     try {
@@ -290,9 +310,11 @@ export function Fiscal() {
         saleData: emitType === 'nfe' ? {
           recipientCnpj, recipientName, totalValue: parseFloat(totalValue),
           modelo: nfeModelo, tpNF: nfeTpNF, tPag: nfeTpPag,
-          installments: (sales.find(s => s.id === selectedSaleId) as any)?.installments || 1,
-          recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientIE,
-          items: (window as any).__nfeImportedItems || (sales.find(s => s.id === selectedSaleId)?.items || []).map((i: any) => ({
+          purchaseId: entry?.purchaseId, paymentInstallments: entry?.installments,
+          paymentMethodLabel: xmlEntryPaymentLabels[entry?.paymentMethod],
+          installments: entry?.installments?.length || (sales.find(s => s.id === selectedSaleId) as any)?.installments || 1,
+          recipientAddress, recipientNeighborhood, recipientCity, recipientUf, recipientCep, recipientIE, recipientPhone, recipientEmail, recipientCMun:recipientCityCode, recipientNumber,
+          items: entry?.items || (sales.find(s => s.id === selectedSaleId)?.items || []).map((i: any) => ({
             name: i.name, quantity: i.quantity, unitPrice: i.unitPrice || i.unit_price,
             code: i.productId || i.code || '1', ncm: i.ncm || '', cfop: i.cfop || '',
             unit: i.unit || 'UN', cest: i.cest || '',
@@ -317,7 +339,7 @@ export function Fiscal() {
       load()
       setTab('invoices')
       // Limpar itens importados do XML
-      delete (window as any).__nfeImportedItems
+      setImportedEntry(null)
     } catch (e: any) { setError(e.response?.data?.message || 'Erro ao emitir nota') }
     finally { setEmitting(false) }
   }
@@ -485,7 +507,8 @@ export function Fiscal() {
       {tab === 'import' && <div className="card space-y-4">
         <div><h2 className="text-lg font-semibold text-gray-900">Importar XML de compra</h2><p className="text-sm text-gray-500">Confira a nota e as condições de pagamento antes de incluir no financeiro.</p></div>
         <label className="block text-sm text-gray-700">Destino dos itens<select className="input mt-1" value={entryDestination} onChange={e=>setEntryDestination(e.target.value as 'product'|'expense')}><option value="product">Entrada em estoque e contas a pagar</option><option value="expense">Somente despesa e contas a pagar</option></select></label>
-        <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} />
+        <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} onPreview={prepareXmlEntry} onUseExisting={()=>setTab('emit')} />
+        {importedEntry?.purchaseId && <button className="btn btn-primary mt-4" onClick={()=>setTab('emit')}>Preparar nota de entrada</button>}
       </div>}
 
       {tab === 'emit' && (
@@ -558,7 +581,7 @@ export function Fiscal() {
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="col-span-2">
-                    <label className="block text-xs text-gray-500 mb-1">Endereco (Logradouro, Numero)</label>
+                    <label className="block text-xs text-gray-500 mb-1">{entry ? 'Endereço (logradouro)' : 'Endereco (Logradouro, Numero)'}</label>
                     <input className="input" value={recipientAddress} onChange={e => setRecipientAddress(e.target.value)} placeholder="Rua Exemplo, 123" />
                   </div>
                   <div>
@@ -566,6 +589,7 @@ export function Fiscal() {
                     <input className="input" value={recipientNeighborhood} onChange={e => setRecipientNeighborhood(e.target.value)} placeholder="Centro" />
                   </div>
                 </div>
+                {entry && <label className="block text-xs text-gray-500">Número do endereço<input aria-label="Número do endereço" className="input mt-1" value={recipientNumber} onChange={e=>setRecipientNumber(e.target.value)} /></label>}
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Cidade</label>
@@ -679,7 +703,7 @@ export function Fiscal() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Forma de pagamento da venda</label>
+                      <label className="block text-xs text-gray-500 mb-1">Forma de pagamento {entry ? 'da entrada' : 'da venda'}</label>
                       <select className="input bg-gray-100" value={nfeTpPag} disabled>
                         <option value="01">Dinheiro</option>
                         <option value="02">Cheque</option>
@@ -721,12 +745,22 @@ export function Fiscal() {
                           </span>
                         </label>
                       </div>
-                      <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} />
+                      <XmlEntryImport destination={entryDestination} onImported={handleXmlImported} onPreview={prepareXmlEntry} onUseExisting={()=>setTab('emit')} />
                       <p className="text-xs text-gray-400 mt-2">Aceita XML de NF-e (procNFe ou NFe). Os dados do emitente serão usados como fornecedor/remetente.</p>
                     </div>
                   )}
 
-                  <p className="text-sm text-blue-600">Os itens da venda vinculada serao utilizados. Certifique-se de que os produtos possuem NCM e CFOP cadastrados.</p>
+                  {entry ? <div className="space-y-3 rounded-lg border border-blue-200 bg-white p-4">
+                    <h3 className="font-semibold text-gray-900">Dados da nota de entrada</h3>
+                    <p className="text-sm text-gray-600">Fornecedor: {entry.supplierName} · XML nº {entry.invoiceNumber} · {entry.items.length} item(ns)</p>
+                    <p className="text-sm text-gray-600">{xmlEntryPaymentLabels[entry.paymentMethod]} · {entry.installments.length} parcela(s){entry.purchaseId ? ' · Contas a pagar registradas' : ' · Confirme a importação acima para registrar as contas a pagar'}</p>
+                    <div className="space-y-2">{entry.installments.map((row:any,index:number)=><p key={index} className="text-sm text-gray-600">Parcela {index+1}: {row.dueDate ? row.dueDate.split('-').reverse().join('/') : 'Vencimento não informado'} · R$ {Number(row.value).toFixed(2)}</p>)}</div>
+                    <p className="text-xs text-gray-500">Confira o NCM e informe o CFOP de entrada de cada item antes de emitir.</p>
+                    <div className="space-y-3">{entry.items.map((item:any,index:number)=><div key={index} className="rounded-lg bg-gray-50 p-3">
+                      <p className="text-sm font-medium text-gray-800">{item.code} · {item.name}</p><p className="text-sm text-gray-600">{item.quantity} {item.unit} · Unitário R$ {Number(item.unitPrice).toFixed(2)}</p>
+                      <div className="mt-2 grid grid-cols-2 gap-3">{['ncm','cfop'].map(field=><label key={field} className="text-xs text-gray-600">{field.toUpperCase()}<input aria-label={`${field.toUpperCase()} do item ${index+1}`} className="input mt-1" value={item[field] || ''} onChange={e=>setImportedEntry((current:any)=>({...current,items:current.items.map((old:any,i:number)=>i===index?{...old,[field]:e.target.value}:old)}))} /></label>)}</div>
+                    </div>)}</div>
+                  </div> : <p className="text-sm text-blue-600">Os itens da venda vinculada serão utilizados. Confira o NCM e CFOP dos produtos.</p>}
                   <div className="text-xs text-gray-500">Ambiente: {nfeAmbiente === 1 ? 'Producao' : 'Homologacao'} (MG) | Versao: 4.00</div>
                 </div>
               )}
@@ -743,7 +777,7 @@ export function Fiscal() {
               {/* Botao emitir */}
               <div className="flex justify-end gap-3">
                 <button onClick={() => setTab('invoices')} className="btn btn-secondary">Cancelar</button>
-                <button onClick={openFiscalPreview} disabled={!selectedSaleId || !recipientName || !totalValue} className="btn btn-secondary flex items-center gap-2 py-3 px-5"><Eye className="w-4 h-4" /> Pré-visualizar</button>
+                <button onClick={openFiscalPreview} disabled={(!selectedSaleId && !entry) || !recipientName || !totalValue} className="btn btn-secondary flex items-center gap-2 py-3 px-5"><Eye className="w-4 h-4" /> Pré-visualizar</button>
                 <button onClick={emitNote} disabled={emitting || !recipientName || !totalValue} className="btn btn-primary flex items-center gap-2 py-3 px-6">
                   {emitting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Send className="w-4 h-4" />}
                   {emitting ? 'Emitindo...' : 'Emitir ' + (emitType === 'nfe' ? 'NF-e' : 'NFS-e')}
@@ -757,7 +791,7 @@ export function Fiscal() {
       {showPreview && (() => {
         const sale: any = sales.find(item => item.id === selectedSaleId)
         const paymentLabels: Record<string, string> = { dinheiro: 'Dinheiro', cheque: 'Cheque', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', boleto: 'Boleto bancário', pix: 'PIX', transferencia: 'Transferência bancária' }
-        const items = (window as any).__nfeImportedItems || sale?.items || []
+        const items = entry?.items || sale?.items || []
         return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
           <div className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-gray-100 shadow-2xl">
             <div className="sticky top-0 z-20 flex items-center justify-between border-b bg-white px-6 py-4">
@@ -984,6 +1018,7 @@ export function Fiscal() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button className="btn btn-secondary" onClick={() => setXmlImportSummary(null)}>Fechar</button>
+                {importedEntry && <button className="btn btn-secondary" onClick={() => { setXmlImportSummary(null); setTab('emit') }}>Preparar nota de entrada</button>}
                 {xmlImportSummary.destination !== 'expense' && <button className="btn btn-secondary" onClick={() => { setXmlImportSummary(null); window.location.href = '/products' }}>Ver produtos</button>}
                 <button className="btn btn-primary" onClick={() => { setXmlImportSummary(null); window.location.href = '/contas-pagar' }}>Ver contas a pagar</button>
               </div>

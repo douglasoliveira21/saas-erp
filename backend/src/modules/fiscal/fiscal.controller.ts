@@ -269,23 +269,8 @@ export class FiscalController {
       await this.sendAuthorizedNfeEmail(saved.id, body.saleId);
     }
 
-    // Se for NF-e de entrada (compra), registrar despesa no fluxo de caixa
-    const tpNF = body.saleData?.tpNF || '1';
-    if (tpNF === '0' && result.status === 'autorizada' && body.saleData?.totalValue) {
-      await this.movementRepo.save(
-        this.movementRepo.create({
-          type: 'despesa',
-          category: 'compra_mercadoria',
-          description: `NF-e Entrada: ${body.saleData.recipientName || 'Fornecedor'} - Nota ${result.number || ''}`,
-          value: Number(body.saleData.totalValue),
-          date: new Date().toISOString().split('T')[0],
-          referenceId: saved.id,
-          referenceType: 'nfe_entrada',
-          isForecast: false,
-          createdBy: req.user?.id,
-        }),
-      );
-    }
+    // A entrada importada já possui contas a pagar e despesas previstas na compra.
+    // A autorização fiscal não representa pagamento nem cria uma segunda despesa.
 
     return result;
   }
@@ -346,7 +331,7 @@ export class FiscalController {
   @Post('nfe/preview-pdf')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
   async previewDanfePdf(@Body() body: { saleId: string; saleData?: any }, @Res() res: Response) {
-    if (!body.saleId) throw new BadRequestException('Venda obrigatória para pré-visualização');
+    if (!body.saleId && !(body.saleData?.tpNF === '0' && body.saleData?.items?.length)) throw new BadRequestException('Selecione uma venda ou importe o XML da nota de entrada para pré-visualizar.');
     const pdf = await this.danfePdfService.generatePreview(body.saleId, body.saleData || {});
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="DANFE_PREVIA_SEM_VALOR_FISCAL.pdf"');

@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Raw, Repository } from 'typeorm';
 import { Invoice } from '../entities/invoice.entity';
 import { Sale } from '../../sales/entities/sale.entity';
 import { Product } from '../../products/entities/product.entity';
 import { getCustomerEmails } from '../../../common/customer-emails';
+import { currentTenantId } from '../../../common/tenant/tenant-context.service';
+import { Purchase } from '../../purchases/entities/purchase.entity';
+import { Bill } from '../../suppliers/entities/bill.entity';
+import { parseXmlEntry, validateXmlEntryPayments, XML_PAYMENT_CODES } from '../../purchases/xml-entry';
 
 @Injectable()
 export class FiscalSaleDataService {
@@ -13,6 +17,10 @@ export class FiscalSaleDataService {
     @InjectRepository(Sale) private saleRepo: Repository<Sale>,
   ) {}
   async validateSaleForInvoice(saleId: string, type: 'nfe' | 'nfse', submitted: any, allowActive = false): Promise<any> {
+    if (type === 'nfe' && String(submitted?.tpNF) === '0') {
+      if (saleId) throw new BadRequestException('A nota de entrada deve ser vinculada à compra importada, sem venda vinculada.');
+      return this.validateImportedEntry(submitted);
+    }
     if (!saleId) throw new BadRequestException('Venda obrigatória para emissão');
     const sale = await this.saleRepo.findOne({ where: { id: saleId }, relations: ['customer', 'items'] });
     if (!sale) throw new BadRequestException('Venda não encontrada');
@@ -71,6 +79,34 @@ export class FiscalSaleDataService {
       paymentMethodLabel, tPag: paymentCodes[String(sale.paymentMethod)] || '99',
       installments, paymentInstallments, discriminacao,
     };
+  }
+
+  private async validateImportedEntry(submitted: any) {
+    const tenantId = currentTenantId();
+    if (!tenantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(submitted?.purchaseId || ''))) throw new BadRequestException('Confirme a importação do XML antes de emitir a nota de entrada.');
+    const purchase = await this.invoiceRepo.manager.getRepository(Purchase).findOne({
+      where: { id: submitted.purchaseId, tenantId }, select: { id:true, tenantId:true, importedXml:true, totalValue:true, status:true, financialStatus:true, paymentMethod:true },
+    });
+    if (!purchase?.importedXml || purchase.status !== 'recebido' || !['generated','partially_paid','paid'].includes(purchase.financialStatus)) throw new BadRequestException('Compra importada não encontrada ou sem financeiro ativo.');
+    const source = parseXmlEntry(purchase.importedXml);
+    if (String(submitted.modelo) !== '55' || Number(submitted.totalValue) !== Number(purchase.totalValue) || String(submitted.recipientCnpj || '').replace(/\D/g,'') !== source.supplierDocument) throw new BadRequestException('Confira o modelo 55, o fornecedor e o total da compra importada.');
+    const duplicate = await this.invoiceRepo.findOne({ where: {
+      tenantId, type:'nfe', status:In(['autorizada','pendente','processando']),
+      taxDetails:Raw(alias => `${alias}->'emissionInput'->>'purchaseId' = :purchaseId`, {purchaseId:purchase.id}),
+    } });
+    if (duplicate) throw new BadRequestException('Já existe NF-e ativa para esta entrada. Consulte a nota antes de emitir novamente.');
+    const bills = await this.invoiceRepo.manager.getRepository(Bill).find({ where:{tenantId,purchaseId:purchase.id,type:'pagar'}, order:{installmentNumber:'ASC'} });
+    const schedule = bills.filter(row=>row.status !== 'cancelado').map(row=>({number:row.installmentNumber,dueDate:row.dueDate,value:Number(row.value)}));
+    const paymentInstallments = validateXmlEntryPayments(Number(purchase.totalValue),purchase.paymentMethod,schedule);
+    if (!Array.isArray(submitted.items) || submitted.items.length !== source.items.length) throw new BadRequestException('Confira os itens da nota de entrada.');
+    const items = source.items.map((item,index)=> {
+      const edited = submitted.items[index];
+      if (!/^\d{8}$/.test(edited?.ncm || '') || !/^[123]\d{3}$/.test(edited?.cfop || '')) throw new BadRequestException(`Informe o NCM e o CFOP de entrada do item ${index+1} (${item.name}).`);
+      return {...item,ncm:edited.ncm,cfop:edited.cfop};
+    });
+    const tPag = Object.entries(XML_PAYMENT_CODES).find(([,method])=>method===purchase.paymentMethod)?.[0] || '99';
+    return {...submitted, purchaseId:purchase.id, tpNF:'0',modelo:'55',items, totalValue:Number(purchase.totalValue), tPag,
+      paymentMethod:purchase.paymentMethod, installments:paymentInstallments.length,paymentInstallments};
   }
 
   calculateNfseTaxes(serviceData: any): Record<string, any> {
