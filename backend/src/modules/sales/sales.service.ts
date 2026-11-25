@@ -1021,8 +1021,16 @@ export class SalesService {
       await manager.update(AccountReceivable, { saleId: sale.id }, { customerId: input.customerId });
     }
     if (plan.financialChanged || plan.dateChanged) {
-      const account = await manager.findOne(AccountReceivable, { where: { saleId: sale.id }, lock: { mode: 'pessimistic_write' } });
-      if (!account) throw new BadRequestException('Conta a receber da venda não encontrada.');
+      let account = await manager.findOne(AccountReceivable, { where: { saleId: sale.id }, lock: { mode: 'pessimistic_write' } });
+      if (!account) {
+        // Venda antiga ou criada sem conta a receber: cria a conta para a edição poder gerar as parcelas.
+        // Os valores reais são gravados logo abaixo, junto com o restante da edição.
+        account = await manager.save(AccountReceivable, manager.create(AccountReceivable, {
+          saleId: sale.id, customerId: input.customerId, description: 'Venda #' + sale.id.substring(0, 8),
+          totalValue: input.totalAmount, paidValue: 0, pendingValue: input.totalAmount, installments: input.installments,
+          paymentMethod: input.paymentMethod, status: 'pendente', dueDate: input.dueDate || null, createdBy: userId,
+        }));
+      }
       const scheduledSale = Object.assign(new Sale(), sale, values);
       if (plan.financialChanged) {
         await manager.update(Installment, { saleId: sale.id }, { status: 'cancelado' });
