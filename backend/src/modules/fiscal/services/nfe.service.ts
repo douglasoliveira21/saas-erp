@@ -637,7 +637,8 @@ export class NfeService {
         dupBlocks += `<dup><nDup>${String(i).padStart(3, '0')}</nDup><dVenc>${dueDate}</dVenc><vDup>${installmentValue.toFixed(2)}</vDup></dup>`;
       }
     }
-    cobr = `<cobr>${fatBlock}${dupBlocks}</cobr>`;
+    // NFC-e (modelo 65, DANFE simplificado) nao aceita grupo de cobranca: a SEFAZ rejeita com 760.
+    cobr = isNfce ? '' : `<cobr>${fatBlock}${dupBlocks}</cobr>`;
     // PAG
     const rawTPag = this.digitsField(saleData?.tPag, 2);
     const tPag = rawTPag.length === 2 ? rawTPag : '01'; // 01=Dinheiro
