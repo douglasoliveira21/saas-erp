@@ -21,6 +21,11 @@ export class QuotesController {
   @Get()
   findAll(@Query() query: any) { return this.service.findAll(query); }
 
+  // Lista de produtos e servicos para montar o orcamento. Fica no modulo de orcamentos: o plano do cliente pode ter
+  // Orcamentos sem ter os modulos Produtos/Servicos, e a lista chegava vazia (403 nas rotas deles).
+  @Get('catalog')
+  catalog() { return this.service.catalog(); }
+
   @Get(':id')
   findOne(@Param('id') id: string) { return this.service.findOne(id); }
 

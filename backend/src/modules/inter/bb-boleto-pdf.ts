@@ -54,7 +54,7 @@ export async function renderBbBoleto(charge: BbCharge, settings: Record<string, 
   field('Vencimento',p.dataVencimento,266,160,120);
   field('Valor do documento',money(p.valorOriginal),386,160,173);
   doc.fontSize(8).text('Autenticação mecânica',400,207);
-  doc.dash(3).moveTo(36,245).lineTo(559,245).stroke().undash();
+  doc.dash(3, {}).moveTo(36,245).lineTo(559,245).stroke().undash();
   doc.font('Helvetica-Bold').fontSize(12).text('Banco do Brasil | 001-9',36,265);
   doc.fontSize(9).text(formatted,235,268,{width:324,align:'right'});
   field('Local de pagamento','Pagável em qualquer banco até o vencimento',36,290,350);

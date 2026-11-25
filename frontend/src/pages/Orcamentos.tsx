@@ -330,11 +330,13 @@ function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   // Lista real de produtos e servicos cadastrados: escolher preenche nome e valor de venda.
+  const [catalogError, setCatalogError] = useState('')
   const [products, setProducts] = useState<CatalogItem[]>([])
   const [services, setServices] = useState<CatalogItem[]>([])
   useEffect(() => {
-    api.get('/products').then(res => setProducts((res.data?.data || res.data || []).filter((p: CatalogItem) => p.active !== false))).catch(() => {})
-    api.get('/services').then(res => setServices((res.data?.data || res.data || []).filter((s: CatalogItem) => s.active !== false))).catch(() => {})
+    api.get('/quotes/catalog')
+      .then(res => { setProducts(res.data?.products || []); setServices(res.data?.services || []) })
+      .catch(() => setCatalogError('Não foi possível carregar a lista de produtos e serviços.'))
   }, [])
 
   const selectedValue = (item: QuoteItem) => item.productId ? 'p:' + item.productId : item.serviceId ? 's:' + item.serviceId : item.name ? 'legacy' : ''
@@ -443,6 +445,7 @@ function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Itens do Orçamento *</label>
+              {catalogError && <span className="text-xs text-red-600">{catalogError}</span>}
               <button type="button" onClick={addItem} className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Adicionar Item
               </button>

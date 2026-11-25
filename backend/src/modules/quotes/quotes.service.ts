@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Quote } from './entities/quote.entity';
+import { Product } from '../products/entities/product.entity';
+import { Service } from '../services/entities/service.entity';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { tenantSql } from '../../common/tenant/tenant-scope';
 
@@ -27,6 +29,15 @@ export class QuotesService {
       status: 'pendente',
     } as Partial<Quote>);
     return this.quoteRepo.save(quote);
+  }
+
+  async catalog(): Promise<{ products: Array<{ id: string; name: string; salePrice: number }>; services: Array<{ id: string; name: string; salePrice: number }> }> {
+    const [products, services] = await Promise.all([
+      this.dataSource.getRepository(Product).find({ where: { active: true }, order: { name: 'ASC' } }),
+      this.dataSource.getRepository(Service).find({ where: { active: true }, order: { name: 'ASC' } }),
+    ]);
+    const pick = (row: { id: string; name: string; salePrice: number }) => ({ id: row.id, name: row.name, salePrice: Number(row.salePrice || 0) });
+    return { products: products.map(pick), services: services.map(pick) };
   }
 
   async findAll(filters?: { status?: string; search?: string }): Promise<Quote[]> {
