@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { useActionToast } from '../components/ActionToast'
 import { Plus, Search, FileText, CheckCircle, XCircle, Copy, ShoppingCart, Trash2, Filter, Eye, Download } from 'lucide-react'
 
@@ -54,6 +55,7 @@ const statusColors: Record<string, string> = {
 
 export function Orcamentos() {
   const { trackAction } = useActionToast()
+  const { isAdmin, isFinanceiro, user } = useAuth()
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -263,7 +265,7 @@ export function Orcamentos() {
                           <button onClick={() => { setConvertingQuote(q); setShowConvertModal(true) }} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Converter em Venda"><ShoppingCart className="w-4 h-4" /></button>
                         )}
                         <button onClick={() => handleDuplicate(q.id)} className="p-1 text-gray-600 hover:bg-gray-50 rounded" title="Duplicar"><Copy className="w-4 h-4" /></button>
-                        {q.status === 'pendente' && (
+                        {q.status === 'pendente' && (isAdmin || isFinanceiro || q.createdBy?.id === user?.id) && (
                           <button onClick={() => { setEditingQuote(q); setShowForm(true) }} className="p-1 text-yellow-600 hover:bg-yellow-50 rounded" title="Editar"><FileText className="w-4 h-4" /></button>
                         )}
                         {['pendente', 'rejeitado', 'expirado'].includes(q.status) && (

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Quote } from './entities/quote.entity';
@@ -58,10 +58,15 @@ export class QuotesService {
     return q;
   }
 
-  async update(id: string, dto: any): Promise<Quote> {
+  async update(id: string, dto: any, user?: { id?: string; role?: string }): Promise<Quote> {
     const q = await this.findOne(id);
+    if (user?.role === 'tecnico' && q.createdById !== user.id) {
+      throw new ForbiddenException('Você só pode editar orçamentos criados por você.');
+    }
     if (q.status !== 'pendente') throw new BadRequestException('Apenas orçamentos pendentes podem ser editados');
-    Object.assign(q, dto);
+    // So os campos editaveis: status, numero, dono e venda nao mudam por aqui.
+    const editable = ['customerId', 'validUntil', 'items', 'subtotal', 'discount', 'totalAmount', 'paymentConditions', 'observations'];
+    for (const key of editable) if (dto?.[key] !== undefined) (q as any)[key] = dto[key];
     return this.quoteRepo.save(q);
   }
 

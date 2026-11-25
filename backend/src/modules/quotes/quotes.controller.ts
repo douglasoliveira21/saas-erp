@@ -29,9 +29,10 @@ export class QuotesController {
   @Get(':id')
   findOne(@Param('id') id: string) { return this.service.findOne(id); }
 
+  // Tecnico tambem cria orcamento, entao pode editar o PROPRIO (pendente); o servico barra o de outra pessoa.
   @Patch(':id')
-  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
-  update(@Param('id') id: string, @Body() dto: any) { return this.service.update(id, dto); }
+  @Roles(UserRole.ADMIN, UserRole.FINANCEIRO, UserRole.TECNICO)
+  update(@Param('id') id: string, @Body() dto: any, @Request() req: any) { return this.service.update(id, dto, req.user); }
 
   @Patch(':id/approve')
   @Roles(UserRole.ADMIN, UserRole.FINANCEIRO)
