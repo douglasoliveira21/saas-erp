@@ -91,10 +91,20 @@ export class QuotesService {
     if (saleId) {
       // Create sale items
       for (const item of q.items) {
+        // Item escolhido da lista de produtos/servicos mantem o vinculo e o custo cadastrado.
+        let costPrice = 0;
+        if (item.productId) {
+          const rows = await this.dataSource.query(`SELECT purchase_price FROM products WHERE id = $1 ${tenantSql('products')}`, [item.productId]);
+          costPrice = Number(rows[0]?.purchase_price || 0);
+        } else if (item.serviceId) {
+          const rows = await this.dataSource.query(`SELECT operational_cost FROM services WHERE id = $1 ${tenantSql('services')}`, [item.serviceId]);
+          costPrice = Number(rows[0]?.operational_cost || 0);
+        }
+        const netProfit = Number(item.totalPrice) - costPrice * Number(item.quantity);
         await this.dataSource.query(`
-          INSERT INTO sale_items (sale_id, name, quantity, unit_price, total_price, cost_price, net_profit)
-          VALUES ($1, $2, $3, $4, $5, 0, 0)
-        `, [saleId, item.name, item.quantity, item.unitPrice, item.totalPrice]);
+          INSERT INTO sale_items (sale_id, product_id, service_id, name, quantity, unit_price, total_price, cost_price, net_profit)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [saleId, item.productId || null, item.serviceId || null, item.name, item.quantity, item.unitPrice, item.totalPrice, costPrice, netProfit]);
       }
 
       q.status = 'convertido';

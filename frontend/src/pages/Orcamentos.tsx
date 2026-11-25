@@ -5,6 +5,8 @@ import { Plus, Search, FileText, CheckCircle, XCircle, Copy, ShoppingCart, Trash
 
 interface QuoteItem {
   name: string
+  productId?: string
+  serviceId?: string
   description?: string
   quantity: number
   unitPrice: number
@@ -312,6 +314,8 @@ export function Orcamentos() {
   )
 }
 
+interface CatalogItem { id: string; name: string; salePrice: number; active?: boolean }
+
 function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote | null; customers: Customer[]; onClose: () => void; onSuccess: () => void }) {
   const [customerId, setCustomerId] = useState(quote?.customer?.id || '')
   const [validUntil, setValidUntil] = useState(() => {
@@ -325,6 +329,37 @@ function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote
   const [observations, setObservations] = useState(quote?.observations || '')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  // Lista real de produtos e servicos cadastrados: escolher preenche nome e valor de venda.
+  const [products, setProducts] = useState<CatalogItem[]>([])
+  const [services, setServices] = useState<CatalogItem[]>([])
+  useEffect(() => {
+    api.get('/products').then(res => setProducts((res.data?.data || res.data || []).filter((p: CatalogItem) => p.active !== false))).catch(() => {})
+    api.get('/services').then(res => setServices((res.data?.data || res.data || []).filter((s: CatalogItem) => s.active !== false))).catch(() => {})
+  }, [])
+
+  const selectedValue = (item: QuoteItem) => item.productId ? 'p:' + item.productId : item.serviceId ? 's:' + item.serviceId : item.name ? 'legacy' : ''
+
+  function selectCatalogItem(idx: number, value: string) {
+    if (value === 'legacy') return
+    const updated = [...items]
+    const current = { ...updated[idx] }
+    if (!value) {
+      Object.assign(current, { productId: undefined, serviceId: undefined, name: '', unitPrice: 0 })
+    } else {
+      const isProduct = value.startsWith('p:')
+      const found = (isProduct ? products : services).find(entry => entry.id === value.slice(2))
+      if (!found) return
+      Object.assign(current, {
+        productId: isProduct ? found.id : undefined,
+        serviceId: isProduct ? undefined : found.id,
+        name: found.name,
+        unitPrice: Number(found.salePrice || 0),
+      })
+    }
+    current.totalPrice = Number(current.quantity) * Number(current.unitPrice)
+    updated[idx] = current
+    setItems(updated)
+  }
 
   const subtotal = items.reduce((s, i) => s + Number(i.totalPrice), 0)
   const totalAmount = subtotal - (subtotal * Number(discount) / 100)
@@ -417,8 +452,21 @@ function QuoteFormModal({ quote, customers, onClose, onSuccess }: { quote: Quote
                 <div key={idx} className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-2">
                   <div className="grid grid-cols-12 gap-2 items-end">
                     <div className="col-span-5">
-                      <label className="block text-xs text-gray-500 mb-0.5">Nome</label>
-                      <input className="input text-sm" placeholder="Nome do item" value={item.name} onChange={e => updateItem(idx, 'name', e.target.value)} />
+                      <label className="block text-xs text-gray-500 mb-0.5">Produto / Serviço</label>
+                      <select className="input text-sm" value={selectedValue(item)} onChange={e => selectCatalogItem(idx, e.target.value)}>
+                        <option value="">Selecione um produto ou serviço</option>
+                        {selectedValue(item) === 'legacy' && <option value="legacy">{item.name} (item digitado)</option>}
+                        {products.length > 0 && (
+                          <optgroup label="Produtos">
+                            {products.map(p => <option key={p.id} value={'p:' + p.id}>{p.name} — R$ {Number(p.salePrice || 0).toFixed(2)}</option>)}
+                          </optgroup>
+                        )}
+                        {services.length > 0 && (
+                          <optgroup label="Serviços">
+                            {services.map(s => <option key={s.id} value={'s:' + s.id}>{s.name} — R$ {Number(s.salePrice || 0).toFixed(2)}</option>)}
+                          </optgroup>
+                        )}
+                      </select>
                     </div>
                     <div className="col-span-2">
                       <label className="block text-xs text-gray-500 mb-0.5">Qtd</label>

@@ -28,7 +28,7 @@ export class Quote {
   validUntil: string;
 
   @Column({ type: 'jsonb' })
-  items: Array<{ name: string; quantity: number; unitPrice: number; totalPrice: number; description?: string }>;
+  items: Array<{ name: string; quantity: number; unitPrice: number; totalPrice: number; description?: string; productId?: string; serviceId?: string }>;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   subtotal: number;
