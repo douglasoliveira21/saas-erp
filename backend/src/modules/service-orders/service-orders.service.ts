@@ -8,6 +8,7 @@ import { ServiceOrder } from './entities/service-order.entity';
 import { ServiceOrderStatus } from './entities/service-order-status.entity';
 import { ServiceOrderAttachment } from './entities/service-order-attachment.entity';
 import { ServiceOrderEvent } from './entities/service-order-event.entity';
+import { User } from '../users/entities/user.entity';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ServiceOrderPdfService } from './service-order-pdf.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -25,13 +26,15 @@ export class ServiceOrdersService {
     @InjectRepository(ServiceOrderStatus) private statusesRepository: Repository<ServiceOrderStatus>,
     @InjectRepository(ServiceOrderAttachment) private attachmentsRepository: Repository<ServiceOrderAttachment>,
     @InjectRepository(ServiceOrderEvent) private eventsRepository: Repository<ServiceOrderEvent>,
+    @InjectRepository(User) private usersRepository: Repository<User>,
     private whatsappService: WhatsappService,
     private pdfService: ServiceOrderPdfService,
     private tenantContext: TenantContextService,
     private tenantsService: TenantsService,
   ) {}
 
-  // Notificação por WhatsApp nunca pode travar a operação principal da OS — se a instância
+  // Notificação por WhatsApp nunca pode travar a operação principal da OS (por isso é chamada sem
+  // await: uma Evolution API lenta fazia a tela estourar o tempo limite) — se a instância
   // estiver desconectada, sem número configurado, ou a Evolution API falhar, apenas registramos
   // o erro (o próprio WhatsappService já loga em whatsapp_message_logs) e seguimos em frente.
   private async notifyCustomer(order: ServiceOrder, message: string): Promise<void> {
@@ -65,6 +68,12 @@ export class ServiceOrdersService {
     } catch {
       // já logado pelo WhatsappService; não deve impedir a conclusão da OS.
     }
+  }
+
+  // Atendentes que podem receber uma OS. Só id/nome, porque todos os perfis internos precisam desta
+  // lista e GET /users é restrito a admin/financeiro.
+  findTechnicians() {
+    return this.usersRepository.find({ select: { id: true, name: true, active: true }, where: { active: true }, order: { name: 'ASC' } });
   }
 
   // === Status (configurável) ===
@@ -196,7 +205,7 @@ export class ServiceOrdersService {
     const saved = await this.ordersRepository.save(order);
     await this.addEvent(saved.id, 'created', statusKey, 'Ordem de serviço criada', userId);
     const full = await this.findOne(saved.id);
-    await this.notifyCustomer(
+    void this.notifyCustomer(
       full,
       `Olá, ${full.customer?.name || ''}! Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi aberta.\n\n*Serviço:* ${full.serviceType}\n*Relato:* ${full.customerReport}\n\nVocê receberá atualizações por aqui conforme o andamento.`,
     );
@@ -207,8 +216,10 @@ export class ServiceOrdersService {
     const order = await this.findOne(id);
     const previousStatus = order.statusKey;
 
-    if (dto.customerId !== undefined) order.customerId = dto.customerId;
-    if (dto.technicianId !== undefined) order.technicianId = dto.technicianId || null;
+    // findOne carrega as relações, e no save() o objeto da relação vence a coluna: sem descartar o
+    // objeto antigo, a troca de cliente/atendente era ignorada em silêncio.
+    if (dto.customerId !== undefined) { order.customerId = dto.customerId; order.customer = undefined; }
+    if (dto.technicianId !== undefined) { order.technicianId = dto.technicianId || null; order.technician = undefined; }
     if (dto.serviceType !== undefined) order.serviceType = String(dto.serviceType).trim();
     if (dto.equipment !== undefined) order.equipment = dto.equipment ? String(dto.equipment).trim() : null;
     if (dto.brand !== undefined) order.brand = dto.brand ? String(dto.brand).trim() : null;
@@ -240,7 +251,7 @@ export class ServiceOrdersService {
     if (statusChanged) {
       const statuses = await this.findAllStatuses(true);
       const label = statuses.find((s) => s.key === order.statusKey)?.label || order.statusKey;
-      await this.notifyCustomer(
+      void this.notifyCustomer(
         full,
         `Atualização da sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}*: agora está em *${label}*.`,
       );
@@ -275,7 +286,7 @@ export class ServiceOrdersService {
     });
     const full = await this.findOne(saved.id);
     const totalCost = Number(full.totalCost || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    await this.notifyCustomerWithPdf(
+    void this.notifyCustomerWithPdf(
       full,
       `Sua Ordem de Serviço *#${String(full.number).padStart(5, '0')}* foi concluída! ✅\n\n*O que foi feito:* ${full.conclusionDescription}\n*Valor total:* ${totalCost}\n\nSegue em anexo o PDF completo da OS, com as fotos de antes e depois.\n\nObrigado pela confiança!`,
     );

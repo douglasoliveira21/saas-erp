@@ -29,7 +29,7 @@ export function ServiceOrderForm() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.get('/customers'), api.get('/users')]).then(([c, u]) => {
+    Promise.all([api.get('/customers'), api.get('/service-orders/technicians')]).then(([c, u]) => {
       setCustomers(c.data)
       setTechnicians(u.data.filter((user: any) => user.active))
     }).catch(() => setError('Erro ao carregar clientes e técnicos'))

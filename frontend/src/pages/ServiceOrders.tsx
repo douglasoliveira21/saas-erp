@@ -60,7 +60,7 @@ export function ServiceOrders() {
       const [o, s, t] = await Promise.all([
         api.get('/service-orders', { params }),
         api.get('/service-orders/statuses'),
-        api.get('/users'),
+        api.get('/service-orders/technicians'),
       ])
       setOrders(o.data)
       setStatuses(s.data)

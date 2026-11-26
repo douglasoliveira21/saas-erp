@@ -41,6 +41,12 @@ export class ServiceOrdersController {
     private readonly pdfService: ServiceOrderPdfService,
   ) {}
 
+  @Get('technicians')
+  @Roles(...internalRoles)
+  listTechnicians() {
+    return this.service.findTechnicians();
+  }
+
   @Get('statuses')
   @Roles(...internalRoles)
   listStatuses(@Query('all') all?: string) {

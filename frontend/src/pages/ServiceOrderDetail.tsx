@@ -90,7 +90,7 @@ export function ServiceOrderDetail() {
       const [o, s, t, e] = await Promise.all([
         api.get(`/service-orders/${id}`),
         api.get('/service-orders/statuses', { params: { all: true } }),
-        api.get('/users'),
+        api.get('/service-orders/technicians'),
         api.get(`/service-orders/${id}/events`),
       ])
       setOrder(o.data)
@@ -115,13 +115,26 @@ export function ServiceOrderDetail() {
 
   useEffect(() => { load() }, [id])
 
-  if (loading || !order) {
+  if (loading) {
     return <div className="flex justify-center p-10"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" /></div>
+  }
+
+  if (!order) {
+    return (
+      <div className="card mx-auto max-w-md space-y-3 p-6 text-center">
+        <p className="text-sm text-gray-500">Não foi possível carregar a ordem de serviço.</p>
+        <div className="flex justify-center gap-2">
+          <Button variant="secondary" onClick={() => navigate('/service-orders')}>Voltar</Button>
+          <Button onClick={load}>Tentar novamente</Button>
+        </div>
+      </div>
+    )
   }
 
   const currentStatus = statuses.find(s => s.key === order.statusKey)
   const isClosed = Boolean(currentStatus?.isFinal)
-  const openStatusOptions = statuses.filter(s => !s.isFinal && s.active)
+  // O status atual entra mesmo se estiver inativo, senão o seletor exibiria outro no lugar dele.
+  const openStatusOptions = statuses.filter(s => !s.isFinal && (s.active || s.key === order.statusKey))
 
   async function saveInfo() {
     if (!order) return

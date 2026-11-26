@@ -10,9 +10,10 @@ import { ServiceOrderPdfService } from './service-order-pdf.service';
 import { ServiceOrdersController } from './service-orders.controller';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { PlatformModule } from '../platform/platform.module';
+import { User } from '../users/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ServiceOrder, ServiceOrderStatus, ServiceOrderAttachment, ServiceOrderEvent, FiscalConfig]), WhatsappModule, PlatformModule],
+  imports: [TypeOrmModule.forFeature([ServiceOrder, ServiceOrderStatus, ServiceOrderAttachment, ServiceOrderEvent, FiscalConfig, User]), WhatsappModule, PlatformModule],
   providers: [ServiceOrdersService, ServiceOrderPdfService],
   controllers: [ServiceOrdersController],
   exports: [ServiceOrdersService],
